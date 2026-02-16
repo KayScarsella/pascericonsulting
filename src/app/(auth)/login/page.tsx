@@ -1,55 +1,43 @@
+// page.tsx
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/utils/supabase/client'
-import { useRouter } from 'next/navigation'
-import { toast } from 'sonner' // Usiamo il nuovo sistema di notifiche
-
+// Rimuovi useRouter, non serve per il successo se gestito dal server
+// import { useRouter } from 'next/navigation' 
+import { toast } from 'sonner'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { loginAction } from '@/actions/auth'
 
 export default function LoginPage() {
-  const router = useRouter()
-  const supabase = createClient()
+  // const router = useRouter() // Non serve più
   const [loading, setLoading] = useState(false)
 
   async function handleLogin(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setLoading(true)
-
     const formData = new FormData(e.currentTarget)
-    const email = formData.get('email') as string
-    const password = formData.get('password') as string
+    const result = await loginAction(formData)
+    setLoading(false)
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
-
-    if (error) {
+    if (result?.error) {
       toast.error("Errore Login", {
-        description: error.message
+        description: result.error
       })
-      setLoading(false)
-    } else {
-      toast.success("Bentornato!", {
-        description: "Login effettuato con successo"
-      })
-      router.push('/') // Rimanda alla home/dashboard dopo il login
-      router.refresh() // Ricarica i dati della pagina
-    }
+    } 
+    // NESSUN ELSE: Se è andato tutto bene, il server sta già facendo il redirect.
+    // Non fare router.push o router.refresh qui, causano l'errore del token!
   }
 
   return (
+    // ... il resto del tuo JSX rimane identico ...
     <div className="flex h-screen w-full items-center justify-center bg-slate-50">
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle className="text-2xl">Accedi</CardTitle>
-          <CardDescription>
-            Inserisci le tue credenziali per entrare.
-          </CardDescription>
+          <CardDescription>Inserisci le tue credenziali per entrare.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
           <form onSubmit={handleLogin} className="space-y-4">

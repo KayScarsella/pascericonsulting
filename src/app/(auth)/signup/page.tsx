@@ -1,18 +1,17 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/utils/supabase/client'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardFooter, CardTitle } from "@/components/ui/card"
+import { signupAction } from '@/actions/auth'
 
 export default function SignupPage() {
   const router = useRouter()
-  const supabase = createClient()
   const [loading, setLoading] = useState(false)
 
   async function handleSignup(e: React.FormEvent<HTMLFormElement>) {
@@ -20,22 +19,10 @@ export default function SignupPage() {
     setLoading(true)
 
     const formData = new FormData(e.currentTarget)
-    const email = formData.get('email') as string
-    const password = formData.get('password') as string
-    const fullName = formData.get('fullName') as string
+    const result = await signupAction(formData)
 
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: fullName, // Questo attiva il trigger nel DB!
-        },
-      },
-    })
-
-    if (error) {
-      toast.error("Errore", { description: error.message })
+    if (result?.error) {
+      toast.error("Errore", { description: result.error })
     } else {
       toast.success("Account creato!", {
         description: "Controlla la tua email (se richiesta) o accedi."
@@ -71,6 +58,11 @@ export default function SignupPage() {
             </Button>
           </form>
         </CardContent>
+        <CardFooter>
+            <p className="text-xs text-center text-gray-500 w-full">
+                hai un account? <a href="/login" className="underline">Accedi</a>
+            </p>
+        </CardFooter>
       </Card>
     </div>
   )
