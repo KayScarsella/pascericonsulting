@@ -3,46 +3,69 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useState } from "react"
-import { Menu, X, LogOut, ShieldAlert, FileText, Search, Home, Database, Lock } from "lucide-react"
+// 1. Importa tutte le icone che pensi di usare nel progetto qui
+import { 
+  Menu, X, LogOut, Home, FileText, ShieldAlert, Search, 
+  Database, Lock, BookOpen, UserCheck, Settings 
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { ToolRole } from "@/lib/tool-auth"
 
 const GOLD_COLOR = "#967635"
 
-// Configurazione Menu
-// minRole indica il livello MINIMO richiesto per vedere la voce
-// standard = tutti | premium = premium e admin | admin = solo admin
-const NAV_ITEMS = [
-  { label: 'Home', href: '', icon: Home, minRole: 'standard' },
-  { label: 'Documentazione', href: '/documentation', icon: FileText, minRole: 'standard' },
-  { label: 'Analisi Rischio', href: '/risk-analysis', icon: ShieldAlert, minRole: 'premium' },
-  { label: 'Cerca', href: '/search', icon: Search, minRole: 'premium' },
-  { label: 'Master', href: '/master', icon: Database, minRole: 'admin' },
-] as const
-
-interface TimberNavbarProps {
-  toolId: string
-  userRole: ToolRole
+// 2. Crea una mappa stringa -> componente
+const ICON_MAP = {
+  Home,
+  FileText,
+  ShieldAlert,
+  Search,
+  Database,
+  Lock,
+  BookOpen,
+  UserCheck,
+  Settings,
+  Menu, // Utile se serve altrove
+  LogOut
 }
 
-export function TimberNavbar({ toolId, userRole }: TimberNavbarProps) {
+// Tipo per le chiavi disponibili (assicura l'autocomplete)
+export type IconName = keyof typeof ICON_MAP
+
+export interface NavItem {
+  label: string
+  href: string
+  // 3. Cambia il tipo da LucideIcon a stringa (IconName)
+  iconName: IconName 
+  minRole: 'standard' | 'premium' | 'admin'
+}
+
+interface ToolNavbarProps {
+  toolName: string      
+  basePath: string      
+  items: NavItem[]      
+  userRole: string      
+}
+
+export function ToolNavbar({ toolName, basePath, items, userRole }: ToolNavbarProps) {
   const pathname = usePathname()
   const [isOpen, setIsOpen] = useState(false)
-  const basePath = `/dashboard/tools/${toolId}`
 
-  // Funzione helper per verificare i permessi gerarchici
   const canView = (minRole: string) => {
-    if (userRole === 'admin') return true // Admin vede tutto
-    if (userRole === 'premium') return minRole !== 'admin' // Premium vede tutto tranne admin
-    return minRole === 'standard' // Standard vede solo standard
+    if (userRole === 'admin') return true
+    if (userRole === 'premium') return minRole !== 'admin'
+    return minRole === 'standard'
   }
 
-  const visibleItems = NAV_ITEMS.filter(item => canView(item.minRole))
+  const visibleItems = items.filter(item => canView(item.minRole))
 
-  const isActive = (path: string) => {
-    if (path === '') return pathname === basePath
-    return pathname.startsWith(`${basePath}${path}`)
+  const isActive = (itemHref: string) => {
+    const fullPath = `${basePath}${itemHref}`.replace(/\/$/, '')
+    const currentPath = pathname.replace(/\/$/, '')
+
+    if (itemHref === '') {
+      return currentPath === fullPath
+    }
+    return currentPath.startsWith(fullPath)
   }
 
   return (
@@ -50,15 +73,14 @@ export function TimberNavbar({ toolId, userRole }: TimberNavbarProps) {
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 justify-between items-center">
           
-          {/* Logo */}
+          {/* Logo & Nome Tool */}
           <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-900 text-white font-bold">
-              TR
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-900 text-white font-bold text-xs">
+              {toolName.substring(0, 2).toUpperCase()}
             </div>
             <span className="hidden font-bold text-slate-900 sm:inline-block">
-              Timber Regulation
+              {toolName}
             </span>
-            {/* Badge Ruolo Utente */}
             <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200 uppercase">
               {userRole}
             </span>
@@ -68,6 +90,9 @@ export function TimberNavbar({ toolId, userRole }: TimberNavbarProps) {
           <div className="hidden md:flex md:gap-x-1">
             {visibleItems.map((item) => {
               const active = isActive(item.href)
+              // 4. Recupera l'icona dalla mappa usando la stringa
+              const IconComponent = ICON_MAP[item.iconName] || Home // Fallback su Home se non trovata
+
               return (
                 <Link
                   key={item.href}
@@ -78,7 +103,7 @@ export function TimberNavbar({ toolId, userRole }: TimberNavbarProps) {
                   )}
                   style={{ color: active ? GOLD_COLOR : undefined }}
                 >
-                  <item.icon 
+                  <IconComponent 
                     className="mr-2 h-4 w-4 transition-colors group-hover:text-[#967635]" 
                     style={{ color: active ? GOLD_COLOR : undefined }} 
                   />
@@ -117,6 +142,8 @@ export function TimberNavbar({ toolId, userRole }: TimberNavbarProps) {
         <div className="md:hidden border-t border-slate-100 bg-white px-4 py-2 space-y-1 shadow-lg">
           {visibleItems.map((item) => {
              const active = isActive(item.href)
+             const IconComponent = ICON_MAP[item.iconName] || Home
+
              return (
               <Link
                 key={item.href}
@@ -128,7 +155,7 @@ export function TimberNavbar({ toolId, userRole }: TimberNavbarProps) {
                 )}
                 style={{ color: active ? GOLD_COLOR : undefined }}
               >
-                <item.icon className="mr-3 h-5 w-5" style={{ color: active ? GOLD_COLOR : undefined }} />
+                <IconComponent className="mr-3 h-5 w-5" style={{ color: active ? GOLD_COLOR : undefined }} />
                 {item.label}
               </Link>
             )

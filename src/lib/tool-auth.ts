@@ -3,7 +3,7 @@ import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 import { cache } from "react"
-import { Database } from "../../types/database.types"
+import { Database } from "@/types/supabase"
 
 // Definiamo i ruoli possibili in ordine di "potere"
 export type ToolRole = 'admin' | 'premium' | 'standard'

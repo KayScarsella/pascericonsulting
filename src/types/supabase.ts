@@ -34,6 +34,172 @@ export type Database = {
   }
   public: {
     Tables: {
+      assessment_sessions: {
+        Row: {
+          created_at: string | null
+          evaluation_code: number
+          final_outcome: string | null
+          id: string
+          metadata: Json | null
+          parent_session_id: string | null
+          session_type: string
+          status: string | null
+          tool_id: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          evaluation_code?: number
+          final_outcome?: string | null
+          id?: string
+          metadata?: Json | null
+          parent_session_id?: string | null
+          session_type: string
+          status?: string | null
+          tool_id: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          evaluation_code?: number
+          final_outcome?: string | null
+          id?: string
+          metadata?: Json | null
+          parent_session_id?: string | null
+          session_type?: string
+          status?: string | null
+          tool_id?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "assessment_sessions_parent_fk"
+            columns: ["parent_session_id"]
+            isOneToOne: false
+            referencedRelation: "assessment_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assessment_sessions_tool_id_fkey"
+            columns: ["tool_id"]
+            isOneToOne: false
+            referencedRelation: "tools"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assessment_sessions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      country: {
+        Row: {
+          conflicts: boolean | null
+          corruption_code: string | null
+          country_name: string | null
+          extra_eu: boolean | null
+          id: string
+          sanction: boolean | null
+        }
+        Insert: {
+          conflicts?: boolean | null
+          corruption_code?: string | null
+          country_name?: string | null
+          extra_eu?: boolean | null
+          id?: string
+          sanction?: boolean | null
+        }
+        Update: {
+          conflicts?: boolean | null
+          corruption_code?: string | null
+          country_name?: string | null
+          extra_eu?: boolean | null
+          id?: string
+          sanction?: boolean | null
+        }
+        Relationships: []
+      }
+      documents: {
+        Row: {
+          created_at: string | null
+          created_by: string | null
+          id: string
+          mime_type: string | null
+          name: string
+          parent_id: string | null
+          size: number | null
+          storage_path: string | null
+          tool_id: string
+          type: string
+        }
+        Insert: {
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          mime_type?: string | null
+          name: string
+          parent_id?: string | null
+          size?: number | null
+          storage_path?: string | null
+          tool_id: string
+          type: string
+        }
+        Update: {
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          mime_type?: string | null
+          name?: string
+          parent_id?: string | null
+          size?: number | null
+          storage_path?: string | null
+          tool_id?: string
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "documents_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "documents_tool_id_fkey"
+            columns: ["tool_id"]
+            isOneToOne: false
+            referencedRelation: "tools"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      eu_products: {
+        Row: {
+          description: string | null
+          eu_code: string | null
+          id: string
+          order: number | null
+        }
+        Insert: {
+          description?: string | null
+          eu_code?: string | null
+          id?: string
+          order?: number | null
+        }
+        Update: {
+          description?: string | null
+          eu_code?: string | null
+          id?: string
+          order?: number | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -92,23 +258,29 @@ export type Database = {
       }
       sections: {
         Row: {
+          group_name: string | null
           id: string
+          logic_rules: Json | null
           order_index: number | null
-          requirements: Json | null
+          render_mode: string | null
           title: string
           tool_id: string
         }
         Insert: {
+          group_name?: string | null
           id?: string
+          logic_rules?: Json | null
           order_index?: number | null
-          requirements?: Json | null
+          render_mode?: string | null
           title: string
           tool_id: string
         }
         Update: {
+          group_name?: string | null
           id?: string
+          logic_rules?: Json | null
           order_index?: number | null
-          requirements?: Json | null
+          render_mode?: string | null
           title?: string
           tool_id?: string
         }
@@ -122,22 +294,43 @@ export type Database = {
           },
         ]
       }
+      species: {
+        Row: {
+          cites: number | null
+          common_name: string | null
+          id: string
+          scientific_name: string | null
+        }
+        Insert: {
+          cites?: number | null
+          common_name?: string | null
+          id?: string
+          scientific_name?: string | null
+        }
+        Update: {
+          cites?: number | null
+          common_name?: string | null
+          id?: string
+          scientific_name?: string | null
+        }
+        Relationships: []
+      }
       tool_access: {
         Row: {
           created_at: string | null
-          role: Database["public"]["Enums"]["app_role"] | null
+          role: Database["public"]["Enums"]["app_role"]
           tool_id: string
           user_id: string
         }
         Insert: {
           created_at?: string | null
-          role?: Database["public"]["Enums"]["app_role"] | null
+          role?: Database["public"]["Enums"]["app_role"]
           tool_id: string
           user_id: string
         }
         Update: {
           created_at?: string | null
-          role?: Database["public"]["Enums"]["app_role"] | null
+          role?: Database["public"]["Enums"]["app_role"]
           tool_id?: string
           user_id?: string
         }
@@ -160,6 +353,7 @@ export type Database = {
       }
       tools: {
         Row: {
+          base_path: string | null
           created_at: string | null
           description: string | null
           id: string
@@ -167,6 +361,7 @@ export type Database = {
           name: string
         }
         Insert: {
+          base_path?: string | null
           created_at?: string | null
           description?: string | null
           id?: string
@@ -174,6 +369,7 @@ export type Database = {
           name: string
         }
         Update: {
+          base_path?: string | null
           created_at?: string | null
           description?: string | null
           id?: string
@@ -190,6 +386,7 @@ export type Database = {
           file_path: string | null
           id: string
           question_id: string
+          session_id: string
           tool_id: string
           updated_at: string | null
           user_id: string
@@ -201,6 +398,7 @@ export type Database = {
           file_path?: string | null
           id?: string
           question_id: string
+          session_id: string
           tool_id: string
           updated_at?: string | null
           user_id: string
@@ -212,6 +410,7 @@ export type Database = {
           file_path?: string | null
           id?: string
           question_id?: string
+          session_id?: string
           tool_id?: string
           updated_at?: string | null
           user_id?: string
@@ -222,6 +421,13 @@ export type Database = {
             columns: ["question_id"]
             isOneToOne: false
             referencedRelation: "questions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_responses_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "assessment_sessions"
             referencedColumns: ["id"]
           },
           {
@@ -245,7 +451,19 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      get_recursive_storage_paths: {
+        Args: { target_id: string }
+        Returns: {
+          storage_path: string
+        }[]
+      }
+      get_storage_paths_recursive: {
+        Args: { target_id: string }
+        Returns: {
+          storage_path: string
+        }[]
+      }
+      is_admin_of_tool: { Args: { _tool_id: string }; Returns: boolean }
     }
     Enums: {
       app_role: "standard" | "premium" | "admin"

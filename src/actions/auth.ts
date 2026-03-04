@@ -85,7 +85,6 @@ export async function signOutAction() {
 
   if (error) {
     console.error("Errore durante il logout:", error)
-    return { error: "Impossibile effettuare il logout" }
   }
 
   // 2. Reindirizza alla pagina di login
