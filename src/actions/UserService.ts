@@ -74,17 +74,50 @@ export class UserService {
         created_at,
         profiles (
           full_name,
-          avatar_url,
-          email 
+          avatar_url
         )
       `)
       .eq('tool_id', toolId)
       .order('created_at', { ascending: false });
-      // Nota: 'email' va aggiunta in profiles o presa da auth se accessibile, 
-      // ma solitamente auth.users non è accessibile via client standard.
 
     if (error) throw new Error(`Errore caricamento utenti: ${error.message}`);
     return data;
+  }
+
+  /**
+   * GET USERS PAGINATED:
+   * Come getToolUsers ma con paginazione per ridurre carico DB e trasferimento.
+   */
+  async getToolUsersPaginated(
+    toolId: string,
+    page: number,
+    limit: number
+  ): Promise<{ data: Awaited<ReturnType<this['getToolUsers']>>; totalCount: number }> {
+    await this.verifyToolAdmin(toolId);
+
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    const { data, error, count } = await this.supabase
+      .from('tool_access')
+      .select(
+        `
+        user_id,
+        role,
+        created_at,
+        profiles (
+          full_name,
+          avatar_url
+        )
+      `,
+        { count: 'exact' }
+      )
+      .eq('tool_id', toolId)
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    if (error) throw new Error(`Errore caricamento utenti: ${error.message}`);
+    return { data: data ?? [], totalCount: count ?? 0 };
   }
 
   /**

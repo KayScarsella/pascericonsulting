@@ -8,6 +8,7 @@ import { ShieldAlert, FilePlus } from "lucide-react"
 import { Button } from "@/components/ui/button" 
 
 import { SectionList } from "@/components/questions/SectionList"
+import { processPrimaFaseTimber } from "@/actions/workflows"
 
 export default async function RiskAnalysisPage({
   searchParams,
@@ -37,7 +38,7 @@ export default async function RiskAnalysisPage({
         </div>
         <h1 className="text-2xl font-bold text-slate-900">Accesso Limitato</h1>
         <p className="text-slate-600 max-w-md">
-            L&apos;Analisi del Rischio è disponibile solo per gli utenti <strong>Premium</strong> o <strong>Admin</strong>.
+            La verifica preliminare è disponibile solo per gli utenti <strong>Premium</strong> o <strong>Admin</strong>.
         </p>
       </div>
     )
@@ -79,9 +80,9 @@ export default async function RiskAnalysisPage({
           <FilePlus className="w-12 h-12 text-[#967635]" />
         </div>
         <div className="space-y-3 max-w-lg">
-            <h1 className="text-3xl font-bold text-slate-900">Nuova Verifica Regolamento</h1>
+            <h1 className="text-3xl font-bold text-slate-900">Nuova Verifica Preliminare</h1>
             <p className="text-slate-600 text-lg">
-                Non hai selezionato nessuna sessione attiva. Vuoi iniziare una nuova valutazione del rischio da zero?
+                Non hai selezionato nessuna verifica attiva. Vuoi iniziare una nuova verifica preliminare da zero?
             </p>
         </div>
         <form action={createNewSession}>
@@ -116,12 +117,7 @@ export default async function RiskAnalysisPage({
     .from('user_responses')
     .select('*')
     .eq('session_id', sessionId)
-  const handleSimpleRedirect = async (savedSessionId: string) => {
-      "use server"
-      // Ritorniamo semplicemente l'URL a cui vogliamo mandare l'utente
-      // con l'ID della sessione appena salvata
-      return { redirectUrl: `/timberRegulation/valutazione-finale?session_id=${savedSessionId}` }
-    }
+
   return (
     <div className="max-w-5xl mx-auto">
       <SectionList 
@@ -132,7 +128,7 @@ export default async function RiskAnalysisPage({
         defaultOpen={true}
         defaultMode="edit"
         // 🛠️ FIX: Reindirizziamo allo step 2 con lo stesso session_id
-        onCompleteAction={handleSimpleRedirect}
+        onCompleteAction={processPrimaFaseTimber}
       />
     </div>
   )

@@ -1,0 +1,269 @@
+'use client'
+
+import { useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
+import { Button } from "@/components/ui/button"
+import {
+  DataManagementTable,
+  type DataManagementColumn,
+} from "@/components/admin/DataManagementTable"
+import { deleteRecords } from "@/actions/actions"
+import { cn } from "@/lib/utils"
+import { EudrAnalisiTable, type EudrAssessmentSessionRow } from "@/components/EudrAnalisiTable"
+
+export type EudrVerificationRow = {
+  id: string
+  created_at: string
+  final_outcome: string | null
+  status: string
+  metadata: {
+    nome_commerciale?: string
+    is_blocked?: boolean
+    block_reason?: string
+    block_variant?: "success" | "warning" | "error"
+  } | null
+}
+
+type VerificheSortField = "created_at" | "nomeCommerciale" | "stato"
+
+function getStatusLabel(row: EudrVerificationRow): {
+  text: string
+  variant: "amber" | "green"
+  key: "in_corso" | "conclusa" | "esente"
+} {
+  if (row.status === "completed") {
+    if (row.final_outcome === "Esente / Non Soggetto" || row.metadata?.is_blocked) {
+      return {
+        text: row.final_outcome || "Esente / Non Soggetto",
+        variant: "green",
+        key: "esente",
+      }
+    }
+    return { text: row.final_outcome || "Verifica completata", variant: "green", key: "conclusa" }
+  }
+  return { text: "In corso", variant: "amber", key: "in_corso" }
+}
+
+export interface EudrSearchViewProps {
+  tab: string
+  analyses: EudrAssessmentSessionRow[]
+  page: number
+  totalPages: number
+  verifications: EudrVerificationRow[]
+  vpage: number
+  totalPagesV: number
+  isAdmin: boolean
+}
+
+export function EudrSearchView({
+  tab,
+  analyses,
+  page,
+  totalPages,
+  verifications,
+  vpage,
+  totalPagesV,
+  isAdmin,
+}: EudrSearchViewProps) {
+  const router = useRouter()
+  const isAnalisi = tab !== "verifiche"
+
+  const [filterStato, setFilterStato] = useState<string>("all")
+  const [sortField, setSortField] = useState<VerificheSortField | null>(null)
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
+
+  const verificheFilteredByStato = useMemo(() => {
+    if (filterStato === "all") return verifications
+    return verifications.filter((row) => {
+      const s = getStatusLabel(row)
+      if (filterStato === "conclusa" && s.key === "esente") return true
+      return s.key === filterStato
+    })
+  }, [verifications, filterStato])
+
+  const handleVerificheSort = (field: string) => {
+    const f = field as VerificheSortField
+    if (sortField === f) setSortDir((d) => (d === "asc" ? "desc" : "asc"))
+    else {
+      setSortField(f)
+      setSortDir("asc")
+    }
+  }
+
+  const verificheSortCompare = (
+    a: EudrVerificationRow,
+    b: EudrVerificationRow,
+    field: string,
+    dir: "asc" | "desc"
+  ) => {
+    let va: string | number = ""
+    let vb: string | number = ""
+
+    if (field === "created_at") {
+      va = a.created_at
+      vb = b.created_at
+    } else if (field === "nomeCommerciale") {
+      va = (a.metadata?.nome_commerciale ?? "").toLowerCase()
+      vb = (b.metadata?.nome_commerciale ?? "").toLowerCase()
+    } else if (field === "stato") {
+      va = getStatusLabel(a).key
+      vb = getStatusLabel(b).key
+    }
+
+    if (va < vb) return dir === "asc" ? -1 : 1
+    if (va > vb) return dir === "asc" ? 1 : -1
+    return 0
+  }
+
+  const handleVerifichePageChange = (newPage: number) => {
+    if (newPage < 1 || newPage > totalPagesV) return
+    router.push(`/EUDR/search?tab=verifiche&vpage=${newPage}`)
+  }
+
+  const handleOpen = (row: EudrVerificationRow) => {
+    router.push(`/EUDR/evaluation?session_id=${row.id}`)
+  }
+
+  const columns: DataManagementColumn<EudrVerificationRow>[] = [
+    {
+      id: "nomeCommerciale",
+      header: "Nome Commerciale",
+      sortKey: "nomeCommerciale",
+      render: (row) => (
+        <span className="font-medium text-slate-900">
+          {row.metadata?.nome_commerciale ?? (
+            <span className="text-slate-400 italic text-xs">—</span>
+          )}
+        </span>
+      ),
+    },
+    {
+      id: "created_at",
+      header: "Data Creazione",
+      sortKey: "created_at",
+      render: (row) => (
+        <span className="text-slate-500">
+          {new Date(row.created_at).toLocaleDateString("it-IT")}
+        </span>
+      ),
+    },
+    {
+      id: "stato",
+      header: "Stato",
+      sortKey: "stato",
+      render: (row) => {
+        const status = getStatusLabel(row)
+        return (
+          <span
+            className={cn(
+              "inline-flex px-2 py-1 rounded text-xs font-medium border",
+              status.variant === "green"
+                ? "bg-green-50 text-green-700 border-green-200"
+                : "bg-amber-50 text-amber-700 border-amber-200"
+            )}
+          >
+            {status.text}
+          </span>
+        )
+      },
+    },
+  ]
+
+  return (
+    <div className="space-y-6">
+      <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1">
+        <Button
+          type="button"
+          variant={isAnalisi ? "default" : "ghost"}
+          size="sm"
+          className={
+            isAnalisi
+              ? "rounded-full px-4 py-1 h-8 text-sm"
+              : "rounded-full px-4 py-1 h-8 text-sm text-slate-600"
+          }
+          onClick={() => router.push("/EUDR/search?tab=analisi&page=1")}
+        >
+          Analisi finali
+        </Button>
+        <Button
+          type="button"
+          variant={!isAnalisi ? "default" : "ghost"}
+          size="sm"
+          className={
+            !isAnalisi
+              ? "rounded-full px-4 py-1 h-8 text-sm"
+              : "rounded-full px-4 py-1 h-8 text-sm text-slate-600"
+          }
+          onClick={() => router.push("/EUDR/search?tab=verifiche&vpage=1")}
+        >
+          Verifiche
+        </Button>
+      </div>
+
+      {isAnalisi ? (
+        <EudrAnalisiTable
+          data={analyses}
+          page={page}
+          totalPages={totalPages}
+          isAdmin={isAdmin}
+        />
+      ) : (
+        <DataManagementTable<EudrVerificationRow>
+          title="Verifiche preliminari EUDR"
+          data={verificheFilteredByStato}
+          columns={columns}
+          getRowId={(row) => row.id}
+          searchPlaceholder="Cerca per nome commerciale..."
+          filterPredicate={(row, q) =>
+            (row.metadata?.nome_commerciale ?? "").toLowerCase().includes(q)
+          }
+          sortConfig={{
+            field: sortField,
+            dir: sortDir,
+            onSort: handleVerificheSort,
+          }}
+          sortCompare={verificheSortCompare}
+          toolbarExtra={
+            <select
+              className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300"
+              value={filterStato}
+              onChange={(e) => setFilterStato(e.target.value)}
+            >
+              <option value="all">Tutti gli stati</option>
+              <option value="in_corso">In corso</option>
+              <option value="conclusa">Concluse / Esenti</option>
+            </select>
+          }
+          resultCountLabel={`${verificheFilteredByStato.length} risultati`}
+          selectable
+          onBulkDelete={async (ids) => {
+            const res = await deleteRecords(ids)
+            if (res.success) router.refresh()
+            return res
+          }}
+          bulkDeleteLabel="Elimina"
+          emptyMessage="Nessuna verifica trovata."
+          pagination={{
+            page: vpage,
+            totalPages: totalPagesV,
+            onPageChange: handleVerifichePageChange,
+          }}
+          renderRowActions={(row) => (
+            <div className="flex justify-end">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-[#967635] hover:bg-[#f3eee3]"
+                onClick={() => handleOpen(row)}
+              >
+                Apri verifica
+              </Button>
+            </div>
+          )}
+        />
+      )}
+    </div>
+  )
+}
+
+

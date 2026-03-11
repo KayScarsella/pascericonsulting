@@ -6,7 +6,14 @@ export type QuestionRow = Database['public']['Tables']['questions']['Row'];
 export type UserResponseRow = Database['public']['Tables']['user_responses']['Row'];
 
 // Tipi di risposta supportati
-export type QuestionType = 'text' | 'number' | 'select' | 'async_select' | 'repeater';
+export type QuestionType =
+  | 'text'
+  | 'number'
+  | 'select'
+  | 'async_select'
+  | 'repeater'
+  | 'supplier_manager'
+  | 'date_range';
 
 // Interfaccia per il JSON "config"
 export interface QuestionConfig {
@@ -19,6 +26,7 @@ export interface QuestionConfig {
   source_value_col?: string;
   // Configurazione file
   file_upload_enabled?: boolean;
+  optional?: boolean; // Indica se la domanda è facoltativa
 }
 
 // Tipo esteso che forza "config" ad essere QuestionConfig invece di Json
@@ -28,8 +36,8 @@ export interface QuestionWithConfig extends Omit<QuestionRow, 'config'> {
 
 export type LogicCondition = {
   question_id: string;
-  operator: 'eq' | 'neq' | 'gt' | 'lt'; // uguale, diverso, maggiore, minore
-  value: string | number | boolean;
+  operator: 'eq' | 'neq' | 'gt' | 'lt' | 'is_not_empty'; // uguale, diverso, maggiore, minore, presente
+  value?: string | number | boolean; // optional for is_not_empty
   extra_field?: string;
 }
 

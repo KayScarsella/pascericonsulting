@@ -200,6 +200,85 @@ export type Database = {
         }
         Relationships: []
       }
+      mitigation_history: {
+        Row: {
+          id: string
+          mitigated_at: string
+          new_answer: string
+          previous_answer: string | null
+          question_id: string
+          session_id: string
+          comment: string | null
+          file_path: string | null
+        }
+        Insert: {
+          id?: string
+          mitigated_at?: string
+          new_answer: string
+          previous_answer?: string | null
+          question_id: string
+          session_id: string
+          comment?: string | null
+          file_path?: string | null
+        }
+        Update: {
+          id?: string
+          mitigated_at?: string
+          new_answer?: string
+          previous_answer?: string | null
+          question_id?: string
+          session_id?: string
+          comment?: string | null
+          file_path?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mitigation_history_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "assessment_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notifications: {
+        Row: {
+          id: string
+          tool_id: string
+          title: string
+          message: string | null
+          created_at: string
+          expires_at: string | null
+          is_active: boolean
+        }
+        Insert: {
+          id?: string
+          tool_id: string
+          title: string
+          message?: string | null
+          created_at?: string
+          expires_at?: string | null
+          is_active?: boolean
+        }
+        Update: {
+          id?: string
+          tool_id?: string
+          title?: string
+          message?: string | null
+          created_at?: string
+          expires_at?: string | null
+          is_active?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_tool_id_fkey"
+            columns: ["tool_id"]
+            isOneToOne: false
+            referencedRelation: "tools"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -314,6 +393,69 @@ export type Database = {
           scientific_name?: string | null
         }
         Relationships: []
+      }
+      suppliers: {
+        Row: {
+          address: string | null
+          contact_person: string | null
+          created_at: string
+          email: string | null
+          eori_number: string | null
+          id: string
+          name: string
+          phone: string | null
+          tool_id: string
+          updated_at: string | null
+          user_id: string
+          vat_number: string | null
+          website: string | null
+        }
+        Insert: {
+          address?: string | null
+          contact_person?: string | null
+          created_at?: string
+          email?: string | null
+          eori_number?: string | null
+          id?: string
+          name: string
+          phone?: string | null
+          tool_id: string
+          updated_at?: string | null
+          user_id: string
+          vat_number?: string | null
+          website?: string | null
+        }
+        Update: {
+          address?: string | null
+          contact_person?: string | null
+          created_at?: string
+          email?: string | null
+          eori_number?: string | null
+          id?: string
+          name?: string
+          phone?: string | null
+          tool_id?: string
+          updated_at?: string | null
+          user_id?: string
+          vat_number?: string | null
+          website?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "suppliers_tool_id_fkey"
+            columns: ["tool_id"]
+            isOneToOne: false
+            referencedRelation: "tools"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "suppliers_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       tool_access: {
         Row: {
@@ -601,4 +743,3 @@ export const Constants = {
     },
   },
 } as const
-

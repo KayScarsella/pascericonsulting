@@ -15,7 +15,7 @@ async function getSupabase() {
   return createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } }
+    { cookies: { getAll: () => cookieStore.getAll(), setAll: () => { } } }
   )
 }
 
@@ -29,9 +29,9 @@ async function requirePremiumAccess(toolId: string) {
 }
 
 // 🛠️ FIX: supabase tipizzato correttamente invece di 'any'
-async function validateSessionAccess(
-  supabase: SupabaseClient<Database>, 
-  toolId: string, 
+export async function validateSessionAccess(
+  supabase: SupabaseClient<Database>,
+  toolId: string,
   sessionId: string
 ) {
   const { data: { user } } = await supabase.auth.getUser()
@@ -63,10 +63,10 @@ async function validateSessionAccess(
 // ----------------------------------------------------------------------
 
 export async function saveResponse(
-  toolId: string, 
-  sessionId: string, 
-  questionId: string, 
-  value: string | number | null, 
+  toolId: string,
+  sessionId: string,
+  questionId: string,
+  value: string | number | null,
   inputType: 'text' | 'json'
 ) {
   try {
@@ -80,12 +80,12 @@ export async function saveResponse(
       question_id: questionId,
       updated_at: new Date().toISOString(),
       answer_text: inputType !== 'json' ? String(value ?? '') : null,
-      answer_json: inputType === 'json' ? (value as unknown as Json) : null, 
+      answer_json: inputType === 'json' ? (value as unknown as Json) : null,
     }
 
     const { error } = await supabase
       .from('user_responses')
-      .upsert(payload, { onConflict: 'session_id, question_id' }) 
+      .upsert(payload, { onConflict: 'session_id, question_id' })
 
     if (error) throw new Error(error.message)
     return { success: true }
@@ -98,7 +98,7 @@ export async function saveResponse(
 
 export async function saveResponsesBulk(
   toolId: string,
-  sessionId: string, 
+  sessionId: string,
   responses: { questionId: string; value: string | number | null | unknown; inputType: 'text' | 'json' }[]
 ) {
   if (!responses.length) return { success: true }
@@ -131,8 +131,8 @@ export async function saveResponsesBulk(
 }
 
 export async function deleteResponsesBulk(
-  toolId: string, 
-  sessionId: string, 
+  toolId: string,
+  sessionId: string,
   questionIds: string[]
 ) {
   if (!questionIds.length) return { success: true }
@@ -174,9 +174,9 @@ export async function deleteResponsesBulk(
 // ----------------------------------------------------------------------
 
 export async function uploadQuestionAttachment(
-  formData: FormData, 
-  toolId: string, 
-  sessionId: string, 
+  formData: FormData,
+  toolId: string,
+  sessionId: string,
   questionId: string
 ) {
   try {
@@ -219,23 +219,23 @@ export async function uploadQuestionAttachment(
 }
 
 export async function deleteQuestionAttachment(
-  toolId: string, 
-  sessionId: string, 
+  toolId: string,
+  sessionId: string,
   questionId: string
 ) {
   try {
     const supabase = await getSupabase()
     await validateSessionAccess(supabase, toolId, sessionId)
-  
+
     const { data: response, error: fetchError } = await supabase
       .from('user_responses')
       .select('id, file_path')
       .eq('session_id', sessionId)
       .eq('question_id', questionId)
       .single()
-    
+
     if (fetchError || !response || !response.file_path) {
-        return { success: true } 
+      return { success: true }
     }
 
     const { error: storageError } = await supabase.storage
@@ -259,8 +259,8 @@ export async function deleteQuestionAttachment(
 }
 
 export async function deleteQuestionRow(
-  toolId: string, 
-  sessionId: string, 
+  toolId: string,
+  sessionId: string,
   questionId: string
 ) {
   try {
@@ -288,17 +288,17 @@ export async function deleteQuestionRow(
 // FUNZIONI GENERICHE (Invariate)
 // ----------------------------------------------------------------------
 
-type AllowedTable = 'country' | 'eu_products' | 'documents' | 'species';
+type AllowedTable = 'country' | 'eu_products' | 'documents' | 'species' | 'suppliers';
 
 export async function fetchDynamicOptions(
-  table: string, 
-  labelCol: string, 
+  table: string,
+  labelCol: string,
   valueCol: string,
   extraCols?: string[]
 ) {
   const supabase = await getSupabase()
-  const ALLOWED_TABLES: AllowedTable[] = ['country', 'eu_products', 'species', 'documents']
-  
+  const ALLOWED_TABLES: AllowedTable[] = ['country', 'eu_products', 'species', 'documents', 'suppliers']
+
   if (!ALLOWED_TABLES.includes(table as AllowedTable)) return []
 
   const isValidColumn = (col: string) => /^[a-zA-Z0-9_]+$/.test(col);
@@ -307,18 +307,18 @@ export async function fetchDynamicOptions(
   let selectQuery = `${labelCol}, ${valueCol}`;
   const validExtras = (extraCols || []).filter(isValidColumn);
   if (validExtras.length > 0) {
-      selectQuery += `, ${validExtras.join(', ')}`;
+    selectQuery += `, ${validExtras.join(', ')}`;
   }
 
   const { data, error } = await supabase
-    .from(table as AllowedTable) 
+    .from(table as AllowedTable)
     .select(selectQuery)
     .limit(100)
 
   if (error) return []
 
   const typedData = data as unknown as Record<string, unknown>[]
-  
+
   return typedData.map((row) => {
     const extraData: Record<string, unknown> = {};
     validExtras.forEach(col => { extraData[col] = row[col]; });

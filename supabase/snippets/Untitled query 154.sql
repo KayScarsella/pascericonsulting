@@ -1,1 +1,0 @@
-ALTER TABLE public.assessment_sessions ADD COLUMN evaluation_code SERIAL;

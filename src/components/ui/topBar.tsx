@@ -75,8 +75,8 @@ export function ToolNavbar({ toolName, basePath, items, userRole }: ToolNavbarPr
           
           {/* Logo & Nome Tool */}
           <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-900 text-white font-bold text-xs">
-              {toolName.substring(0, 2).toUpperCase()}
+            <div className="topbar-logo flex items-center justify-center rounded-md overflow-hidden">
+              <img src="/logo.png" alt="logo" className="h-8 w-auto" />
             </div>
             <span className="hidden font-bold text-slate-900 sm:inline-block">
               {toolName}

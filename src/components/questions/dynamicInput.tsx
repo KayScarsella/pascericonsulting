@@ -11,29 +11,31 @@ import { Button } from "@/components/ui/button"
 import { QuestionConfig, QuestionType } from "@/types/questions"
 import { fetchDynamicOptions } from "@/actions/questions"
 import { toast } from "sonner" 
+import { SupplierManager } from "./SupplierManager"
 
-export type AnswerValue = string | number | null | Record<string, unknown>[]
+export type AnswerValue = string | number | null | Record<string, unknown>[] | Record<string, unknown>
 
 interface RepeaterField {
     name: string
     label?: string
-    type: QuestionType | 'repeater'
+    type: QuestionType
     config: QuestionConfig
 }
 
-interface RepeaterConfig extends QuestionConfig {
+export interface RepeaterConfig extends QuestionConfig {
     max_items?: number
     item_label?: string
     fields?: RepeaterField[]
 }
 
 interface DynamicInputProps {
-  type: QuestionType | 'repeater' 
+  type: QuestionType 
   config: RepeaterConfig 
   value: AnswerValue
   onChange: (val: AnswerValue) => void
   onExtraChange?: (extraData: Record<string, unknown> | null) => void 
   readOnly?: boolean
+  toolId?: string
 }
 
 // 🛠️ BEST PRACTICE: Interfaccia tipizzata per evitare l'uso di 'any'
@@ -85,7 +87,18 @@ function DebouncedInput({
   )
 }
 
-export function DynamicInput({ type, config, value, onChange, onExtraChange, readOnly }: DynamicInputProps) {
+export function DynamicInput({ type, config, value, onChange, onExtraChange, readOnly, toolId}: DynamicInputProps) {
+
+if (type === 'supplier_manager') {
+    return (
+      <SupplierManager 
+        value={value as string | null} 
+        onChange={onChange} 
+        toolId={toolId || ''} 
+        readOnly={readOnly} 
+      />
+    )
+  }
   
   if (type === 'text' || type === 'number') {
     const stringValue = (value === null || value === undefined || Array.isArray(value)) ? '' : value.toString()
@@ -98,6 +111,50 @@ export function DynamicInput({ type, config, value, onChange, onExtraChange, rea
         className={cn("focus-visible:ring-[#967635]", readOnly && "bg-slate-50 text-slate-600")}
         readOnly={readOnly} 
       />
+    )
+  }
+
+  if (type === 'date_range') {
+    const current =
+      value && !Array.isArray(value) && typeof value === 'object'
+        ? (value as { start?: string | null; end?: string | null })
+        : { start: '', end: '' }
+
+    const handleChange = (field: 'start' | 'end', val: string) => {
+      const next = { start: current.start || '', end: current.end || '' }
+      next[field] = val || ''
+      onChange(next as AnswerValue)
+    }
+
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 mb-1">
+              {config.placeholder || 'Data di inizio'}
+            </label>
+            <Input
+              type="date"
+              value={current.start || ''}
+              onChange={(e) => handleChange('start', e.target.value)}
+              className={cn("focus-visible:ring-[#967635]", readOnly && "bg-slate-50 text-slate-600")}
+              disabled={readOnly}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 mb-1">
+              Data di fine
+            </label>
+            <Input
+              type="date"
+              value={current.end || ''}
+              onChange={(e) => handleChange('end', e.target.value)}
+              className={cn("focus-visible:ring-[#967635]", readOnly && "bg-slate-50 text-slate-600")}
+              disabled={readOnly}
+            />
+          </div>
+        </div>
+      </div>
     )
   }
 

@@ -19,7 +19,7 @@ async function createSupabaseServerClient() {
             cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, options)
             )
-          } catch {}
+          } catch { }
         },
       },
     }
@@ -29,7 +29,7 @@ async function createSupabaseServerClient() {
 export async function loginAction(formData: FormData) {
   const email = formData.get("email") as string
   const password = formData.get("password") as string
-  
+
   if (!email || !password) return { error: "Campi obbligatori" }
 
   const supabase = await createSupabaseServerClient()
@@ -51,8 +51,8 @@ export async function loginAction(formData: FormData) {
 export async function signupAction(formData: FormData) {
   const email = formData.get("email") as string
   const password = formData.get("password") as string
-  const fullName = formData.get("fullName") as string 
-  
+  const fullName = formData.get("fullName") as string
+
   if (!email || !password) return { error: "Campi obbligatori" }
 
   const supabase = await createSupabaseServerClient()
@@ -62,10 +62,10 @@ export async function signupAction(formData: FormData) {
     email,
     password,
     options: {
-      emailRedirectTo: `${origin}/auth/callback`,
+      emailRedirectTo: `${origin}/callback`,
       // 2. Passa il nome ai metadata dell'utente
       data: {
-        full_name: fullName, 
+        full_name: fullName,
       }
     },
   })

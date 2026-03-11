@@ -18,7 +18,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="it">
-      <body className={inter.className}>
+      <body className={`${inter.className} site-forest-bg`}>
         {children}
         {/* 2. Aggiungilo qui, prima della chiusura del body */}
         <Toaster />

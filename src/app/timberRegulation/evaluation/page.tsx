@@ -37,7 +37,7 @@ export default async function EvaluationPage({
         </div>
         <h1 className="text-2xl font-bold text-slate-900">Accesso Limitato</h1>
         <p className="text-slate-600 max-w-md">
-            La Valutazione è disponibile solo per gli utenti <strong>Premium</strong> o <strong>Admin</strong>.
+            La configurazione delle analisi finali è disponibile solo per gli utenti <strong>Premium</strong> o <strong>Admin</strong>.
         </p>
       </div>
     )
@@ -49,8 +49,8 @@ export default async function EvaluationPage({
         <div className="p-4 bg-red-50 rounded-full">
             <ShieldAlert className="w-10 h-10 text-red-600" />
         </div>
-        <h2 className="text-xl font-bold text-slate-800">Nessuna sessione selezionata</h2>
-        <p className="text-slate-500">Non è stato fornito un ID valido. Torna allo storico per selezionare una valutazione.</p>
+        <h2 className="text-xl font-bold text-slate-800">Nessuna verifica selezionata</h2>
+        <p className="text-slate-500">Non è stato fornito un ID valido. Torna allo storico per selezionare una verifica.</p>
       </div>
     )
   }
@@ -67,7 +67,7 @@ export default async function EvaluationPage({
   }
 
   if (sessionInfo.user_id !== user.id && role !== 'admin') {
-    return <div className="p-8 text-center text-red-600 font-bold">Non sei autorizzato a visualizzare o modificare questa valutazione.</div>;
+    return <div className="p-8 text-center text-red-600 font-bold">Non sei autorizzato a visualizzare o modificare questa verifica.</div>;
   }
 
   const { data: sections } = await supabase
@@ -105,9 +105,9 @@ export default async function EvaluationPage({
     <div className="max-w-5xl mx-auto">
       
       <div className="border-b border-slate-200 pb-6 mb-8 mt-4">
-        <h1 className="text-3xl font-bold text-slate-900">Valutazione Timber</h1>
+        <h1 className="text-3xl font-bold text-slate-900">Configurazione Analisi Finali</h1>
         <p className="text-slate-500 mt-2">
-          Rivedi i dati dell&apos;Analisi del Rischio e compila la tua valutazione finale.
+          Rivedi i dati della verifica preliminare e definisci quante e quali analisi finali generare.
         </p>
       </div>
 
