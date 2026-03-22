@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 // 1. Importa il componente Toaster
 import { Toaster } from "@/components/ui/sonner";
+import { SpeedInsights } from '@vercel/speed-insights/next';
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -22,6 +23,7 @@ export default function RootLayout({
         {children}
         {/* 2. Aggiungilo qui, prima della chiusura del body */}
         <Toaster />
+        <SpeedInsights />
       </body>
     </html>
   );
