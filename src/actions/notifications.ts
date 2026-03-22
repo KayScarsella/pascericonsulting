@@ -1,9 +1,8 @@
 'use server'
 
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
-import { getToolAccess } from '@/lib/tool-auth'
-import { Database } from '@/types/supabase'
+import { requireToolAdmin } from '@/lib/tool-auth'
+import { createClient } from '@/utils/supabase/server'
+import type { Database } from '@/types/supabase'
 
 type NotificationRow = Database['public']['Tables']['notifications']['Row']
 type NotificationInsert = Database['public']['Tables']['notifications']['Insert']
@@ -11,17 +10,7 @@ type NotificationInsert = Database['public']['Tables']['notifications']['Insert'
 const PAGE_SIZE = 25
 
 async function getSupabase() {
-  const cookieStore = await cookies()
-  return createServerClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } }
-  )
-}
-
-async function requireAdmin(toolId: string) {
-  const { role } = await getToolAccess(toolId)
-  if (role !== 'admin') throw new Error('Non autorizzato: servono permessi admin')
+  return createClient()
 }
 
 /** List active, not expired notifications for a tool (e.g. for the tool home page). User must have access to the tool. */
@@ -46,7 +35,7 @@ export async function listNotificationsPaginated(
   limit: number = PAGE_SIZE
 ): Promise<{ data: NotificationRow[] | null; totalCount: number; error: string | null }> {
   try {
-    await requireAdmin(toolId)
+    await requireToolAdmin(toolId)
     const supabase = await getSupabase()
     const from = (page - 1) * limit
     const to = from + limit - 1
@@ -68,7 +57,7 @@ export async function createNotification(
   payload: { title: string; message?: string | null; expires_at?: string | null; is_active?: boolean }
 ): Promise<{ data: NotificationRow | null; error: string | null }> {
   try {
-    await requireAdmin(toolId)
+    await requireToolAdmin(toolId)
     const supabase = await getSupabase()
     const insert: NotificationInsert = {
       tool_id: toolId,
@@ -91,7 +80,7 @@ export async function updateNotification(
   payload: { title?: string; message?: string | null; expires_at?: string | null; is_active?: boolean }
 ): Promise<{ data: NotificationRow | null; error: string | null }> {
   try {
-    await requireAdmin(toolId)
+    await requireToolAdmin(toolId)
     const supabase = await getSupabase()
     const { data, error } = await supabase
       .from('notifications')
@@ -114,7 +103,7 @@ export async function updateNotification(
 
 export async function deleteNotification(toolId: string, id: string): Promise<{ success: boolean; error?: string }> {
   try {
-    await requireAdmin(toolId)
+    await requireToolAdmin(toolId)
     const supabase = await getSupabase()
     const { error } = await supabase.from('notifications').delete().eq('id', id).eq('tool_id', toolId)
     if (error) return { success: false, error: error.message }
@@ -126,7 +115,7 @@ export async function deleteNotification(toolId: string, id: string): Promise<{ 
 
 export async function deleteNotificationsBulk(toolId: string, ids: string[]): Promise<{ success: boolean; error?: string }> {
   try {
-    await requireAdmin(toolId)
+    await requireToolAdmin(toolId)
     if (ids.length === 0) return { success: true }
     const supabase = await getSupabase()
     const { error } = await supabase

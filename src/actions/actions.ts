@@ -5,6 +5,7 @@ import { cookies } from "next/headers"
 import { Database } from "@/types/supabase"
 import { revalidatePath } from "next/cache"
 import { getToolAccess } from "@/lib/tool-auth"
+import { removePreviousDueDiligenceRuns } from "@/features/eudr-due-diligence/storage/cleanupSessionRuns"
 
 /**
  * Delete assessment sessions and clean up orphaned storage files.
@@ -123,6 +124,21 @@ export async function deleteRecords(ids: string[]) {
       ...(responseFiles?.map(r => r.file_path).filter((p): p is string => Boolean(p)) ?? []),
       ...(mitigationFiles?.map(m => m.file_path).filter((p): p is string => Boolean(p)) ?? []),
     ];
+
+    // 3b. EUDR due-diligence AOI artifacts (stesso bucket user-uploads, come mitigazioni)
+    const { data: sessionsForDd } = await supabase
+      .from('assessment_sessions')
+      .select('id, user_id')
+      .in('id', allSessionIds);
+    if (sessionsForDd?.length) {
+      const seen = new Set<string>();
+      for (const row of sessionsForDd) {
+        const key = `${row.user_id}:${row.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        await removePreviousDueDiligenceRuns(supabase, row.user_id, row.id);
+      }
+    }
 
     // 4. Remove files from storage (ignore errors for missing files)
     if (filePaths.length > 0) {

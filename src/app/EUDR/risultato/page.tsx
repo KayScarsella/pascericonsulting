@@ -11,12 +11,18 @@ import {
   calculateEudrRisk,
   RISK_THRESHOLD,
   EUDR_SCORED_QUESTIONS,
+  EUDR_COUNTRY_PREFILL_QUESTION_IDS,
   getEudrLabelForRaw,
 } from "@/lib/eudr-risk-calculator"
+import {
+  applyAoiGateToEudrRiskResult,
+  AOI_GATE_QUESTION_ID,
+  type DdLastRunSnapshot,
+} from "@/features/eudr-due-diligence/aoiRiskGate"
 import type { RiskCalculationResult } from "@/lib/eudr-risk-calculator"
 import { RiskBarChart } from "@/components/RiskBarChart"
 import { MitigationHistorySection } from "@/components/MitigationHistorySection"
-import { ExportAnalysisPdfButton } from "@/components/ExportAnalysisPdfButton"
+import { ExportAnalysisPdfButton, PDF_DISCLAIMERS } from "@/components/ExportAnalysisPdfButton"
 import { fetchDynamicOptions } from "@/actions/questions"
 import type { QuestionConfig } from "@/types/questions"
 
@@ -39,6 +45,14 @@ export default async function EudrRisultatoPage({
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) redirect("/login")
+
+  const { data: userProfile } = await supabase
+    .from("profiles")
+    .select(
+      "full_name,ragione_sociale,cf_partita_iva,indirizzo,cap,citta,provincia,recapito_telefonico,email"
+    )
+    .eq("id", user.id)
+    .single()
 
   const { role } = await getToolAccess(EUDR_TOOL_ID)
   if (!role || role === "standard") {
@@ -109,7 +123,26 @@ export default async function EudrRisultatoPage({
     if (r.answer_json != null) answersJsonMap[r.question_id] = r.answer_json
   }
 
-  const result: RiskCalculationResult = calculateEudrRisk(answersMap)
+  // Resolve species + country for PDF header using the same approach as Timber
+  const countryId = (answersMap[EUDR_COUNTRY_PREFILL_QUESTION_IDS.PAESE_RACCOLTA] || "").trim() || null
+  const specieId = (answersMap[EUDR_COUNTRY_PREFILL_QUESTION_IDS.SPECIE] || "").trim() || null
+
+  const [speciesResult, countryResult] = await Promise.all([
+    specieId
+      ? supabase.from("species").select("common_name").eq("id", specieId).single()
+      : null,
+    countryId
+      ? supabase.from("country").select("country_name, conflicts").eq("id", countryId).single()
+      : null,
+  ])
+
+  const specieName = speciesResult?.data?.common_name || "N/D"
+  const countryName = countryResult?.data?.country_name || "N/D"
+  const countryHasConflicts = countryResult?.data?.conflicts ?? false
+
+  let result: RiskCalculationResult = calculateEudrRisk(answersMap)
+  const ddLastRun = metadata?.dd_last_run as DdLastRunSnapshot | undefined
+  result = applyAoiGateToEudrRiskResult(result, ddLastRun)
 
   if (session.status !== "completed" || !session.final_outcome) {
     const updatePayload: Record<string, unknown> = {
@@ -127,9 +160,38 @@ export default async function EudrRisultatoPage({
         })),
         completed_at: new Date().toISOString(),
         expiry_date: result.expiryDate,
+        ...(ddLastRun?.triggers_non_accettabile
+          ? {
+              aoi_gate_triggered: true,
+              aoi_gate_reasons: ddLastRun.reasons,
+            }
+          : {}),
       },
     }
     await supabase.from("assessment_sessions").update(updatePayload).eq("id", sessionId)
+  } else if (
+    ddLastRun?.triggers_non_accettabile &&
+    session.final_outcome === "Rischio Accettabile"
+  ) {
+    // AOI run after finalize: align stored outcome with gate (non accettabile)
+    await supabase
+      .from("assessment_sessions")
+      .update({
+        final_outcome: "Rischio Non Accettabile",
+        metadata: {
+          ...(metadata || {}),
+          risk_score: result.overallRisk,
+          risk_details: result.details.map((d) => ({
+            shortLabel: d.shortLabel,
+            riskIndex: d.riskIndex,
+          })),
+          expiry_date: null,
+          aoi_gate_triggered: true,
+          aoi_gate_reasons: ddLastRun.reasons,
+          aoi_gate_synced_at: new Date().toISOString(),
+        },
+      })
+      .eq("id", sessionId)
   }
 
   let mitigationHistory: {
@@ -157,6 +219,8 @@ export default async function EudrRisultatoPage({
 
   const isAccettabile = result.outcome === "accettabile"
   const failingQuestions = result.details.filter((d) => d.riskIndex > RISK_THRESHOLD)
+  // La mitigazione serve per domande del questionario: l'AOI gate è una "soglia" e non è mitigabile.
+  const failingNonAoiQuestions = failingQuestions.filter((d) => d.questionId !== AOI_GATE_QUESTION_ID)
 
   const questionLabelsMap: Record<
     string,
@@ -194,9 +258,12 @@ export default async function EudrRisultatoPage({
     questions: QuestionRow[] | null
   }
   const sectionsData = (sectionsForPdfRaw || []) as SectionRow[]
+  const sectionsDataFiltered = sectionsData.filter(
+    (s) => s.id !== "a3df1e07-a678-49d2-9a4d-f134fba3498c"
+  )
 
   const supplierIds = new Set<string>()
-  for (const section of sectionsData) {
+  for (const section of sectionsDataFiltered) {
     for (const q of section.questions || []) {
       if (q.type === "supplier_manager") {
         const id = answersMap[q.id]
@@ -215,7 +282,7 @@ export default async function EudrRisultatoPage({
     contact_person: string | null
   }
   const supplierRecordsById: Record<string, SupplierRecord> = {}
-  let supplierDetailsMap: Record<string, string> = {}
+  const supplierDetailsMap: Record<string, string> = {}
   if (supplierIds.size > 0) {
     const { data: suppliersRows } = await supabase
       .from("suppliers")
@@ -255,7 +322,7 @@ export default async function EudrRisultatoPage({
   const asyncSelectKey = (c: QuestionConfig) =>
     `${c.source_table ?? ""}|${c.source_label_col ?? "name"}|${c.source_value_col ?? "id"}`
   const asyncSelectOptionsCache = new Map<string, { label: string; value: string }[]>()
-  for (const section of sectionsData) {
+  for (const section of sectionsDataFiltered) {
     for (const q of section.questions || []) {
       if (q.type !== "async_select" || !q.config?.source_table) continue
       const key = asyncSelectKey(q.config)
@@ -329,7 +396,7 @@ export default async function EudrRisultatoPage({
     mitigationByQuestionId.get(entry.question_id)!.push(item)
   }
 
-  const sectionsForPdf = sectionsData
+  const sectionsForPdf = sectionsDataFiltered
     .map((section) => {
       const questions = section.questions || []
       const expanded = questions.flatMap((q) => {
@@ -368,6 +435,40 @@ export default async function EudrRisultatoPage({
       return { sectionTitle: section.title, questions: expanded.filter((q) => q.questionText) }
     })
     .filter((s) => s.questions.length > 0)
+
+  // Carica dd_report.json da storage per PDF (senza GEE) (stessi colori grafico/mappa) — come mitigazioni, cancellato con deleteRecords
+  let ddPdfPayload: import("@/components/ExportAnalysisPdfButton").DdPdfPayload | null = null
+  if (ddLastRun?.run_id) {
+    const artifactSessionId = ddLastRun.dd_artifact_session_id ?? sessionId
+    const { data: artifactSession } = await supabase
+      .from("assessment_sessions")
+      .select("user_id")
+      .eq("id", artifactSessionId)
+      .single()
+    if (artifactSession?.user_id) {
+      const path = `${artifactSession.user_id}/eudr-due-diligence/${artifactSessionId}/${ddLastRun.run_id}/dd_report.json`
+      const { data: blob, error: dlErr } = await supabase.storage.from("user-uploads").download(path)
+      if (!dlErr && blob) {
+        try {
+          const parsed = JSON.parse(await blob.text()) as import("@/components/ExportAnalysisPdfButton").DdPdfPayload
+          if (parsed?.lossyear_histogram && parsed?.cutting_date_iso) {
+            const payload = parsed as import("@/components/ExportAnalysisPdfButton").DdPdfPayload
+            if (payload.has_snapshot) {
+              const snapName = payload.snapshot_storage_filename?.trim() || "aoi_map_snapshot.png"
+              const snapPath = `${artifactSession.user_id}/eudr-due-diligence/${artifactSessionId}/${ddLastRun.run_id}/${snapName}`
+              const { data: snapSigned } = await supabase.storage
+                .from("user-uploads")
+                .createSignedUrl(snapPath, 3600, { download: false })
+              if (snapSigned?.signedUrl) payload.dd_snapshot_signed_url = snapSigned.signedUrl
+            }
+            ddPdfPayload = payload
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-4 pb-16">
@@ -458,19 +559,92 @@ export default async function EudrRisultatoPage({
 
       <div className="flex flex-wrap items-center gap-3 mb-10">
         <ExportAnalysisPdfButton
+          variant="EUDR"
           nomeOperazione={nomeOperazione}
+          userProfile={userProfile}
+          disclaimerText={PDF_DISCLAIMERS.EUDR}
           outcome={result.outcome}
           outcomeDescription={result.outcomeDescription}
-          specieName="—"
-          countryName="—"
-          countryHasConflicts={false}
+          specieName={specieName}
+          countryName={countryName}
+          countryHasConflicts={!!countryHasConflicts}
           expiryDate={result.expiryDate}
           overallRisk={result.overallRisk}
           details={result.details}
           sectionsForPdf={sectionsForPdf}
           sessionId={sessionId}
+          ddPdfPayload={ddPdfPayload}
         />
       </div>
+
+      {/* AOI / Hansen: esito esplicito positivo vs negativo (dd_last_run salvato al run) */}
+      {ddLastRun && (
+        <div
+          className={`rounded-2xl border p-5 mb-10 ${
+            ddLastRun.triggers_non_accettabile
+              ? "border-red-200 bg-red-50/80"
+              : "border-[#4a7c2e]/25 bg-[#4a7c2e]/5"
+          }`}
+        >
+          <div className="flex items-start gap-3">
+            {ddLastRun.triggers_non_accettabile ? (
+              <AlertTriangle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
+            ) : (
+              <CheckCircle className="w-6 h-6 text-[#4a7c2e] flex-shrink-0 mt-0.5" />
+            )}
+            <div className="min-w-0 flex-1">
+              <h3 className="font-bold text-[#3d2b1a]">
+                Screening AOI (EUDR) —{" "}
+                {ddLastRun.triggers_non_accettabile
+                  ? "esito negativo"
+                  : "nessun gate attivato"}
+              </h3>
+              <p className="text-sm text-slate-600 mt-1">
+                {ddLastRun.triggers_non_accettabile
+                  ? "È stata rilevata perdita forestale nell’AOI dopo il 31/12/2020 o dopo la data di taglio dichiarata. L’esito è stato portato a non accettabile anche se il questionario da solo sarebbe stato più favorevole."
+                  : "Nell’AOI non risulta evidenza significativa di loss su foresta al 2020 dopo il cutoff (JRC GFC2020 ∩ Hansen), né loss Hansen post-taglio oltre soglia. Il gate AOI non ha alzato il rischio oltre il questionario."}
+              </p>
+              {ddLastRun.cutting_date_iso && /^\d{4}/.test(ddLastRun.cutting_date_iso) && (
+                <p className="text-xs text-slate-500 mt-2 rounded-md bg-slate-100/80 border border-slate-200 px-3 py-2">
+                  <strong>Legenda mappa Hansen (run AOI):</strong> rosso = loss dall&apos;anno di taglio in poi
+                  (≥ {ddLastRun.cutting_date_iso.slice(0, 4)}), incluso l&apos;anno inserito — così eventuale
+                  loss nell&apos;anno del taglio è visibile e coerente con l&apos;esito. Blu = solo anni 2021…
+                  precedenti all&apos;anno di taglio.
+                </p>
+              )}
+              <p className="text-xs text-slate-500 mt-2 font-mono">
+                Run: {ddLastRun.run_id.slice(0, 8)}… · pixel loss (Hansen tot):{" "}
+                {ddLastRun.loss_pixel_count ?? "—"} · {ddLastRun.dataset_id}
+                {ddLastRun.gate_uses_jrc_gfc2020 && ddLastRun.loss_on_forest_2020_post_eudr_ha != null && (
+                  <> · loss su foresta 2020 post-EUDR ≈ {ddLastRun.loss_on_forest_2020_post_eudr_ha.toFixed(2)} ha</>
+                )}
+              </p>
+              {ddLastRun.logic_mode && (
+                <p className="text-xs text-slate-600 mt-2">
+                  Modalità screening:{' '}
+                  <strong>{ddLastRun.logic_mode === 'raffinata' ? 'raffinata (JRC ∩ Hansen)' : 'base (Hansen / sotto soglia)'}</strong>
+                </p>
+              )}
+              {ddLastRun.triggers_non_accettabile && ddLastRun.reasons?.length > 0 && (
+                <ul className="mt-3 text-sm text-red-800 list-disc list-inside space-y-1">
+                  {ddLastRun.reasons.map((r, i) => (
+                    <li key={i}>{r}</li>
+                  ))}
+                </ul>
+              )}
+              {!ddLastRun.triggers_non_accettabile &&
+                ddLastRun.advisory_notes &&
+                ddLastRun.advisory_notes.length > 0 && (
+                  <ul className="mt-3 text-sm text-amber-900 list-disc list-inside space-y-1 bg-amber-50/80 rounded-md p-3 border border-amber-100">
+                    {ddLastRun.advisory_notes.map((r, i) => (
+                      <li key={i}>{r}</li>
+                    ))}
+                  </ul>
+                )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6 md:p-8 mb-10">
         <h2 className="text-lg font-bold text-[#3d2b1a] mb-6">Grafico dei Rischi</h2>
@@ -578,7 +752,7 @@ export default async function EudrRisultatoPage({
         </div>
       </div>
 
-      {!isAccettabile && (
+      {!isAccettabile && failingNonAoiQuestions.length > 0 && (
         <div className="rounded-2xl border-2 border-dashed border-red-200 bg-gradient-to-r from-red-50/50 to-orange-50/30 p-6 mb-10">
           <div className="flex items-center gap-4">
             <div className="flex-shrink-0 p-3 bg-gradient-to-br from-red-500 to-red-700 rounded-xl shadow-md">
@@ -587,8 +761,8 @@ export default async function EudrRisultatoPage({
             <div className="flex-1 min-w-0">
               <h3 className="text-lg font-bold text-red-900">Azioni di mitigazione richieste</h3>
               <p className="text-sm text-red-700/80 mt-1">
-                {failingQuestions.length}{" "}
-                {failingQuestions.length === 1
+                {failingNonAoiQuestions.length}{" "}
+                {failingNonAoiQuestions.length === 1
                   ? "criterio non supera"
                   : "criteri non superano"}{" "}
                 la soglia di rischio. Avvia la mitigazione per aggiornare le risposte.

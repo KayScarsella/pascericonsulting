@@ -1,9 +1,8 @@
 'use server'
 
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
-import { getToolAccess } from '@/lib/tool-auth'
-import { Database } from '@/types/supabase'
+import { requireToolAdmin } from '@/lib/tool-auth'
+import { createClient } from '@/utils/supabase/server'
+import type { Database } from '@/types/supabase'
 
 type SpeciesRow = Database['public']['Tables']['species']['Row']
 type SpeciesInsert = Database['public']['Tables']['species']['Insert']
@@ -11,17 +10,7 @@ type CountryRow = Database['public']['Tables']['country']['Row']
 type CountryInsert = Database['public']['Tables']['country']['Insert']
 
 async function getSupabase() {
-  const cookieStore = await cookies()
-  return createServerClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } }
-  )
-}
-
-async function requireAdmin(toolId: string) {
-  const { role } = await getToolAccess(toolId)
-  if (role !== 'admin') throw new Error('Non autorizzato: servono permessi admin')
+  return createClient()
 }
 
 // ---------------------------------------------------------------------------
@@ -32,7 +21,7 @@ const DEFAULT_PAGE_SIZE = 25
 
 export async function listSpecies(toolId: string): Promise<{ data: SpeciesRow[] | null; error: string | null }> {
   try {
-    await requireAdmin(toolId)
+    await requireToolAdmin(toolId)
     const supabase = await getSupabase()
     const { data, error } = await supabase
       .from('species')
@@ -51,7 +40,7 @@ export async function listSpeciesPaginated(
   limit: number = DEFAULT_PAGE_SIZE
 ): Promise<{ data: SpeciesRow[] | null; totalCount: number; error: string | null }> {
   try {
-    await requireAdmin(toolId)
+    await requireToolAdmin(toolId)
     const supabase = await getSupabase()
     const from = (page - 1) * limit
     const to = from + limit - 1
@@ -72,7 +61,7 @@ export async function createSpecies(
   payload: { scientific_name?: string | null; common_name?: string | null; cites?: number | null }
 ): Promise<{ data: SpeciesRow | null; error: string | null }> {
   try {
-    await requireAdmin(toolId)
+    await requireToolAdmin(toolId)
     const supabase = await getSupabase()
     const insert: SpeciesInsert = {
       scientific_name: payload.scientific_name ?? null,
@@ -93,7 +82,7 @@ export async function updateSpecies(
   payload: { scientific_name?: string | null; common_name?: string | null; cites?: number | null }
 ): Promise<{ data: SpeciesRow | null; error: string | null }> {
   try {
-    await requireAdmin(toolId)
+    await requireToolAdmin(toolId)
     const supabase = await getSupabase()
     const { data, error } = await supabase
       .from('species')
@@ -114,7 +103,7 @@ export async function updateSpecies(
 
 export async function deleteSpecies(toolId: string, id: string): Promise<{ success: boolean; error?: string }> {
   try {
-    await requireAdmin(toolId)
+    await requireToolAdmin(toolId)
     const supabase = await getSupabase()
     const { error } = await supabase.from('species').delete().eq('id', id)
     if (error) return { success: false, error: error.message }
@@ -126,7 +115,7 @@ export async function deleteSpecies(toolId: string, id: string): Promise<{ succe
 
 export async function deleteSpeciesBulk(toolId: string, ids: string[]): Promise<{ success: boolean; error?: string }> {
   try {
-    await requireAdmin(toolId)
+    await requireToolAdmin(toolId)
     if (ids.length === 0) return { success: true }
     const supabase = await getSupabase()
     const { error } = await supabase.from('species').delete().in('id', ids)
@@ -143,7 +132,7 @@ export async function deleteSpeciesBulk(toolId: string, ids: string[]): Promise<
 
 export async function listCountries(toolId: string): Promise<{ data: CountryRow[] | null; error: string | null }> {
   try {
-    await requireAdmin(toolId)
+    await requireToolAdmin(toolId)
     const supabase = await getSupabase()
     const { data, error } = await supabase
       .from('country')
@@ -162,7 +151,7 @@ export async function listCountriesPaginated(
   limit: number = DEFAULT_PAGE_SIZE
 ): Promise<{ data: CountryRow[] | null; totalCount: number; error: string | null }> {
   try {
-    await requireAdmin(toolId)
+    await requireToolAdmin(toolId)
     const supabase = await getSupabase()
     const from = (page - 1) * limit
     const to = from + limit - 1
@@ -189,14 +178,14 @@ export async function createCountry(
   }
 ): Promise<{ data: CountryRow | null; error: string | null }> {
   try {
-    await requireAdmin(toolId)
+    await requireToolAdmin(toolId)
     const supabase = await getSupabase()
     const insert: CountryInsert = {
       country_name: payload.country_name ?? null,
       extra_eu: payload.extra_eu ?? null,
       conflicts: payload.conflicts ?? null,
       sanction: payload.sanction ?? null,
-      corruption_code: payload.corruption_code ?? null,
+      corruption_code: (payload.corruption_code ?? null) as CountryInsert["corruption_code"],
     }
     const { data, error } = await supabase.from('country').insert(insert).select().single()
     if (error) return { data: null, error: error.message }
@@ -218,7 +207,7 @@ export async function updateCountry(
   }
 ): Promise<{ data: CountryRow | null; error: string | null }> {
   try {
-    await requireAdmin(toolId)
+    await requireToolAdmin(toolId)
     const supabase = await getSupabase()
     const { data, error } = await supabase
       .from('country')
@@ -227,7 +216,7 @@ export async function updateCountry(
         extra_eu: payload.extra_eu,
         conflicts: payload.conflicts,
         sanction: payload.sanction,
-        corruption_code: payload.corruption_code,
+        corruption_code: payload.corruption_code as CountryInsert["corruption_code"],
       })
       .eq('id', id)
       .select()
@@ -241,7 +230,7 @@ export async function updateCountry(
 
 export async function deleteCountry(toolId: string, id: string): Promise<{ success: boolean; error?: string }> {
   try {
-    await requireAdmin(toolId)
+    await requireToolAdmin(toolId)
     const supabase = await getSupabase()
     const { error } = await supabase.from('country').delete().eq('id', id)
     if (error) return { success: false, error: error.message }
@@ -253,7 +242,7 @@ export async function deleteCountry(toolId: string, id: string): Promise<{ succe
 
 export async function deleteCountriesBulk(toolId: string, ids: string[]): Promise<{ success: boolean; error?: string }> {
   try {
-    await requireAdmin(toolId)
+    await requireToolAdmin(toolId)
     if (ids.length === 0) return { success: true }
     const supabase = await getSupabase()
     const { error } = await supabase.from('country').delete().in('id', ids)

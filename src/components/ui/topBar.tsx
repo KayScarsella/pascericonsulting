@@ -6,7 +6,7 @@ import { useState } from "react"
 // 1. Importa tutte le icone che pensi di usare nel progetto qui
 import { 
   Menu, X, LogOut, Home, FileText, ShieldAlert, Search, 
-  Database, Lock, BookOpen, UserCheck, Settings 
+  Database, Lock, BookOpen, UserCheck, Settings, Map
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -24,6 +24,7 @@ const ICON_MAP = {
   BookOpen,
   UserCheck,
   Settings,
+  Map,
   Menu, // Utile se serve altrove
   LogOut
 }

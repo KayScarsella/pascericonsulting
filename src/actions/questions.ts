@@ -1,22 +1,16 @@
 'use server'
 
-import { createServerClient } from "@supabase/ssr"
-import { cookies } from "next/headers"
-import { SupabaseClient } from "@supabase/supabase-js" // 🛠️ Aggiunto import per la tipizzazione
+import { SupabaseClient } from "@supabase/supabase-js"
 import { Database, TablesInsert, Json } from "@/types/supabase"
 import { getToolAccess } from "@/lib/tool-auth"
+import { createClient } from "@/utils/supabase/server"
 
 // ----------------------------------------------------------------------
 // HELPER FUNCTIONS
 // ----------------------------------------------------------------------
 
 async function getSupabase() {
-  const cookieStore = await cookies()
-  return createServerClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll(), setAll: () => { } } }
-  )
+  return createClient()
 }
 
 async function requirePremiumAccess(toolId: string) {

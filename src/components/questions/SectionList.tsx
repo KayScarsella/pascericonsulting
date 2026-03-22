@@ -9,6 +9,48 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import { saveResponsesBulk, deleteResponsesBulk } from "@/actions/questions"
+import { EUDR_TOOL_ID } from "@/lib/constants"
+import { EmbeddedDueDiligenceBlock } from "@/features/eudr-due-diligence/EmbeddedDueDiligenceBlock"
+
+/** Sezione E — Paese di raccolta: dopo "Rischio paese" mostra blocco AOI inline */
+const SECTION_E_PAES_EMBED_AFTER = "8e3c8459-5a9b-4ecf-8a4e-9f9da2b53cc1"
+const QUESTION_RISCHIO_PAESE_ID = "e8f9a0b1-c2d3-4e4f-8a9b-0c1d2e3f4a65"
+
+// ── EUDR: FLEGT/CITES ⇒ prefill/NA in Section G (Valutazione Finale) ────
+const EUDR_Q_FLEGT = "881c4918-ca7f-44ad-9c52-530de70b8add"
+const EUDR_Q_CITES = "6e0896e6-0be7-4286-bd7a-3fba6e34b83f"
+const EUDR_SECTION_G = "c4d9e2b7-8a61-4a3f-b72a-45157b0dfc3f"
+
+const RELIABILITY_OPTIONS_SIGNATURE = [
+    { label: "Affidabilità alta", value: "1" },
+    { label: "Affidabilità medio alta", value: "2" },
+    { label: "Affidabilità media", value: "3" },
+    { label: "Affidabilità medio bassa", value: "4" },
+    { label: "Affidabilità bassa", value: "44" },
+] as const
+
+function isYesLike(v: unknown): boolean {
+    if (v === true) return true
+    if (v == null) return false
+    const s = String(v).trim().toLowerCase()
+    return s === "si" || s === "sì" || s === "yes" || s === "y"
+}
+
+function hasReliabilitySelectConfig(q: Tables<'questions'>): boolean {
+    if (q.type !== "select") return false
+    const cfg = q.config as Record<string, unknown> | null
+    if (!cfg || typeof cfg !== "object") return false
+    if (cfg.file_upload_enabled !== true) return false
+    const opts = cfg.options as unknown
+    if (!Array.isArray(opts) || opts.length !== RELIABILITY_OPTIONS_SIGNATURE.length) return false
+    for (let i = 0; i < RELIABILITY_OPTIONS_SIGNATURE.length; i++) {
+        const o = opts[i] as Record<string, unknown> | null
+        if (!o) return false
+        if (String(o.label ?? "") !== RELIABILITY_OPTIONS_SIGNATURE[i].label) return false
+        if (String(o.value ?? "") !== RELIABILITY_OPTIONS_SIGNATURE[i].value) return false
+    }
+    return true
+}
 
 // 🛠️ IMPORT RIGOROSI: Niente interfacce clonate localmente
 import { Tables } from "@/types/supabase"
@@ -148,8 +190,19 @@ export function SectionList({
         const payloadToSave: { questionId: string, value: unknown, inputType: 'text' | 'json' }[] = [];
         const idsToDelete: string[] = [];
 
+        const triggerGeoOnly =
+            toolId === EUDR_TOOL_ID &&
+            (isYesLike(localAnswers[EUDR_Q_FLEGT]) || isYesLike(localAnswers[EUDR_Q_CITES]))
+
         for (const q of processedForm.visibleQs) {
             if (!editModes[q.section_id]) continue;
+
+            // EUDR Section G override: when triggered, we only require geolocation uploads.
+            // - reliability select questions: prefilled to value "2" but still require file upload
+            // - all other questions in Section G: treated as N/A (ignored for save/required)
+            const isEudrSectionG = toolId === EUDR_TOOL_ID && q.section_id === EUDR_SECTION_G
+            const isReliabilitySelect = isEudrSectionG && triggerGeoOnly && hasReliabilitySelectConfig(q)
+            const isNaInSectionG = isEudrSectionG && triggerGeoOnly && !isReliabilitySelect
             
             // Ignoriamo le domande facoltative se configurate (estrazione sicura dal JSON config)
             const configObj = q.config as Record<string, unknown> | null;
@@ -157,7 +210,14 @@ export function SectionList({
 
             const val = localAnswers[q.id];
             const fileVal = localFiles[q.id];
-            const isAnswered = (val !== undefined && val !== null && val !== '') || (fileVal !== undefined && fileVal !== null);
+            if (isNaInSectionG) continue;
+
+            // If Section G is not editable (view mode) we must never block saving on it.
+            // When trigger is active, we also don't require uploads on the prefilled reliability selects;
+            // geolocation evidence is handled by the dedicated AOI flow / other questions.
+            const isAnswered = isReliabilitySelect
+                ? true
+                : (val !== undefined && val !== null && val !== '') || (fileVal !== undefined && fileVal !== null);
 
             const initialVal = initialAnswers[q.id];
             const initialFileVal = initialFiles[q.id];
@@ -172,6 +232,16 @@ export function SectionList({
                     idsToDelete.push(q.id);
                 }
             } else if (isValueChanged || isFileChanged || !userResponses?.some(r => r.question_id === q.id)) {
+                // For reliability selects in Section G: allow persisting the derived "2" value so it can be stored in DB.
+                // Only upsert when missing/empty to avoid overwriting real data.
+                if (isReliabilitySelect) {
+                    const existing = (userResponses || []).find((r) => r.question_id === q.id)
+                    const existingText = existing?.answer_text?.trim() ?? ""
+                    if (!existingText) {
+                        payloadToSave.push({ questionId: q.id, value: "2", inputType: "text" })
+                    }
+                    continue;
+                }
                 const isJson = typeof val === 'object' && val !== null;
                 payloadToSave.push({
                     questionId: q.id,
@@ -228,6 +298,14 @@ export function SectionList({
         const answeredCount = visibleQs.filter(q => {
             const val = localAnswers[q.id];
             const file = localFiles[q.id];
+            const triggerGeoOnly =
+                toolId === EUDR_TOOL_ID &&
+                (isYesLike(localAnswers[EUDR_Q_FLEGT]) || isYesLike(localAnswers[EUDR_Q_CITES]))
+            const isEudrSectionG = toolId === EUDR_TOOL_ID && q.section_id === EUDR_SECTION_G
+            const isReliabilitySelect = isEudrSectionG && triggerGeoOnly && hasReliabilitySelectConfig(q)
+            const isNaInSectionG = isEudrSectionG && triggerGeoOnly && !isReliabilitySelect
+            if (isNaInSectionG) return true
+            if (isReliabilitySelect) return true
             return (val !== undefined && val !== null && val !== '' && (!Array.isArray(val) || val.length > 0)) || (file !== undefined && file !== null);
         }).length;
         return { total: visibleQs.length, answered: answeredCount };
@@ -300,20 +378,52 @@ export function SectionList({
                                             ...question,
                                             config: question.config
                                         } as unknown as QuestionWithConfig;
+
+                                        const triggerGeoOnly =
+                                            toolId === EUDR_TOOL_ID &&
+                                            (isYesLike(localAnswers[EUDR_Q_FLEGT]) || isYesLike(localAnswers[EUDR_Q_CITES]))
+                                        const isEudrSectionG =
+                                            toolId === EUDR_TOOL_ID &&
+                                            section.id === EUDR_SECTION_G
+                                        const isReliabilitySelect =
+                                            isEudrSectionG && triggerGeoOnly && hasReliabilitySelectConfig(question)
+                                        const isNaInSectionG = isEudrSectionG && triggerGeoOnly && !isReliabilitySelect
+
+                                        const derivedValue = isReliabilitySelect ? ("2" as unknown as AnswerValue) : null
+                                        const effectiveValue = isReliabilitySelect
+                                            ? ((localAnswers[question.id] as AnswerValue) ?? derivedValue)
+                                            : ((localAnswers[question.id] as AnswerValue) ?? null)
                                         
                                         return (
-                                            <QuestionItem
-                                                key={question.id}
-                                                toolId={toolId}
-                                                sessionId={sessionId}
-                                                question={questionWithConfig} // 🛠️ Nessun errore qui ora
-                                                value={(localAnswers[question.id] as AnswerValue) ?? null} // 🛠️ Cast sicuro della risposta
-                                                filePath={localFiles[question.id] ?? null}
-                                                onAnswerChange={(val) => handleAnswerChange(question.id, val)}
-                                                onFileChange={(path) => handleFileChange(question.id, path)}
-                                                onExtraChange={(extra) => handleExtraDataChange(question.id, extra)}
-                                                readOnly={!editModes[section.id]}
-                                            />
+                                            <div key={question.id} className="space-y-0">
+                                                <QuestionItem
+                                                    toolId={toolId}
+                                                    sessionId={sessionId}
+                                                    question={questionWithConfig}
+                                                    value={isNaInSectionG ? null : effectiveValue}
+                                                    filePath={localFiles[question.id] ?? null}
+                                                    onAnswerChange={(val) => {
+                                                        if (isReliabilitySelect || isNaInSectionG) return
+                                                        handleAnswerChange(question.id, val)
+                                                    }}
+                                                    onFileChange={(path) => handleFileChange(question.id, path)}
+                                                    onExtraChange={(extra) => handleExtraDataChange(question.id, extra)}
+                                                    readOnly={!editModes[section.id]}
+                                                    inputReadOnly={isReliabilitySelect || isNaInSectionG || !editModes[section.id]}
+                                                    uploadReadOnly={isNaInSectionG || !editModes[section.id]}
+                                                    staticDisplayText={
+                                                        isNaInSectionG
+                                                            ? "Non applicabile (FLEGT/CITES: geolocalizzazione sufficiente)"
+                                                            : null
+                                                    }
+                                                />
+                                                {toolId === EUDR_TOOL_ID &&
+                                                    section.id === SECTION_E_PAES_EMBED_AFTER &&
+                                                    question.id === QUESTION_RISCHIO_PAESE_ID &&
+                                                    editModes[section.id] && (
+                                                        <EmbeddedDueDiligenceBlock sessionId={sessionId} />
+                                                    )}
+                                            </div>
                                         )
                                     })}
                                 </div>

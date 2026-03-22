@@ -45,7 +45,11 @@ export default async function MasterSectionPage({
     notificationsRes = await listNotificationsPaginated(EUDR_TOOL_ID, page, PAGE_SIZE)
   }
 
-  const error = usersRes?.error ?? speciesRes?.error ?? countriesRes?.error ?? notificationsRes?.error
+  const error =
+    usersRes?.error ??
+    speciesRes?.error ??
+    countriesRes?.error ??
+    notificationsRes?.error
   if (error) {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">

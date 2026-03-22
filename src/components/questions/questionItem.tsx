@@ -7,6 +7,9 @@ import { QuestionWithConfig, QuestionType } from "@/types/questions"
 import { DynamicInput, AnswerValue, RepeaterConfig } from "./dynamicInput"
 import { ResponseUploader } from "./FileUploader"
 
+const NOTE_QUESTION_ID = "c8d9e0f1-a2b3-4c4d-9e5f-6a7b8c9d0e92"
+export const SECTION_H_POINT5_NOTE_TEXT = "hello everyone"
+
 interface QuestionItemProps {
   question: QuestionWithConfig
   value: AnswerValue
@@ -17,6 +20,12 @@ interface QuestionItemProps {
   onFileChange: (path: string | null) => void
   onExtraChange?: (extraData: Record<string, unknown> | null) => void
   readOnly?: boolean
+  /** Optional: lock just the input (keep upload active) */
+  inputReadOnly?: boolean
+  /** Optional: lock just the uploader */
+  uploadReadOnly?: boolean
+  /** Optional: render a static display instead of DynamicInput */
+  staticDisplayText?: string | null
 }
 
 export function QuestionItem({
@@ -29,12 +38,25 @@ export function QuestionItem({
   onFileChange,
   onExtraChange,
   readOnly = false
+  ,
+  inputReadOnly,
+  uploadReadOnly,
+  staticDisplayText = null
 }: QuestionItemProps) {
 
-  const isAnswered = (value !== null && value !== undefined && value !== '' && (!Array.isArray(value) || value.length > 0)) || filePath !== null
+  const effectiveInputReadOnly = inputReadOnly ?? readOnly
+  const effectiveUploadReadOnly = uploadReadOnly ?? readOnly
+
+  const isAnswered =
+    (value !== null &&
+      value !== undefined &&
+      value !== "" &&
+      (!Array.isArray(value) || value.length > 0)) ||
+    filePath !== null
   
   // Cast sicuro al tipo RepeaterConfig che include le proprietà base di QuestionConfig
   const typedConfig = question.config as RepeaterConfig
+  const noteText = question.id === NOTE_QUESTION_ID ? SECTION_H_POINT5_NOTE_TEXT : null
 
   // ── REPEATER LAYOUT ──────────────────────────────────────
   if (question.type === 'repeater') {
@@ -60,18 +82,27 @@ export function QuestionItem({
           {typedConfig.placeholder && (
             <p className="text-sm text-[#7a5f2a]/60 max-w-xl">{typedConfig.placeholder}</p>
           )}
+          {noteText && (
+            <p className="text-sm text-slate-600 max-w-xl italic">{noteText}</p>
+          )}
         </div>
 
         <div className="w-full">
-          <DynamicInput
-            type={question.type as QuestionType | 'supplier_manager'}
-            config={typedConfig}
-            value={value}
-            onChange={onAnswerChange}
-            onExtraChange={onExtraChange}
-            readOnly={readOnly}
-            toolId={toolId}
-          />
+          {staticDisplayText ? (
+            <div className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+              {staticDisplayText}
+            </div>
+          ) : (
+            <DynamicInput
+              type={question.type as QuestionType | "supplier_manager"}
+              config={typedConfig}
+              value={value}
+              onChange={onAnswerChange}
+              onExtraChange={onExtraChange}
+              readOnly={effectiveInputReadOnly}
+              toolId={toolId}
+            />
+          )}
         </div>
 
       </div>
@@ -103,6 +134,9 @@ export function QuestionItem({
           {typedConfig.placeholder && (
             <p className="text-sm text-[#7a5f2a]/60 ml-9">{typedConfig.placeholder}</p>
           )}
+          {noteText && (
+            <p className="text-sm text-slate-600 ml-9 italic">{noteText}</p>
+          )}
         </div>
 
         {/* Input Manager Fornitore che ora può espandersi liberamente */}
@@ -119,7 +153,7 @@ export function QuestionItem({
         </div>
 
         {/* File upload (se abilitato per questa domanda) */}
-        {typedConfig.file_upload_enabled !== false && (
+        {typedConfig.file_upload_enabled !== false && !staticDisplayText && (
           <div className="flex justify-end border-t border-[#e8dcc8]/50 pt-4 mt-2">
             <div className="w-full md:w-1/3">
               <ResponseUploader
@@ -128,7 +162,7 @@ export function QuestionItem({
                 sessionId={sessionId}
                 questionId={question.id}
                 onUploadComplete={onFileChange}
-                readOnly={readOnly}
+                readOnly={effectiveUploadReadOnly}
               />
             </div>
           </div>
@@ -163,32 +197,41 @@ export function QuestionItem({
           {typedConfig.placeholder && (
             <p className="text-xs text-[#7a5f2a]/50 mt-1">{typedConfig.placeholder}</p>
           )}
+          {noteText && (
+            <p className="text-xs text-slate-600 mt-2 italic">{noteText}</p>
+          )}
         </div>
       </div>
 
       {/* Input (Colonna centrale/destra) */}
       <div className="md:col-span-5 flex items-start flex-col justify-center relative">
-        <DynamicInput
-          type={question.type as QuestionType | 'supplier_manager'}
-          config={typedConfig}
-          value={value}
-          onChange={onAnswerChange}
-          onExtraChange={onExtraChange}
-          readOnly={readOnly}
-          toolId={toolId}
-        />
+        {staticDisplayText ? (
+          <div className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+            {staticDisplayText}
+          </div>
+        ) : (
+          <DynamicInput
+            type={question.type as QuestionType | "supplier_manager"}
+            config={typedConfig}
+            value={value}
+            onChange={onAnswerChange}
+            onExtraChange={onExtraChange}
+            readOnly={effectiveInputReadOnly}
+            toolId={toolId}
+          />
+        )}
       </div>
 
       {/* File upload (Colonna più a destra) */}
       <div className="md:col-span-2 flex items-center justify-end md:justify-center border-t md:border-t-0 md:border-l border-[#e8dcc8]/50 pt-4 md:pt-0 pl-0 md:pl-4">
-        {typedConfig.file_upload_enabled !== false && (
+        {typedConfig.file_upload_enabled !== false && !staticDisplayText && (
           <ResponseUploader
             currentPath={filePath}
             toolId={toolId}
             sessionId={sessionId}
             questionId={question.id}
             onUploadComplete={onFileChange}
-            readOnly={readOnly}
+            readOnly={effectiveUploadReadOnly}
           />
         )}
       </div>

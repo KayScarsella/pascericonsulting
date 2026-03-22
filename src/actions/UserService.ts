@@ -73,8 +73,21 @@ export class UserService {
         role,
         created_at,
         profiles (
+          id,
           full_name,
-          avatar_url
+          avatar_url,
+          email,
+          ragione_sociale,
+          cf_partita_iva,
+          recapito_telefonico,
+          indirizzo,
+          citta,
+          provincia,
+          cap,
+          settore_merceologico,
+          attivita,
+          sito_internet,
+          username
         )
       `)
       .eq('tool_id', toolId)
@@ -92,7 +105,7 @@ export class UserService {
     toolId: string,
     page: number,
     limit: number
-  ): Promise<{ data: Awaited<ReturnType<this['getToolUsers']>>; totalCount: number }> {
+  ): Promise<{ data: Awaited<ReturnType<UserService["getToolUsers"]>>; totalCount: number }> {
     await this.verifyToolAdmin(toolId);
 
     const from = (page - 1) * limit;
@@ -106,8 +119,21 @@ export class UserService {
         role,
         created_at,
         profiles (
+          id,
           full_name,
-          avatar_url
+          avatar_url,
+          email,
+          ragione_sociale,
+          cf_partita_iva,
+          recapito_telefonico,
+          indirizzo,
+          citta,
+          provincia,
+          cap,
+          settore_merceologico,
+          attivita,
+          sito_internet,
+          username
         )
       `,
         { count: 'exact' }

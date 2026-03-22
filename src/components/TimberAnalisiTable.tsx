@@ -36,6 +36,7 @@ export interface AssessmentSessionRow {
   evaluation_code: number
   base_session_id: string
   base_evaluation_code: number
+  owner_name?: string | null
 }
 
 export interface TimberAnalisiTableProps {
@@ -204,6 +205,21 @@ export function TimberAnalisiTable({ data, page, totalPages, isAdmin }: TimberAn
         )
       },
     },
+    ...(isAdmin
+      ? ([
+          {
+            id: 'owner',
+            header: 'Proprietario',
+            render: (row: AssessmentSessionRow) => (
+              <span className="text-slate-700">
+                {row.owner_name ?? (
+                  <span className="text-slate-400 text-xs italic">—</span>
+                )}
+              </span>
+            ),
+          },
+        ] as DataManagementColumn<AssessmentSessionRow>[])
+      : []),
   ]
 
   const handlePageChange = (newPage: number) => {

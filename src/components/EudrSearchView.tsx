@@ -22,6 +22,7 @@ export type EudrVerificationRow = {
     block_reason?: string
     block_variant?: "success" | "warning" | "error"
   } | null
+  owner_name?: string | null
 }
 
 type VerificheSortField = "created_at" | "nomeCommerciale" | "stato"
@@ -147,6 +148,21 @@ export function EudrSearchView({
         </span>
       ),
     },
+    ...(isAdmin
+      ? ([
+          {
+            id: "owner",
+            header: "Proprietario",
+            render: (row: EudrVerificationRow) => (
+              <span className="text-slate-700">
+                {row.owner_name ?? (
+                  <span className="text-slate-400 text-xs italic">—</span>
+                )}
+              </span>
+            ),
+          },
+        ] as DataManagementColumn<EudrVerificationRow>[])
+      : []),
     {
       id: "stato",
       header: "Stato",

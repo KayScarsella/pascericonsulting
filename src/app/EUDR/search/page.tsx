@@ -57,9 +57,12 @@ export default async function EudrSearchPage({
   // ANALISI FINALI EUDR
   const analisiQuery = supabase
     .from("assessment_sessions")
-    .select("id, created_at, status, parent_session_id, final_outcome, metadata, evaluation_code", {
-      count: "exact",
-    })
+    .select(
+      "id, created_at, status, parent_session_id, final_outcome, metadata, evaluation_code, user_id, profiles ( full_name )",
+      {
+        count: "exact",
+      }
+    )
     .eq("tool_id", EUDR_TOOL_ID)
     .eq("session_type", "analisi_finale")
   if (!isAdmin) analisiQuery.eq("user_id", user.id)
@@ -111,6 +114,8 @@ export default async function EudrSearchPage({
       evaluation_code: row.evaluation_code || 0,
       base_session_id: baseId,
       base_evaluation_code: baseCode,
+      owner_name:
+        (row.profiles as { full_name?: string } | null)?.full_name ?? null,
     }
   })
 
@@ -120,7 +125,6 @@ export default async function EudrSearchPage({
     .select("id", { count: "exact", head: true })
     .eq("tool_id", EUDR_TOOL_ID)
     .eq("session_type", "verifica")
-
   if (!isAdmin) verifCountQuery.eq("user_id", user.id)
   const { count: verifCount } = await verifCountQuery
 
@@ -128,7 +132,9 @@ export default async function EudrSearchPage({
 
   const verifListQuery = supabase
     .from("assessment_sessions")
-    .select("id, created_at, status, final_outcome, metadata")
+    .select(
+      "id, created_at, status, final_outcome, metadata, user_id, profiles ( full_name )"
+    )
     .eq("tool_id", EUDR_TOOL_ID)
     .eq("session_type", "verifica")
 
@@ -142,13 +148,17 @@ export default async function EudrSearchPage({
     console.error("Errore durante il fetch delle verifiche EUDR:", verifError)
   }
 
-  const verificationRows: EudrVerificationRow[] = (verifData || []).map((row) => ({
-    id: row.id,
-    created_at: row.created_at || new Date().toISOString(),
-    status: row.status || "in_progress",
-    final_outcome: row.final_outcome,
-    metadata: (row.metadata as EudrVerificationRow["metadata"]) || null,
-  }))
+  const verificationRows: EudrVerificationRow[] = (verifData || []).map(
+    (row) => ({
+      id: row.id,
+      created_at: row.created_at || new Date().toISOString(),
+      status: row.status || "in_progress",
+      final_outcome: row.final_outcome,
+      metadata: (row.metadata as EudrVerificationRow["metadata"]) || null,
+      owner_name:
+        (row.profiles as { full_name?: string } | null)?.full_name ?? null,
+    })
+  )
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 py-8 px-4">

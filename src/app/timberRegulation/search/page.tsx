@@ -58,7 +58,10 @@ export default async function SearchPage({
   // 3a. FETCH ANALISI FINALI (paginated). Admin sees all; others only their own.
   const analisiQuery = supabase
     .from('assessment_sessions')
-    .select('id, created_at, status, parent_session_id, final_outcome, metadata, evaluation_code', { count: 'exact' })
+    .select(
+      'id, created_at, status, parent_session_id, final_outcome, metadata, evaluation_code, user_id, profiles ( full_name )',
+      { count: 'exact' }
+    )
     .eq('tool_id', TIMBER_TOOL_ID)
     .eq('session_type', 'analisi_finale')
   if (!isAdmin) analisiQuery.eq('user_id', user.id)
@@ -105,6 +108,8 @@ export default async function SearchPage({
       evaluation_code: row.evaluation_code || 0,
       base_session_id: baseId,
       base_evaluation_code: baseCode,
+      owner_name:
+        (row.profiles as { full_name?: string } | null)?.full_name ?? null,
     }
   })
 
@@ -121,7 +126,9 @@ export default async function SearchPage({
 
   const verifListQuery = supabase
     .from('assessment_sessions')
-    .select('id, created_at, evaluation_code, status, final_outcome, metadata')
+    .select(
+      'id, created_at, evaluation_code, status, final_outcome, metadata, user_id, profiles ( full_name )'
+    )
     .eq('tool_id', TIMBER_TOOL_ID)
     .eq('session_type', 'verifica')
   if (!isAdmin) verifListQuery.eq('user_id', user.id)
@@ -206,6 +213,9 @@ export default async function SearchPage({
         status: session.status || 'in_progress',
         final_outcome: session.final_outcome,
         isBlocked,
+        owner_name:
+          (session.profiles as { full_name?: string } | null)?.full_name ??
+          null,
         nomeCommerciale:
           nomeBySession.get(session.id) ?? (metadata?.nome_commerciale as string) ?? null,
       }

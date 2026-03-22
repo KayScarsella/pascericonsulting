@@ -5,7 +5,7 @@
  * - Affidabilità (1,2,3,4,44): same DATI_LEGALI mapping as timber risk-calculator.
  * - Conflitti / Segnalazioni / Sanzioni: si → 1, no → 0.30 (PHP).
  * - Passaggi proprietà / Non mescolamento: no → 1, si → 0.30 (PHP).
- * - Rischio paese: RB/RM/RA → low/medium/high numeric risk.
+ * - Rischio paese: RB/RS/RA → low/standard/high (RS = 0.30 per rischio_paese.csv). RM kept as legacy alias.
  *
  * overallRisk = max(all indices); ≤ 0.30 → accettabile + expiry +12 months.
  */
@@ -18,8 +18,14 @@ export { RISK_THRESHOLD }
 export type { RiskDetail, RiskCalculationResult }
 
 // ── QUESTION IDS (EUDR Valutazione Finale – final analysis) ─────────────
+// Sezioni list D/E — id domanda univoci da Supabase (non section_id).
 
-/** 2) Rischio paese – RB / RM / RA */
+/** 1) Paese di raccolta del legname — section 8e3c8459…, async_select country */
+const Q_PAESE_RACCOLTA = "d5e6f7a8-b9c0-4d1e-9f2a-3b4c5d6e7f54"
+/** Nome della specie — section 9c2f5b17…, async_select species */
+const Q_SPECIE = "ce302e2d-e894-4cc1-bc8b-9b580e163e7f"
+
+/** 2) Rischio paese – RB / RS / RA (aligned with country_risk enum) */
 const Q_RISCHIO_PAESE = "e8f9a0b1-c2d3-4e4f-8a9b-0c1d2e3f4a65"
 /** 6) Trasformazione foresta/piantagione ad uso agricolo post 31-12-2020 */
 const Q_TRASFORMAZIONE = "b0c1d2e3-f4a5-4b6c-8d7e-9f0a1b2c3d09"
@@ -55,6 +61,15 @@ const Q_PASSAGGI = "e9f0a1b2-c3d4-4e5f-8a9b-0c1d2e3f4a58"
 const Q_NON_MESCOLAMENTO = "b3c4d5e6-f7a8-4b9c-9d0e-1f2a3b4c5d69"
 /** 3) Sanzioni ONU/UE legno */
 const Q_SANZIONI = "d6e7f8a9-b0c1-4d2e-9f3a-4b5c6d7e8f70"
+
+/** EUDR prefill — id allineati all’export Supabase (stesso pattern Timber Q_COUNTRY / Q_SPECIES). */
+export const EUDR_COUNTRY_PREFILL_QUESTION_IDS = {
+  PAESE_RACCOLTA: Q_PAESE_RACCOLTA,
+  SPECIE: Q_SPECIE,
+  RISCHIO_PAESE: Q_RISCHIO_PAESE,
+  CONFLITTI: Q_CONFLITTI,
+  SANZIONI: Q_SANZIONI,
+} as const
 
 // ── LOOKUPS ─────────────────────────────────────────────────────────────
 
@@ -101,17 +116,20 @@ const NO_BAD_EUDR: Record<string, number> = {
   no: 1.0,
 }
 
-/** Rischio paese – RB basso, RM medio, RA alto (PHP used float from DB) */
+/** Rischio paese – RB/RS/RA from rischio_paese.csv (RB 0.10, RS 0.30, RA 1.00). RM legacy only. */
 const RISCHIO_PAESE_LOOKUP: Record<string, number> = {
   RB: 0.1,
-  RM: 0.55,
+  RS: 0.3,
   RA: 1.0,
+  /** Legacy: old question used "Rischio Medio" = RM; keep so existing rows still score until migrated */
+  RM: 0.55,
 }
 
 const LABELS_RISCHIO_PAESE: Record<string, string> = {
   RB: "Rischio Basso",
-  RM: "Rischio Medio",
+  RS: "Rischio Standard",
   RA: "Rischio Alto",
+  RM: "Rischio Medio",
 }
 
 // ── SCORED QUESTIONS (order = display / chart order) ────────────────────

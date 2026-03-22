@@ -70,7 +70,7 @@ export default async function RiskAnalysisPage({
 
       if (createError || !newSession) throw new Error("Errore durante la creazione di una nuova verifica.")
 
-      redirect(`?session_id=${newSession.id}`)
+      redirect(`/EUDR/risk-analysis?session_id=${newSession.id}`)
     }
 
     return (

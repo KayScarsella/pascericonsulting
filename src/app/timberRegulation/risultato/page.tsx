@@ -10,7 +10,7 @@ import Link from "next/link"
 import { calculateRisk, RiskCalculationResult, RISK_THRESHOLD, SCORED_QUESTIONS, getLabelForRaw } from "@/lib/risk-calculator"
 import { RiskBarChart } from "@/components/RiskBarChart"
 import { MitigationHistorySection } from "@/components/MitigationHistorySection"
-import { ExportAnalysisPdfButton } from "@/components/ExportAnalysisPdfButton"
+import { ExportAnalysisPdfButton, PDF_DISCLAIMERS } from "@/components/ExportAnalysisPdfButton"
 import { fetchDynamicOptions } from "@/actions/questions"
 import type { QuestionConfig } from "@/types/questions"
 
@@ -31,6 +31,14 @@ export default async function RisultatoPage({
 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
+
+  const { data: userProfile } = await supabase
+    .from('profiles')
+    .select(
+      'full_name,ragione_sociale,cf_partita_iva,indirizzo,cap,citta,provincia,recapito_telefonico,email'
+    )
+    .eq('id', user.id)
+    .single()
 
   const { role } = await getToolAccess(TIMBER_TOOL_ID)
   if (!role || role === 'standard') {
@@ -413,7 +421,10 @@ export default async function RisultatoPage({
       {/* PDF export: complete analysis with all questions */}
       <div className="flex flex-wrap items-center gap-3 mb-10">
         <ExportAnalysisPdfButton
+          variant="EUTR"
           nomeOperazione={nomeOperazione}
+          userProfile={userProfile}
+          disclaimerText={PDF_DISCLAIMERS.EUTR}
           outcome={result.outcome}
           outcomeDescription={result.outcomeDescription}
           specieName={specieName}

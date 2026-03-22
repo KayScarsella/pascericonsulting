@@ -47,3 +47,11 @@ export const getToolAccess = cache(async (toolId: string) => {
     userId: user.id
   }
 })
+
+/** Throws if user is not admin for the tool (for server actions that return { error } instead of redirect). */
+export async function requireToolAdmin(toolId: string): Promise<void> {
+  const { role } = await getToolAccess(toolId)
+  if (role !== 'admin') {
+    throw new Error('Non autorizzato: servono permessi admin')
+  }
+}

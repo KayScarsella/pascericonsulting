@@ -29,6 +29,7 @@ export interface EudrAssessmentSessionRow {
   evaluation_code: number
   base_session_id: string
   base_evaluation_code: number
+  owner_name?: string | null
 }
 
 export interface EudrAnalisiTableProps {
@@ -192,6 +193,21 @@ export function EudrAnalisiTable({ data, page, totalPages, isAdmin }: EudrAnalis
         )
       },
     },
+    ...(isAdmin
+      ? ([
+          {
+            id: "owner",
+            header: "Proprietario",
+            render: (row: EudrAssessmentSessionRow) => (
+              <span className="text-slate-700">
+                {row.owner_name ?? (
+                  <span className="text-slate-400 text-xs italic">—</span>
+                )}
+              </span>
+            ),
+          },
+        ] as DataManagementColumn<EudrAssessmentSessionRow>[])
+      : []),
   ]
 
   const handlePageChange = (newPage: number) => {

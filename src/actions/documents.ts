@@ -1,18 +1,11 @@
 'use server'
 
-import { createServerClient } from "@supabase/ssr"
-import { cookies } from "next/headers"
 import { getToolAccess } from "@/lib/tool-auth"
 import { revalidatePath } from "next/cache"
+import { createClient } from "@/utils/supabase/server"
 
-// Helper per Supabase Client
 async function getSupabase() {
-  const cookieStore = await cookies()
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } }
-  )
+  return createClient()
 }
 
 /**

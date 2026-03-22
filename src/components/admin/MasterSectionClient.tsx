@@ -34,6 +34,7 @@ import {
   deleteCountry,
   deleteCountriesBulk,
 } from '@/actions/master-data'
+import { updateProfileAdmin } from '@/actions/profiles-admin'
 import {
   createNotification,
   updateNotification,
@@ -49,6 +50,7 @@ import { Edit, Plus, Trash2, Loader2 } from 'lucide-react'
 type SpeciesRow = Database['public']['Tables']['species']['Row']
 type CountryRow = Database['public']['Tables']['country']['Row']
 type NotificationRow = Database['public']['Tables']['notifications']['Row']
+type ProfileRow = Database['public']['Tables']['profiles']['Row']
 
 export const MASTER_SECTIONS = ['users', 'species', 'countries', 'notifications'] as const
 export type MasterSection = (typeof MASTER_SECTIONS)[number]
@@ -114,6 +116,22 @@ export function MasterSectionClient({
   const [notifExpiresAt, setNotifExpiresAt] = useState('')
   const [notifActive, setNotifActive] = useState(true)
 
+  // profiles form state (admin, used from users section)
+  const [profileId, setProfileId] = useState<string | null>(null)
+  const [profileFullName, setProfileFullName] = useState('')
+  const [profileEmail, setProfileEmail] = useState('')
+  const [profileUsername, setProfileUsername] = useState('')
+  const [profileRagioneSociale, setProfileRagioneSociale] = useState('')
+  const [profileCfPiva, setProfileCfPiva] = useState('')
+  const [profileTelefono, setProfileTelefono] = useState('')
+  const [profileIndirizzo, setProfileIndirizzo] = useState('')
+  const [profileCitta, setProfileCitta] = useState('')
+  const [profileProvincia, setProfileProvincia] = useState('')
+  const [profileCap, setProfileCap] = useState('')
+  const [profileSettore, setProfileSettore] = useState('')
+  const [profileAttivita, setProfileAttivita] = useState('')
+  const [profileSito, setProfileSito] = useState('')
+
   if (section === 'users') {
     const data = usersData ?? []
     const handleRoleChange = async (
@@ -138,6 +156,73 @@ export function MasterSectionClient({
         router.refresh()
       } else toast.error(res.error)
     }
+    const openEditProfile = (row: ToolUserRow) => {
+      const profile = row.profiles as ProfileRow | null
+      if (!profile) return
+      setProfileId(profile.id)
+      setProfileFullName(profile.full_name ?? '')
+      setProfileEmail(profile.email ?? '')
+      setProfileUsername(profile.username ?? '')
+      setProfileRagioneSociale(profile.ragione_sociale ?? '')
+      setProfileCfPiva(profile.cf_partita_iva ?? '')
+      setProfileTelefono(profile.recapito_telefonico ?? '')
+      setProfileIndirizzo(profile.indirizzo ?? '')
+      setProfileCitta(profile.citta ?? '')
+      setProfileProvincia(profile.provincia ?? '')
+      setProfileCap(profile.cap ?? '')
+      setProfileSettore(profile.settore_merceologico ?? '')
+      setProfileAttivita(profile.attivita ?? '')
+      setProfileSito(profile.sito_internet ?? '')
+      setDialogOpen(true)
+    }
+
+    const resetProfileForm = () => {
+      setProfileId(null)
+      setProfileFullName('')
+      setProfileEmail('')
+      setProfileUsername('')
+      setProfileRagioneSociale('')
+      setProfileCfPiva('')
+      setProfileTelefono('')
+      setProfileIndirizzo('')
+      setProfileCitta('')
+      setProfileProvincia('')
+      setProfileCap('')
+      setProfileSettore('')
+      setProfileAttivita('')
+      setProfileSito('')
+    }
+
+    const handleProfileSubmit = async () => {
+      if (!profileId) return
+      setUpdating(profileId)
+      const res = await updateProfileAdmin(toolId, profileId, {
+        full_name: profileFullName.trim() || null,
+        email: profileEmail.trim() || null,
+        username: profileUsername.trim() || null,
+        ragione_sociale: profileRagioneSociale.trim() || null,
+        cf_partita_iva: profileCfPiva.trim() || null,
+        recapito_telefonico: profileTelefono.trim() || null,
+        indirizzo: profileIndirizzo.trim() || null,
+        citta: profileCitta.trim() || null,
+        provincia: profileProvincia.trim() || null,
+        cap: profileCap.trim() || null,
+        settore_merceologico: profileSettore.trim() || null,
+        attivita: profileAttivita.trim() || null,
+        sito_internet: profileSito.trim() || null,
+      })
+      setUpdating(null)
+
+      if (res.error) {
+        toast.error(res.error)
+        return
+      }
+      toast.success('Profilo aggiornato.')
+      setDialogOpen(false)
+      resetProfileForm()
+      router.refresh()
+    }
+
     const columns: DataManagementColumn<ToolUserRow>[] = [
       {
         id: 'name',
@@ -145,6 +230,35 @@ export function MasterSectionClient({
         render: (row) => (
           <span className="font-medium text-slate-900">
             {(row.profiles as { full_name?: string } | null)?.full_name ?? '—'}
+          </span>
+        ),
+      },
+      {
+        id: 'email',
+        header: 'Email',
+        render: (row) => (
+          <span className="text-slate-600">
+            {(row.profiles as { email?: string } | null)?.email ?? '—'}
+          </span>
+        ),
+      },
+      {
+        id: 'ragione_sociale',
+        header: 'Ragione sociale',
+        render: (row) => (
+          <span className="text-slate-600">
+            {(row.profiles as { ragione_sociale?: string } | null)
+              ?.ragione_sociale ?? '—'}
+          </span>
+        ),
+      },
+      {
+        id: 'recapito_telefonico',
+        header: 'Telefono',
+        render: (row) => (
+          <span className="text-slate-600 text-sm">
+            {(row.profiles as { recapito_telefonico?: string } | null)
+              ?.recapito_telefonico ?? '—'}
           </span>
         ),
       },
@@ -180,40 +294,191 @@ export function MasterSectionClient({
       },
     ]
     return (
-      <DataManagementTable<ToolUserRow>
-        title="Gestione Utenti"
-        data={data}
-        columns={columns}
-        getRowId={(row) => row.user_id}
-        searchPlaceholder="Cerca per nome..."
-        filterPredicate={(row, q) => {
-          const name = (
-            (row.profiles as { full_name?: string } | null)?.full_name ?? ''
-          ).toLowerCase()
-          return name.includes(q)
-        }}
-        emptyMessage="Nessun utente con accesso al tool."
-        resultCountLabel={`${data.length} utenti`}
-        pagination={paginationConfig}
-        renderRowActions={(row) => (
-          <div className="flex justify-end gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="text-red-600 hover:bg-red-50"
-              onClick={() => handleRemove(row.user_id)}
-              disabled={updating === row.user_id}
-              title="Rimuovi dal tool"
-            >
-              {updating === row.user_id ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Trash2 className="h-4 w-4" />
-              )}
-            </Button>
-          </div>
-        )}
-      />
+      <>
+        <DataManagementTable<ToolUserRow>
+          title="Gestione Utenti"
+          data={data}
+          columns={columns}
+          getRowId={(row) => row.user_id}
+          searchPlaceholder="Cerca per nome, email o ragione sociale..."
+          filterPredicate={(row, q) => {
+            const profile = row.profiles as ProfileRow | null
+            const name = (profile?.full_name ?? '').toLowerCase()
+            const email = (profile?.email ?? '').toLowerCase()
+            const rs = (profile?.ragione_sociale ?? '').toLowerCase()
+            const term = q.toLowerCase()
+            return (
+              name.includes(term) ||
+              email.includes(term) ||
+              rs.includes(term)
+            )
+          }}
+          emptyMessage="Nessun utente con accesso al tool."
+          resultCountLabel={`${data.length} utenti`}
+          pagination={paginationConfig}
+          renderRowActions={(row) => (
+            <div className="flex justify-end gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-slate-600 hover:bg-slate-100"
+                onClick={() => openEditProfile(row)}
+                title="Modifica profilo"
+              >
+                <Edit className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-red-600 hover:bg-red-50"
+                onClick={() => handleRemove(row.user_id)}
+                disabled={updating === row.user_id}
+                title="Rimuovi dal tool"
+              >
+                {updating === row.user_id ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+          )}
+        />
+
+        <Dialog
+          open={dialogOpen}
+          onOpenChange={(open) => {
+            setDialogOpen(open)
+            if (!open) resetProfileForm()
+          }}
+        >
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Modifica profilo utente</DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-4 py-4 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="profile-full-name">Nome</Label>
+                <Input
+                  id="profile-full-name"
+                  value={profileFullName}
+                  onChange={(e) => setProfileFullName(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="profile-email">Email</Label>
+                <Input
+                  id="profile-email"
+                  value={profileEmail}
+                  onChange={(e) => setProfileEmail(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="profile-username">Username</Label>
+                <Input
+                  id="profile-username"
+                  value={profileUsername}
+                  onChange={(e) => setProfileUsername(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="profile-ragione-sociale">Ragione sociale</Label>
+                <Input
+                  id="profile-ragione-sociale"
+                  value={profileRagioneSociale}
+                  onChange={(e) => setProfileRagioneSociale(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="profile-cf">CF / Partita IVA</Label>
+                <Input
+                  id="profile-cf"
+                  value={profileCfPiva}
+                  onChange={(e) => setProfileCfPiva(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="profile-tel">Telefono</Label>
+                <Input
+                  id="profile-tel"
+                  value={profileTelefono}
+                  onChange={(e) => setProfileTelefono(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2 sm:col-span-2">
+                <Label htmlFor="profile-indirizzo">Indirizzo</Label>
+                <Input
+                  id="profile-indirizzo"
+                  value={profileIndirizzo}
+                  onChange={(e) => setProfileIndirizzo(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="profile-citta">Città</Label>
+                <Input
+                  id="profile-citta"
+                  value={profileCitta}
+                  onChange={(e) => setProfileCitta(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="profile-provincia">Provincia</Label>
+                <Input
+                  id="profile-provincia"
+                  value={profileProvincia}
+                  onChange={(e) => setProfileProvincia(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="profile-cap">CAP</Label>
+                <Input
+                  id="profile-cap"
+                  value={profileCap}
+                  onChange={(e) => setProfileCap(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="profile-settore">Settore</Label>
+                <Input
+                  id="profile-settore"
+                  value={profileSettore}
+                  onChange={(e) => setProfileSettore(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="profile-attivita">Attività</Label>
+                <Input
+                  id="profile-attivita"
+                  value={profileAttivita}
+                  onChange={(e) => setProfileAttivita(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="profile-sito">Sito</Label>
+                <Input
+                  id="profile-sito"
+                  value={profileSito}
+                  onChange={(e) => setProfileSito(e.target.value)}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDialogOpen(false)}>
+                Annulla
+              </Button>
+              <Button onClick={handleProfileSubmit} disabled={!profileId || updating === profileId}>
+                {updating === profileId ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Salvataggio...
+                  </span>
+                ) : (
+                  'Salva'
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </>
     )
   }
 

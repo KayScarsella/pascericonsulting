@@ -23,6 +23,7 @@ export interface VerificationRow {
   status?: string | null
   final_outcome?: string | null
   isBlocked?: boolean
+  owner_name?: string | null
 }
 
 type VerificheSortField = "evaluation_code" | "created_at" | "nomeCommerciale" | "stato"
@@ -158,6 +159,21 @@ export function TimberSearchView({
         <span className="text-slate-500">{new Date(row.created_at).toLocaleDateString("it-IT")}</span>
       ),
     },
+    ...(isAdmin
+      ? ([
+          {
+            id: 'owner',
+            header: 'Proprietario',
+            render: (row: VerificationRow) => (
+              <span className="text-slate-700">
+                {row.owner_name ?? (
+                  <span className="text-slate-400 text-xs italic">—</span>
+                )}
+              </span>
+            ),
+          },
+        ] as DataManagementColumn<VerificationRow>[])
+      : []),
     {
       id: 'stato',
       header: 'Stato',
