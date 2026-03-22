@@ -1,67 +1,35 @@
-'use client'
-
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { toast } from 'sonner'
-
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardFooter, CardTitle } from "@/components/ui/card"
-import { signupAction } from '@/actions/auth'
+import Link from 'next/link'
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 
 export default function SignupPage() {
-  const router = useRouter()
-  const [loading, setLoading] = useState(false)
-
-  async function handleSignup(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    setLoading(true)
-
-    const formData = new FormData(e.currentTarget)
-    const result = await signupAction(formData)
-
-    if (result?.error) {
-      toast.error("Errore", { description: result.error })
-    } else {
-      toast.success("Account creato!", {
-        description: "Controlla la tua email (se richiesta) o accedi."
-      })
-      router.push('/login')
-    }
-    setLoading(false)
-  }
-
   return (
     <div className="flex h-screen w-full items-center justify-center bg-slate-50">
-      <Card className="w-full max-w-sm">
+      <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle className="text-2xl">Crea Account</CardTitle>
-          <CardDescription>Inserisci i tuoi dati per iniziare.</CardDescription>
+          <CardTitle className="text-2xl">Accesso su invito</CardTitle>
+          <CardDescription>
+            Non è possibile creare un account autonomamente. Un amministratore del tool deve invitarti
+            per email: riceverai un link per impostare la password e accedere.
+          </CardDescription>
         </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSignup} className="space-y-4">
-            <div className="grid gap-2">
-              <Label htmlFor="fullName">Nome Completo</Label>
-              <Input id="fullName" name="fullName" required />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" name="email" type="email" required />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="password">Password</Label>
-              <Input id="password" name="password" type="password" required />
-            </div>
-            <Button className="w-full" type="submit" disabled={loading}>
-              {loading ? "Registrazione..." : "Registrati"}
-            </Button>
-          </form>
+        <CardContent className="space-y-3 text-sm text-slate-600">
+          <p>
+            In alternativa, un admin può invitarti dal pannello gestione utenti del tool (richiede la
+            chiave di servizio configurata sul server).
+          </p>
+          <p className="text-xs text-slate-500">
+            In Supabase: Authentication → disattiva &quot;Allow new users to sign up&quot; e mantieni
+            attiva la conferma email.
+          </p>
         </CardContent>
-        <CardFooter>
-            <p className="text-xs text-center text-gray-500 w-full">
-                hai un account? <a href="/login" className="underline">Accedi</a>
-            </p>
+        <CardFooter className="flex flex-col gap-2">
+          <Button asChild className="w-full">
+            <Link href="/login">Vai al login</Link>
+          </Button>
+          <Button asChild variant="ghost" className="w-full">
+            <Link href="/">Torna alla home</Link>
+          </Button>
         </CardFooter>
       </Card>
     </div>

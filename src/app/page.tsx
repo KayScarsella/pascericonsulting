@@ -30,13 +30,13 @@ export default async function Home() {
              👋 Benvenuto, accedi per continuare.
         </div> */}
 
-        <div className="flex gap-4">
+        <div className="flex flex-col items-center gap-3">
           <Button asChild variant="default" size="lg">
             <Link href="/login">Accedi</Link>
           </Button>
-          <Button asChild variant="outline" size="lg">
-            <Link href="/signup">Registrati</Link>
-          </Button>
+          <p className="text-sm text-muted-foreground max-w-sm text-center">
+            L’accesso è su invito. Se non hai ancora un account, chiedi a un amministratore del tool.
+          </p>
         </div>
       </div>
     </div>

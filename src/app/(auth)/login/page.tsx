@@ -56,7 +56,7 @@ export default function LoginPage() {
         </CardContent>
         <CardFooter>
             <p className="text-xs text-center text-gray-500 w-full">
-                Non hai un account? <a href="/signup" className="underline">Registrati</a>
+                Accesso su invito — contatta un amministratore se ti serve un account.
             </p>
         </CardFooter>
       </Card>

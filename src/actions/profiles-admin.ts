@@ -25,7 +25,8 @@ export async function listProfilesPaginated(
 
     const { data, error, count } = await supabase
       .from('profiles')
-      .select('*', { count: 'exact' })
+      .select('*, tool_access!inner(tool_id)', { count: 'exact' })
+      .eq('tool_access.tool_id', toolId)
       .order('updated_at', { ascending: false, nullsFirst: false })
       .range(from, to)
 
@@ -47,7 +48,6 @@ export async function updateProfileAdmin(
     Pick<
       ProfileRow,
       | 'full_name'
-      | 'email'
       | 'username'
       | 'ragione_sociale'
       | 'cf_partita_iva'

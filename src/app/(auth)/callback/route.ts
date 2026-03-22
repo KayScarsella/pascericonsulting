@@ -2,11 +2,26 @@ import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 
+/** Only same-origin relative paths; blocks open redirects (e.g. //evil.com). */
+function safeNextPath(raw: string | null): string {
+  const fallback = "/landingPage"
+  if (raw == null || raw === "") return fallback
+  const decoded = decodeURIComponent(raw)
+  if (
+    !decoded.startsWith("/") ||
+    decoded.startsWith("//") ||
+    decoded.includes("\\") ||
+    decoded.includes("..")
+  ) {
+    return fallback
+  }
+  return decoded
+}
+
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get("code")
-  // if "next" is in search params, use it as the redirection URL
-  const next = searchParams.get("next") ?? "/"
+  const next = safeNextPath(searchParams.get("next"))
 
   if (code) {
     const cookieStore = await cookies()

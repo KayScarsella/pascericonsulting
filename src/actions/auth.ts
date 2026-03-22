@@ -2,7 +2,7 @@
 'use server'
 
 import { createServerClient } from "@supabase/ssr"
-import { cookies, headers } from "next/headers"
+import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 
 // ... (tua funzione createSupabaseServerClient esistente va bene) ...
@@ -48,33 +48,13 @@ export async function loginAction(formData: FormData) {
   redirect("/")
 }
 
-export async function signupAction(formData: FormData) {
-  const email = formData.get("email") as string
-  const password = formData.get("password") as string
-  const fullName = formData.get("fullName") as string
-
-  if (!email || !password) return { error: "Campi obbligatori" }
-
-  const supabase = await createSupabaseServerClient()
-  const origin = (await headers()).get("origin")
-
-  const { error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      emailRedirectTo: `${origin}/callback`,
-      // 2. Passa il nome ai metadata dell'utente
-      data: {
-        full_name: fullName,
-      }
-    },
-  })
-
-  if (error) {
-    return { error: error.message }
+export async function signupAction(_formData: FormData) {
+  // Registrazione solo su invito: usa invite dal pannello admin + SUPABASE_SERVICE_ROLE_KEY,
+  // e in Supabase Dashboard disattiva "Allow new users to sign up".
+  return {
+    error:
+      "La registrazione libera non è attiva. Ricevi un invito da un amministratore del tool e usa il link nell’email.",
   }
-
-  return { success: "Controlla la tua email per confermare la registrazione." }
 }
 
 export async function signOutAction() {

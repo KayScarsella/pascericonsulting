@@ -35,6 +35,7 @@ import {
   deleteCountriesBulk,
 } from '@/actions/master-data'
 import { updateProfileAdmin } from '@/actions/profiles-admin'
+import { inviteUserToToolAction } from '@/actions/invite'
 import {
   createNotification,
   updateNotification,
@@ -132,6 +133,11 @@ export function MasterSectionClient({
   const [profileAttivita, setProfileAttivita] = useState('')
   const [profileSito, setProfileSito] = useState('')
 
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteRole, setInviteRole] = useState<'standard' | 'premium'>('standard')
+  const [inviteLoading, setInviteLoading] = useState(false)
+
   if (section === 'users') {
     const data = usersData ?? []
     const handleRoleChange = async (
@@ -198,7 +204,6 @@ export function MasterSectionClient({
       setUpdating(profileId)
       const res = await updateProfileAdmin(toolId, profileId, {
         full_name: profileFullName.trim() || null,
-        email: profileEmail.trim() || null,
         username: profileUsername.trim() || null,
         ragione_sociale: profileRagioneSociale.trim() || null,
         cf_partita_iva: profileCfPiva.trim() || null,
@@ -293,8 +298,88 @@ export function MasterSectionClient({
         },
       },
     ]
+    const handleInvite = async () => {
+      const email = inviteEmail.trim()
+      if (!email) {
+        toast.error('Inserisci un indirizzo email.')
+        return
+      }
+      setInviteLoading(true)
+      const res = await inviteUserToToolAction(toolId, email, inviteRole)
+      setInviteLoading(false)
+      if (res.success) {
+        toast.success('Invito inviato.', {
+          description: 'L’utente riceverà un’email da Supabase per completare l’accesso.',
+        })
+        setInviteOpen(false)
+        setInviteEmail('')
+        setInviteRole('standard')
+        router.refresh()
+      } else {
+        toast.error(res.error ?? 'Invito non riuscito')
+      }
+    }
+
     return (
       <>
+        <div className="mb-4 flex justify-end">
+          <Button type="button" variant="outline" size="sm" onClick={() => setInviteOpen(true)}>
+            Invita utente per email
+          </Button>
+        </div>
+
+        <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Invita utente</DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-4 py-2">
+              <div className="grid gap-2">
+                <Label htmlFor="invite-email">Email</Label>
+                <Input
+                  id="invite-email"
+                  type="email"
+                  autoComplete="email"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  placeholder="nome@azienda.it"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>Ruolo iniziale</Label>
+                <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as 'standard' | 'premium')}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="standard">Standard</SelectItem>
+                    <SelectItem value="premium">Premium</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <p className="text-xs text-slate-500">
+                Serve <code className="rounded bg-slate-100 px-1">SUPABASE_SERVICE_ROLE_KEY</code> sul
+                server e <code className="rounded bg-slate-100 px-1">NEXT_PUBLIC_SITE_URL</code> con
+                l’URL dell’app (non *.supabase.co).
+              </p>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setInviteOpen(false)}>
+                Annulla
+              </Button>
+              <Button onClick={handleInvite} disabled={inviteLoading}>
+                {inviteLoading ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Invio...
+                  </span>
+                ) : (
+                  'Invia invito'
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <DataManagementTable<ToolUserRow>
           title="Gestione Utenti"
           data={data}
@@ -367,11 +452,8 @@ export function MasterSectionClient({
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="profile-email">Email</Label>
-                <Input
-                  id="profile-email"
-                  value={profileEmail}
-                  onChange={(e) => setProfileEmail(e.target.value)}
-                />
+                <Input id="profile-email" value={profileEmail} readOnly className="bg-slate-50 text-slate-600" />
+                <p className="text-xs text-slate-500">L’email non può essere modificata da admin.</p>
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="profile-username">Username</Label>
