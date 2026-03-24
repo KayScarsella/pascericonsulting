@@ -176,6 +176,9 @@ export function MasterSectionClient({
       }
     }
     const openEditProfile = (row: ToolUserRow) => {
+      // #region agent log
+      fetch('http://127.0.0.1:7443/ingest/e3f27f07-b7f1-4eb5-9645-5d724b3a3d9b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1c1df8'},body:JSON.stringify({sessionId:'1c1df8',runId:'pre-fix',hypothesisId:'H3',location:'src/components/admin/MasterSectionClient.tsx:openEditProfile',message:'Row profiles shape before edit dialog',data:{userId:row.user_id,profilesType:typeof row.profiles,profilesIsArray:Array.isArray(row.profiles),profilesIsNull:row.profiles===null,profilesHasOnboardingCompleted:typeof (row.profiles as { onboarding_completed?: unknown } | null)?.onboarding_completed !== 'undefined'},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       const profile = row.profiles as ProfileRow | null
       if (!profile) return
       setProfileId(profile.id)
