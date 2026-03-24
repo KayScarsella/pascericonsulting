@@ -4,6 +4,7 @@ import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 import { cache } from "react"
 import { Database } from "@/types/supabase"
+import { isOnboardingComplete } from "@/lib/onboarding"
 
 // Definiamo i ruoli possibili in ordine di "potere"
 export type ToolRole = 'admin' | 'premium' | 'standard'
@@ -27,6 +28,11 @@ export const getToolAccess = cache(async (toolId: string) => {
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) {
     redirect("/login")
+  }
+
+  const onboardingComplete = await isOnboardingComplete()
+  if (!onboardingComplete) {
+    redirect("/onboarding")
   }
 
   // 2. Verifica Ruolo nel DB

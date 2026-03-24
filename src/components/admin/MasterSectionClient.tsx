@@ -42,7 +42,11 @@ import {
   deleteNotification,
   deleteNotificationsBulk,
 } from '@/actions/notifications'
-import { updateUserRoleAction, removeUserFromToolAction } from '@/actions/users'
+import {
+  updateUserRoleAction,
+  deleteUserFromToolAction,
+  cleanupPendingOnboardingUsersAction,
+} from '@/actions/users'
 import type { ToolUserRow } from '@/actions/users'
 import type { Database } from '@/types/supabase'
 import { toast } from 'sonner'
@@ -137,6 +141,7 @@ export function MasterSectionClient({
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<'standard' | 'premium'>('standard')
   const [inviteLoading, setInviteLoading] = useState(false)
+  const [cleanupLoading, setCleanupLoading] = useState(false)
 
   if (section === 'users') {
     const data = usersData ?? []
@@ -152,15 +157,23 @@ export function MasterSectionClient({
         router.refresh()
       } else toast.error(res.error ?? 'Errore aggiornamento ruolo.')
     }
-    const handleRemove = async (userId: string) => {
-      if (!confirm('Rimuovere questo utente dal tool?')) return
-      setUpdating(userId)
-      const res = await removeUserFromToolAction(userId, toolId)
+    const handleDeleteUser = async (userId: string) => {
+      if (
+        !confirm(
+          'Eliminare utente dal tool? Se e\' associato solo a questo tool verra\' eliminato completamente (auth, profilo, accessi). Verranno anche rimosse analisi e file collegati.'
+        )
+      ) {
+        return
+      }
+      setUpdating(`delete-${userId}`)
+      const res = await deleteUserFromToolAction(userId, toolId)
       setUpdating(null)
       if (res.success) {
-        toast.success('Utente rimosso.')
+        toast.success('Utente eliminato correttamente.')
         router.refresh()
-      } else toast.error(res.error)
+      } else {
+        toast.error(res.error ?? 'Eliminazione account fallita.')
+      }
     }
     const openEditProfile = (row: ToolUserRow) => {
       const profile = row.profiles as ProfileRow | null
@@ -297,6 +310,25 @@ export function MasterSectionClient({
           )
         },
       },
+      {
+        id: 'onboarding_status',
+        header: 'Onboarding',
+        render: (row) => {
+          const profile = row.profiles as (ProfileRow & { onboarding_completed?: boolean }) | null
+          const done = Boolean(profile?.onboarding_completed)
+          return (
+            <span
+              className={
+                done
+                  ? 'rounded bg-green-100 px-2 py-1 text-xs font-medium text-green-700'
+                  : 'rounded bg-amber-100 px-2 py-1 text-xs font-medium text-amber-700'
+              }
+            >
+              {done ? 'Completato' : 'Da completare'}
+            </span>
+          )
+        },
+      },
     ]
     const handleInvite = async () => {
       const email = inviteEmail.trim()
@@ -322,7 +354,26 @@ export function MasterSectionClient({
 
     return (
       <>
-        <div className="mb-4 flex justify-end">
+        <div className="mb-4 flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              setCleanupLoading(true)
+              const res = await cleanupPendingOnboardingUsersAction(toolId, 7)
+              setCleanupLoading(false)
+              if (res.success) {
+                toast.success(`Cleanup completato: ${res.removed} account rimossi.`)
+                router.refresh()
+              } else {
+                toast.error(res.error ?? 'Cleanup fallito.')
+              }
+            }}
+            disabled={cleanupLoading}
+          >
+            {cleanupLoading ? 'Cleanup...' : 'Cleanup onboarding > 7 giorni'}
+          </Button>
           <Button type="button" variant="outline" size="sm" onClick={() => setInviteOpen(true)}>
             Invita utente per email
           </Button>
@@ -416,11 +467,11 @@ export function MasterSectionClient({
                 variant="ghost"
                 size="icon"
                 className="text-red-600 hover:bg-red-50"
-                onClick={() => handleRemove(row.user_id)}
-                disabled={updating === row.user_id}
-                title="Rimuovi dal tool"
+                onClick={() => handleDeleteUser(row.user_id)}
+                disabled={updating === `delete-${row.user_id}`}
+                title="Elimina utente"
               >
-                {updating === row.user_id ? (
+                {updating === `delete-${row.user_id}` ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <Trash2 className="h-4 w-4" />

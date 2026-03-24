@@ -82,7 +82,7 @@ export default async function EudrRisultatoPage({
 
   const { data: session } = await supabase
     .from("assessment_sessions")
-    .select("id, user_id, session_type, parent_session_id, metadata, status, final_outcome")
+    .select("id, user_id, session_type, parent_session_id, metadata, status, final_outcome, evaluation_code")
     .eq("id", sessionId)
     .single()
 
@@ -92,6 +92,15 @@ export default async function EudrRisultatoPage({
     return <div className="p-8 text-center text-red-600 font-bold">Accesso negato.</div>
 
   const metadata = session.metadata as Record<string, unknown> | null
+  let baseEvaluationCode = session.evaluation_code ?? null
+  if (session.parent_session_id) {
+    const { data: parentSession } = await supabase
+      .from("assessment_sessions")
+      .select("evaluation_code")
+      .eq("id", session.parent_session_id)
+      .single()
+    if (parentSession?.evaluation_code != null) baseEvaluationCode = parentSession.evaluation_code
+  }
   const nomeOperazione =
     (metadata?.nome_operazione as string) ||
     (metadata?.operation_name as string) ||
@@ -573,6 +582,7 @@ export default async function EudrRisultatoPage({
           details={result.details}
           sectionsForPdf={sectionsForPdf}
           sessionId={sessionId}
+          baseEvaluationCode={baseEvaluationCode}
           ddPdfPayload={ddPdfPayload}
         />
       </div>

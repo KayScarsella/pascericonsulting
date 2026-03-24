@@ -13,14 +13,11 @@ const DISCLAIMER_EUDR =
 
 const THRESHOLD = 0.30
 
-const OFFICE_BLUE: [number, number, number] = [47, 85, 151] // #2F5597
-const FOOTER_LOGO_W = 26
-const FOOTER_LOGO_H = 8
-const FOOTER_Y_PAD = 2
-
-function asQaRows(fields: Array<{ label: string; value: unknown }>): Array<[string, string]> {
-  return fields.map((f) => [f.label, (f.value ?? '').toString().trim() || '—'])
-}
+const TEMPLATE_TEAL: [number, number, number] = [0, 112, 192] // Office blue
+const TEMPLATE_YELLOW: [number, number, number] = [254, 222, 0] // #FEDE00 (Informazioni di contatto in DOCX)
+const HEADER_LOGO_W = 54
+const HEADER_LOGO_H = 16
+const TABLE_BODY_GRAY: [number, number, number] = [242, 242, 242]
 
 export interface SectionForPdf {
   sectionTitle: string
@@ -87,6 +84,7 @@ export interface ExportAnalysisPdfProps {
   details: RiskDetail[]
   sectionsForPdf: SectionForPdf[]
   sessionId: string
+  baseEvaluationCode?: number | null
   /** Opzionale: screening AOI — grafico a barre con colori blu/rosso come in app */
   ddPdfPayload?: DdPdfPayload | null
 }
@@ -126,6 +124,8 @@ function buildPdf(
     overallRisk,
     details,
     sectionsForPdf,
+    sessionId,
+    baseEvaluationCode,
     ddPdfPayload,
   } = props
 
@@ -142,6 +142,19 @@ function buildPdf(
       ? 'EUDR'
       : 'EUTR')
   const isEudrPdf = resolvedVariant === 'EUDR'
+  const formatValue = (value: unknown) => String(value ?? '').trim() || '—'
+  const addressLine = [
+    userProfile?.indirizzo,
+    [userProfile?.cap, userProfile?.citta].filter(Boolean).join(' '),
+    userProfile?.provincia ? `(${userProfile.provincia})` : '',
+  ]
+    .filter((p) => String(p || '').trim())
+    .join(', ')
+  const companyLabel = formatValue(userProfile?.ragione_sociale || userProfile?.full_name)
+  const analysisCode =
+    baseEvaluationCode != null && Number.isFinite(baseEvaluationCode)
+      ? String(baseEvaluationCode)
+      : sessionId.slice(0, 8).toUpperCase()
 
   /**
    * Normalizza spaziature “non semantiche” (tabs, doppi spazi, nbsp) che in PDF
@@ -192,203 +205,155 @@ function buildPdf(
       .replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, '')
   }
 
-  // 1. (Logo moved to footer per requirements)
-  y = 20
+  const drawSectionDivider = (title: string, titleSize = 16) => {
+    if (y > pageH - 30) {
+      doc.addPage()
+      y = margin
+    }
+    doc.setDrawColor(TEMPLATE_TEAL[0], TEMPLATE_TEAL[1], TEMPLATE_TEAL[2])
+    doc.setLineWidth(0.6)
+    doc.line(margin, y, pageW - margin, y)
+    y += 5
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(titleSize)
+    doc.setTextColor(TEMPLATE_TEAL[0], TEMPLATE_TEAL[1], TEMPLATE_TEAL[2])
+    doc.text(title, margin, y)
+    doc.setTextColor(0, 0, 0)
+    y += 5
+    doc.setDrawColor(210, 210, 210)
+    doc.setLineWidth(0.2)
+    doc.line(margin, y, pageW - margin, y)
+    y += 6
+  }
 
-  // 2. Initial summary (no disclaimer here) — title lowered
-  doc.setFontSize(22)
+  // 1. Titolo + barra superiore (fornitore a sx, logo a dx)
+  y = 18
+  const regulationLabel = resolvedVariant === 'EUDR' ? 'EUDR' : 'Timber'
+  doc.setFontSize(21)
   doc.setFont('helvetica', 'bold')
-  doc.text('Analisi Finale – Valutazione del Rischio', margin, y)
-  y += 8
-
-  doc.setFontSize(11)
-  doc.setFont('helvetica', 'normal')
-  doc.text(nomeOperazione, margin, y)
-  y += 10
-
-  doc.setFontSize(16)
-  doc.setFont('helvetica', 'bold')
-  doc.setTextColor(isAccettabile ? 74 : 185, isAccettabile ? 124 : 28, isAccettabile ? 46 : 28)
-  doc.text(
-    isAccettabile ? 'Rischio Accettabile' : 'Rischio Non Accettabile',
-    margin,
-    y
-  )
+  doc.setTextColor(TEMPLATE_TEAL[0], TEMPLATE_TEAL[1], TEMPLATE_TEAL[2])
+  doc.text(`Valutazione del Rischio ${regulationLabel}`, margin, y)
   doc.setTextColor(0, 0, 0)
-  y += 7
+  y += 5
 
+  const barTop = y
+  const barH = 24
+  doc.setFillColor(236, 246, 246)
+  doc.rect(margin, barTop, pageW - 2 * margin, barH, 'F')
+  doc.setDrawColor(210, 230, 230)
+  doc.rect(margin, barTop, pageW - 2 * margin, barH)
+
+  if (logoResult) {
+    const xLogo = pageW - margin - HEADER_LOGO_W - 2
+    try {
+      doc.addImage(logoResult.dataUrl, logoResult.format, xLogo, barTop + 4, HEADER_LOGO_W, HEADER_LOGO_H)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const supplierX = margin + 3
+  y = barTop + 6
   doc.setFontSize(10)
   doc.setFont('helvetica', 'normal')
-  const descLines = doc.splitTextToSize(outcomeDescription, pageW - 2 * margin)
-  doc.text(descLines, margin, y)
-  y += descLines.length * 5 + 6
+  doc.text(companyLabel, supplierX, y, { maxWidth: 120 })
+  y += 6.2
+  doc.text(formatValue(addressLine), supplierX, y, { maxWidth: 120 })
+  y += 6.2
+  doc.text(`${formatValue(userProfile?.recapito_telefonico)} · — · — · —`, supplierX, y, { maxWidth: 120 })
+  y = barTop + barH + 7
 
+  // Esito in evidenza prima della sintesi analisi
+  const nonAcceptableMessage =
+    'Esito non accettabile non è conforme alla normativa EUDR a causa di evidenza geospaziale di deforestazione. Sono necessarie verifiche e/o mitigazione.'
+  const outcomeDetailLines = !isAccettabile
+    ? doc.splitTextToSize(nonAcceptableMessage, pageW - 2 * margin - 10)
+    : []
+  const outcomeBoxH = !isAccettabile ? 16 + outcomeDetailLines.length * 4.2 : 18
+  const outcomeColor: [number, number, number] = isAccettabile ? [74, 124, 46] : [185, 28, 28]
+  const outcomeBg: [number, number, number] = isAccettabile ? [232, 245, 226] : [254, 242, 242]
+  doc.setFillColor(outcomeBg[0], outcomeBg[1], outcomeBg[2])
+  doc.roundedRect(margin, y, pageW - 2 * margin, outcomeBoxH, 2, 2, 'F')
+  doc.setDrawColor(outcomeColor[0], outcomeColor[1], outcomeColor[2])
+  doc.setLineWidth(0.4)
+  doc.line(margin + 2, y + 1.5, margin + 2, y + outcomeBoxH - 1.5)
+  doc.setFontSize(13)
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(10)
-  doc.text('Operazione:', margin, y)
+  doc.setTextColor(outcomeColor[0], outcomeColor[1], outcomeColor[2])
+  doc.text(isAccettabile ? 'Rischio Accettabile' : 'Rischio Non Accettabile', margin + 6, y + 7)
+  doc.setFontSize(9)
   doc.setFont('helvetica', 'normal')
-  doc.text(nomeOperazione, margin + 28, y)
-  y += 6
+  doc.text(`Indice massimo: ${overallRisk.toFixed(2)}`, margin + 6, y + 13)
+  if (!isAccettabile) {
+    doc.setFontSize(8.5)
+    doc.text(outcomeDetailLines, margin + 6, y + 17)
+  }
+  doc.setTextColor(0, 0, 0)
+  y += outcomeBoxH + 6
 
-  doc.setFont('helvetica', 'bold')
-  doc.text('Specie:', margin, y)
-  doc.setFont('helvetica', 'normal')
-  doc.text(specieName, margin + 28, y)
-  y += 6
+  // 2. Tabella riepilogo progetto con codice sessione base.
+  autoTable(doc, {
+    startY: y,
+    head: [['Sintesi richiesta', 'Valore']],
+    body: [
+      ['Codice analisi', analysisCode],
+      ['Operazione', nomeOperazione],
+      ['Specie', specieName],
+      ['Paese', countryName + (countryHasConflicts ? ' (Conflitti)' : '')],
+      ['Scadenza', expiryDate ? new Date(expiryDate).toLocaleDateString('it-IT') : '—'],
+      ['Rischio complessivo (MAX)', overallRisk.toFixed(2)],
+      ['Esito', isAccettabile ? 'Rischio Accettabile' : 'Rischio Non Accettabile'],
+    ],
+    margin: { left: margin, right: margin },
+    theme: 'grid',
+    headStyles: { fillColor: TEMPLATE_TEAL, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 11 },
+    bodyStyles: { fontSize: 10, fillColor: TABLE_BODY_GRAY },
+    columnStyles: {
+      0: { cellWidth: 70, fontStyle: 'bold' },
+      1: { cellWidth: pageW - 2 * margin - 70 },
+    },
+    pageBreak: 'auto',
+  })
+  const docWithTableHeader = doc as jsPDF & { lastAutoTable?: { finalY: number } }
+  y = (docWithTableHeader.lastAutoTable?.finalY ?? y) + 6
 
-  doc.setFont('helvetica', 'bold')
-  doc.text('Paese:', margin, y)
-  doc.setFont('helvetica', 'normal')
-  doc.text(
-    countryName + (countryHasConflicts ? ' (Conflitti)' : ''),
-    margin + 28,
-    y
-  )
-  y += 6
-
-  if (expiryDate) {
-    doc.setFont('helvetica', 'bold')
-    doc.text('Scadenza:', margin, y)
+  autoTable(doc, {
+    startY: y,
+    head: [['Dati utente', 'Valore']],
+    body: [
+      ['Ragione sociale / Nome', companyLabel],
+      ['CF / P.IVA', formatValue(userProfile?.cf_partita_iva)],
+      ['Indirizzo', formatValue(addressLine)],
+      ['Telefono', formatValue(userProfile?.recapito_telefonico)],
+      ['Email', formatValue(userProfile?.email)],
+    ],
+    margin: { left: margin, right: margin },
+    theme: 'grid',
+    headStyles: { fillColor: TEMPLATE_TEAL, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 11 },
+    bodyStyles: { fontSize: 10, fillColor: TABLE_BODY_GRAY },
+    columnStyles: {
+      0: { cellWidth: 70, fontStyle: 'bold' },
+      1: { cellWidth: pageW - 2 * margin - 70 },
+    },
+    pageBreak: 'auto',
+  })
+  y = (docWithTableHeader.lastAutoTable?.finalY ?? y) + 6
+  if (isAccettabile) {
+    doc.setFontSize(10)
     doc.setFont('helvetica', 'normal')
-    doc.text(
-      new Date(expiryDate).toLocaleDateString('it-IT'),
-      margin + 28,
-      y
-    )
-    y += 6
+    const descLines = doc.splitTextToSize(outcomeDescription, pageW - 2 * margin)
+    doc.text(descLines, margin, y)
+    y += descLines.length * 5 + 8
+  } else {
+    y += 2
   }
+  drawSectionDivider('Risposte del questionario')
 
-  doc.setFont('helvetica', 'bold')
-  doc.text('Rischio complessivo (MAX):', margin, y)
-  doc.setFont('helvetica', 'normal')
-  doc.text(overallRisk.toFixed(2), margin + 55, y)
-  y += 12
-
-  // 2b. "Dati utente" section (supplier-like: fixed fields with — when missing)
-  if (userProfile) {
-    const addressParts = [
-      userProfile.indirizzo,
-      [userProfile.cap, userProfile.citta].filter(Boolean).join(' '),
-      userProfile.provincia ? `(${userProfile.provincia})` : '',
-    ]
-      .filter((p) => String(p || '').trim())
-      .join(', ')
-
-    const qaRows = asQaRows([
-      { label: 'Nome', value: userProfile.full_name },
-      { label: 'Ragione sociale', value: userProfile.ragione_sociale },
-      { label: 'CF / P.IVA', value: userProfile.cf_partita_iva },
-      { label: 'Email', value: userProfile.email },
-      { label: 'Telefono', value: userProfile.recapito_telefonico },
-      { label: 'Indirizzo', value: addressParts },
-    ])
-
-    if (y > 240) {
-      doc.addPage()
-      y = margin
-    }
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(13)
-    doc.text('Dati utente', margin, y)
-    y += 11
-
-    autoTable(doc, {
-      startY: y,
-      head: [['Domanda', 'Risposta']],
-      body: qaRows,
-      margin: { left: margin, right: margin },
-      theme: 'grid',
-      headStyles: { fillColor: OFFICE_BLUE, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 11 },
-      bodyStyles: { fontSize: 10 },
-      columnStyles: {
-        0: { cellWidth: 95 },
-        1: { cellWidth: pageW - 2 * margin - 95 },
-      },
-      pageBreak: 'auto',
-    })
-    const docWithTable = doc as jsPDF & { lastAutoTable?: { finalY: number } }
-    y = (docWithTable.lastAutoTable?.finalY ?? y) + 10
-  }
-
-  // 3. Risk chart (horizontal bars in portrait)
-  if (details.length > 0) {
-    if (y > 240) {
-      doc.addPage()
-      y = margin
-    }
-
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(12)
-    doc.text('Grafico dei Rischi', margin, y)
-    y += 6
-
-    const labelW = 62
-    const valueW = 14
-    const barX = margin + labelW + 2
-    const barW = pageW - margin - barX - valueW
-    const barH = 4
-    const rowGap = 2.5
-    const maxRowsPerPage = Math.floor((pageH - margin - y - 20) / (barH + rowGap))
-
-    const getBarColor = (risk: number) => {
-      if (risk <= 0.30) return [74, 124, 46] as const
-      if (risk <= 0.60) return [217, 119, 6] as const
-      return [220, 38, 38] as const
-    }
-
-    let rowY = y
-    let rowIndex = 0
-    for (const d of details) {
-      if (rowIndex > 0 && rowIndex % Math.max(1, maxRowsPerPage) === 0) {
-        doc.addPage()
-        rowY = margin
-        doc.setFont('helvetica', 'bold')
-        doc.setFontSize(12)
-        doc.text('Grafico dei Rischi (continua)', margin, rowY)
-        rowY += 6
-      }
-
-      const label = d.shortLabel || d.label
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(8)
-      const labelTxt = doc.splitTextToSize(label, labelW)
-      doc.text(labelTxt, margin, rowY + 3)
-
-      // background
-      doc.setFillColor(245, 245, 245)
-      doc.rect(barX, rowY, barW, barH, 'F')
-
-      // threshold marker at 0.30
-      const tX = barX + barW * THRESHOLD
-      doc.setDrawColor(150, 118, 53)
-      doc.setLineWidth(0.4)
-      doc.line(tX, rowY - 0.6, tX, rowY + barH + 0.6)
-      doc.setLineWidth(0.2)
-      doc.setDrawColor(0, 0, 0)
-
-      // actual bar
-      const w = Math.max(0, Math.min(1, d.riskIndex)) * barW
-      const [r, g, b] = getBarColor(d.riskIndex)
-      doc.setFillColor(r, g, b)
-      doc.rect(barX, rowY, w, barH, 'F')
-
-      // value
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(8)
-      doc.text(d.riskIndex.toFixed(2), barX + barW + 2, rowY + 3.3)
-
-      rowY += barH + rowGap + (labelTxt.length > 1 ? (labelTxt.length - 1) * 3.2 : 0)
-      rowIndex++
-    }
-
-    y = rowY + 10
-  }
-
-  // 4. Q/A report (tables) — portrait pages, no per-page banner (optional header only on first page)
-  const reportTitle = 'Report analisi (Domande e risposte)'
+  // 4. Report di dettaglio (tabelle)
+  const reportTitle = 'Report analisi (dettaglio risposte)'
   const drawReportHeaderOnce = () => {
     const headerH = 10
-    doc.setFillColor(OFFICE_BLUE[0], OFFICE_BLUE[1], OFFICE_BLUE[2])
+    doc.setFillColor(TEMPLATE_TEAL[0], TEMPLATE_TEAL[1], TEMPLATE_TEAL[2])
     doc.rect(margin, y, pageW - 2 * margin, headerH, 'F')
     doc.setTextColor(255, 255, 255)
     doc.setFont('helvetica', 'bold')
@@ -398,7 +363,22 @@ function buildPdf(
     y += headerH + 8
   }
 
-  if (sectionsForPdf.length > 0) {
+  const sectionsForPdfMerged: SectionForPdf[] = [...sectionsForPdf]
+  if (sectionsForPdfMerged.length >= 2) {
+    const firstTitle = normalizePdfText(sectionsForPdfMerged[0].sectionTitle).toUpperCase()
+    const secondTitle = normalizePdfText(sectionsForPdfMerged[1].sectionTitle).toUpperCase()
+    const firstIsA = firstTitle.startsWith('A)') || firstTitle.startsWith('A.')
+    const secondIsB = secondTitle.startsWith('B)') || secondTitle.startsWith('B.')
+    if (firstIsA && secondIsB) {
+      const mergedFirst: SectionForPdf = {
+        sectionTitle: 'A) INFORMAZIONI PRELIMINARI',
+        questions: [...sectionsForPdfMerged[0].questions, ...sectionsForPdfMerged[1].questions],
+      }
+      sectionsForPdfMerged.splice(0, 2, mergedFirst)
+    }
+  }
+
+  if (sectionsForPdfMerged.length > 0) {
     if (y > 230) {
       doc.addPage()
       y = margin
@@ -407,7 +387,7 @@ function buildPdf(
   }
 
   const docWithTable = doc as jsPDF & { lastAutoTable?: { finalY: number } }
-  for (const section of sectionsForPdf) {
+  for (const section of sectionsForPdfMerged) {
     if (y > 260) {
       doc.addPage()
       y = margin
@@ -469,12 +449,12 @@ function buildPdf(
       margin: { left: margin, right: margin },
       theme: 'grid',
       headStyles: {
-        fillColor: OFFICE_BLUE,
+        fillColor: TEMPLATE_TEAL,
         textColor: [255, 255, 255],
         fontStyle: 'bold',
         fontSize: 11,
       },
-      bodyStyles: { fontSize: 10 },
+      bodyStyles: { fontSize: 10, fillColor: TABLE_BODY_GRAY },
       columnStyles: {
         0: { cellWidth: 95 },
         1: { cellWidth: pageW - 2 * margin - 95 },
@@ -484,66 +464,160 @@ function buildPdf(
     y = (docWithTable.lastAutoTable?.finalY ?? y) + 8
   }
 
+  drawSectionDivider('Grafico dei rischi', 13)
+  // Risk chart after questionnaire responses
+  if (details.length > 0) {
+    if (y > 240) {
+      doc.addPage()
+      y = margin
+    }
+
+    const labelW = 62
+    const valueW = 14
+    const barX = margin + labelW + 2
+    const barW = pageW - margin - barX - valueW
+    const barH = 4
+    const rowGap = 2.5
+
+    // Guida visiva rapida per lettura intuitiva del grafico
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8)
+    doc.setFillColor(245, 245, 245)
+    doc.rect(barX, y - 1.2, barW, 1.4, 'F')
+    const tXLegend = barX + barW * THRESHOLD
+    doc.setDrawColor(TEMPLATE_YELLOW[0], TEMPLATE_YELLOW[1], TEMPLATE_YELLOW[2])
+    doc.setLineWidth(0.4)
+    doc.line(tXLegend, y - 2.2, tXLegend, y + 1.8)
+    doc.setDrawColor(0, 0, 0)
+    doc.setLineWidth(0.2)
+    doc.setFontSize(7.5)
+    doc.text('Soglia 0.30', tXLegend + 1.5, y + 1.2)
+    y += 5
+
+    const getBarColor = (risk: number) => {
+      if (risk <= 0.30) return [74, 124, 46] as const
+      if (risk <= 0.60) return [217, 119, 6] as const
+      return [220, 38, 38] as const
+    }
+
+    let rowY = y
+    for (const d of details) {
+      const label = d.shortLabel || d.label
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(8)
+      const labelTxt = doc.splitTextToSize(label, labelW)
+      const rowH = barH + rowGap + (labelTxt.length > 1 ? (labelTxt.length - 1) * 3.2 : 0)
+      if (rowY + rowH > pageH - margin - 6) {
+        doc.addPage()
+        rowY = margin
+      }
+      doc.text(labelTxt, margin, rowY + 3)
+
+      doc.setFillColor(245, 245, 245)
+      doc.rect(barX, rowY, barW, barH, 'F')
+
+      const tX = barX + barW * THRESHOLD
+      doc.setDrawColor(TEMPLATE_YELLOW[0], TEMPLATE_YELLOW[1], TEMPLATE_YELLOW[2])
+      doc.setLineWidth(0.4)
+      doc.line(tX, rowY - 0.6, tX, rowY + barH + 0.6)
+      doc.setLineWidth(0.2)
+      doc.setDrawColor(0, 0, 0)
+
+      const w = Math.max(0, Math.min(1, d.riskIndex)) * barW
+      const [r, g, b] = getBarColor(d.riskIndex)
+      doc.setFillColor(r, g, b)
+      doc.rect(barX, rowY, w, barH, 'F')
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(8)
+      doc.text(d.riskIndex.toFixed(2), barX + barW + 2, rowY + 3.3)
+
+      rowY += rowH
+    }
+
+    y = rowY + 10
+  }
+
   // 5. Screening AOI — subito prima del disclaimer:
   // includi sempre la sezione se il run AOI è stato salvato su storage.
   // La presenza/assenza di loss post-2020 può rendere la histogram vuota (o tutti zeri),
   // ma il report (legenda + note) deve comunque comparire.
-  if (ddPdfPayload) {
+  if (ddPdfPayload || isEudrPdf) {
     doc.addPage()
     y = margin
+    drawSectionDivider('Allegato due diligence geospaziale')
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(14)
-    doc.text('Due diligence geospaziale (AOI) — allegato', margin, y)
-    y += 8
+    y += 4
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(9)
 
-    // Summary line + gate outcome
-    const gateActive = Boolean(ddPdfPayload.gate_triggers_non_accettabile)
-    const aoiSummaryRows: Array<[string, string]> = [
-      ['Data di taglio', normalizePdfText(`${ddPdfPayload.cutting_date_iso} (anno ${ddPdfPayload.cutting_year})`)],
-      ['Esito gate AOI', normalizePdfText(gateActive ? 'NON ACCETTABILE' : 'nessun gate attivato')],
-    ]
-    autoTable(doc, {
-      startY: y,
-      head: [['Sintesi', 'Valore']],
-      body: aoiSummaryRows,
-      margin: { left: margin, right: margin },
-      theme: 'grid',
-      headStyles: { fillColor: OFFICE_BLUE, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
-      bodyStyles: { fontSize: 9 },
-      columnStyles: {
-        0: { cellWidth: 50 },
-        1: { cellWidth: pageW - 2 * margin - 50 },
-      },
-      pageBreak: 'auto',
-    })
-    y = (docWithTable.lastAutoTable?.finalY ?? y) + 6
+    if (!ddPdfPayload) {
+      autoTable(doc, {
+        startY: y,
+        head: [['Stato allegato AOI']],
+        body: [[
+          'Dati AOI non disponibili per questa analisi (run non presente o artefatti non caricati).',
+        ]],
+        margin: { left: margin, right: margin },
+        theme: 'grid',
+        headStyles: { fillColor: TEMPLATE_TEAL, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
+        bodyStyles: { fontSize: 9, fillColor: TABLE_BODY_GRAY },
+        columnStyles: { 0: { cellWidth: pageW - 2 * margin } },
+        pageBreak: 'auto',
+      })
+      y = (docWithTable.lastAutoTable?.finalY ?? y) + 10
+    }
 
-    // KPI table
-    const kpiRows: Array<[string, string]> = [
-      ['AOI (ha)', ddPdfPayload.aoi_area_ha != null ? ddPdfPayload.aoi_area_ha.toFixed(2) : '—'],
-      ['Pixel loss Hansen (tot)', ddPdfPayload.loss_pixel_count != null ? String(ddPdfPayload.loss_pixel_count) : '—'],
-      ['Anno taglio', String(ddPdfPayload.cutting_year || '—')],
-    ]
-    autoTable(doc, {
-      startY: y,
-      head: [['Parametro', 'Valore']],
-      body: kpiRows,
-      margin: { left: margin, right: margin },
-      theme: 'grid',
-      headStyles: { fillColor: OFFICE_BLUE, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
-      bodyStyles: { fontSize: 9 },
-      columnStyles: {
-        0: { cellWidth: 70 },
-        1: { cellWidth: pageW - 2 * margin - 70 },
-      },
-      pageBreak: 'auto',
-    })
-    y = (docWithTable.lastAutoTable?.finalY ?? y) + 6
+    if (ddPdfPayload) {
+      // Summary line + gate outcome
+      const gateActive = Boolean(ddPdfPayload.gate_triggers_non_accettabile)
 
-    // Immagine mappa (screenshot canvas se cattura non tainted)
+      const aoiSummaryRows: Array<[string, string]> = [
+        ['Data di taglio', normalizePdfText(`${ddPdfPayload.cutting_date_iso} (anno ${ddPdfPayload.cutting_year})`)],
+        ['Esito gate AOI', normalizePdfText(gateActive ? 'NON ACCETTABILE' : 'nessun gate attivato')],
+      ]
+      autoTable(doc, {
+        startY: y,
+        head: [['Sintesi', 'Valore']],
+        body: aoiSummaryRows,
+        margin: { left: margin, right: margin },
+        theme: 'grid',
+        headStyles: { fillColor: TEMPLATE_TEAL, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
+        bodyStyles: { fontSize: 9, fillColor: TABLE_BODY_GRAY },
+        columnStyles: {
+          0: { cellWidth: 50 },
+          1: { cellWidth: pageW - 2 * margin - 50 },
+        },
+        pageBreak: 'auto',
+      })
+      y = (docWithTable.lastAutoTable?.finalY ?? y) + 6
+
+      // KPI table
+      const kpiRows: Array<[string, string]> = [
+        ['AOI (ha)', ddPdfPayload.aoi_area_ha != null ? ddPdfPayload.aoi_area_ha.toFixed(2) : '—'],
+        ['Pixel loss Hansen (tot)', ddPdfPayload.loss_pixel_count != null ? String(ddPdfPayload.loss_pixel_count) : '—'],
+        ['Anno taglio', String(ddPdfPayload.cutting_year || '—')],
+      ]
+      autoTable(doc, {
+        startY: y,
+        head: [['Parametro', 'Valore']],
+        body: kpiRows,
+        margin: { left: margin, right: margin },
+        theme: 'grid',
+        headStyles: { fillColor: TEMPLATE_TEAL, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
+        bodyStyles: { fontSize: 9, fillColor: TABLE_BODY_GRAY },
+        columnStyles: {
+          0: { cellWidth: 70 },
+          1: { cellWidth: pageW - 2 * margin - 70 },
+        },
+        pageBreak: 'auto',
+      })
+      y = (docWithTable.lastAutoTable?.finalY ?? y) + 6
+
+    // Immagine mappa in sezione dedicata
     if (ddPdfPayload.dd_snapshot_image_data_url) {
+      drawSectionDivider('Foto mappa AOI salvata')
       try {
         const imgW = pageW - 2 * margin
         const imgH = 85
@@ -586,8 +660,8 @@ function buildPdf(
       body: legendLines.map((l) => [normalizePdfText(l)]),
       margin: { left: margin, right: margin },
       theme: 'grid',
-      headStyles: { fillColor: OFFICE_BLUE, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
-      bodyStyles: { fontSize: 8 },
+      headStyles: { fillColor: TEMPLATE_TEAL, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
+      bodyStyles: { fontSize: 8, fillColor: TABLE_BODY_GRAY },
       columnStyles: { 0: { cellWidth: pageW - 2 * margin } },
       pageBreak: 'auto',
     })
@@ -602,35 +676,43 @@ function buildPdf(
         margin: { left: margin, right: margin },
         theme: 'grid',
         headStyles: { fillColor: [180, 30, 30], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
-        bodyStyles: { fontSize: 8 },
+        bodyStyles: { fontSize: 8, fillColor: TABLE_BODY_GRAY },
         columnStyles: { 0: { cellWidth: pageW - 2 * margin } },
         pageBreak: 'auto',
       })
       y = (docWithTable.lastAutoTable?.finalY ?? y) + 6
     }
 
-    // Narrative blocks (grouped bullets)
-    if (ddPdfPayload.ui_blocks?.length) {
-      const rows = ddPdfPayload.ui_blocks.map((b) => [
-        normalizePdfText(b.heading || ''),
-        normalizePdfText(b.body),
-      ])
-      autoTable(doc, {
-        startY: y,
-        head: [['Dettagli e note operative', '']],
-        body: rows,
-        margin: { left: margin, right: margin },
-        theme: 'grid',
-        headStyles: { fillColor: OFFICE_BLUE, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
-        bodyStyles: { fontSize: 8 },
-        columnStyles: {
-          0: { cellWidth: 55, fontStyle: 'bold' },
-          1: { cellWidth: pageW - 2 * margin - 55 },
-        },
-        pageBreak: 'auto',
-      })
-      y = (docWithTable.lastAutoTable?.finalY ?? y) + 6
-    }
+    // Dettagli e note operative (tabella grigia stile office)
+    const detailRowsFromPayload: Array<[string, string]> =
+      ddPdfPayload.ui_blocks?.map(
+        (b): [string, string] => [normalizePdfText(b.heading || 'Dettaglio'), normalizePdfText(b.body)]
+      ) ?? []
+    const detailRows: Array<[string, string]> =
+      detailRowsFromPayload.length > 0
+        ? detailRowsFromPayload
+        : [
+            ['Logica screening', gateActive ? 'Gate AOI attivato (esito non accettabile).' : 'Nessun gate AOI attivato.'],
+            [
+              'Risultato numerico',
+              `Pixel Hansen con loss ~ ${ddPdfPayload.loss_pixel_count ?? '—'} · AOI ~ ${ddPdfPayload.aoi_area_ha?.toFixed(2) ?? '—'} ha`,
+            ],
+          ]
+    autoTable(doc, {
+      startY: y,
+      head: [['Dettagli e note operative', '']],
+      body: detailRows,
+      margin: { left: margin, right: margin },
+      theme: 'grid',
+      headStyles: { fillColor: TEMPLATE_TEAL, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
+      bodyStyles: { fontSize: 8, fillColor: TABLE_BODY_GRAY },
+      columnStyles: {
+        0: { cellWidth: 55, fontStyle: 'bold' },
+        1: { cellWidth: pageW - 2 * margin - 55 },
+      },
+      pageBreak: 'auto',
+    })
+    y = (docWithTable.lastAutoTable?.finalY ?? y) + 6
 
     // Istogramma a barre (stessi colori)
     const bandToYear = (band: number) => (band >= 1 && band <= 99 ? 2000 + band : band)
@@ -672,28 +754,56 @@ function buildPdf(
         body: ddPdfPayload.advisory_notes.map((n) => [normalizePdfText(n)]),
         margin: { left: margin, right: margin },
         theme: 'grid',
-        headStyles: { fillColor: OFFICE_BLUE, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
-        bodyStyles: { fontSize: 8 },
+        headStyles: { fillColor: TEMPLATE_TEAL, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
+        bodyStyles: { fontSize: 8, fillColor: TABLE_BODY_GRAY },
         columnStyles: { 0: { cellWidth: pageW - 2 * margin } },
         pageBreak: 'auto',
       })
       y = (docWithTable.lastAutoTable?.finalY ?? y) + 6
     }
-    const bullets = ddPdfPayload.methodology_bullets?.length
-      ? ddPdfPayload.methodology_bullets
-      : [ddPdfPayload.sources_limits]
-    autoTable(doc, {
-      startY: y,
-      head: [['Fonti dati e limiti']],
-      body: bullets.map((b) => [normalizePdfText(b)]),
-      margin: { left: margin, right: margin },
-      theme: 'grid',
-      headStyles: { fillColor: OFFICE_BLUE, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
-      bodyStyles: { fontSize: 7 },
-      columnStyles: { 0: { cellWidth: pageW - 2 * margin } },
-      pageBreak: 'auto',
-    })
-    y = (docWithTable.lastAutoTable?.finalY ?? y) + 10
+      const bullets = ddPdfPayload.methodology_bullets?.length
+        ? ddPdfPayload.methodology_bullets
+        : [ddPdfPayload.sources_limits]
+      autoTable(doc, {
+        startY: y,
+        head: [['Fonti dati e limiti']],
+        body: bullets.map((b) => [normalizePdfText(b)]),
+        margin: { left: margin, right: margin },
+        theme: 'grid',
+        headStyles: { fillColor: [180, 180, 180], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
+        bodyStyles: { fontSize: 7, fillColor: TABLE_BODY_GRAY },
+        columnStyles: { 0: { cellWidth: pageW - 2 * margin } },
+        pageBreak: 'auto',
+      })
+      y = (docWithTable.lastAutoTable?.finalY ?? y) + 8
+
+      // Glossario termini (nuova tabella grigia)
+      const glossaryRows: Array<[string, string, string]> = [
+        ['AOI', 'Area of Interest', "La zona geografica specifica dove il legno e stato tagliato"],
+        ['Hansen', 'Global Forest Change Dataset da UMD', 'Dati satellitari mondiali che rilevano tagli forestali'],
+        ['Loss', 'Forest Loss (riduzione copertura forestale)', 'Aree dove gli alberi sono stati abbattuti'],
+        ['Screening', 'Verifica automatica iniziale', 'Test che controlla rapidamente se il legno e conforme'],
+        ['JRC', 'Joint Research Centre europeo', "Centro di ricerca dell'Unione Europea"],
+        ['GFC', 'Global Forest Change', 'Progetto che monitora i cambiamenti forestali globali'],
+        ['Ettari (ha)', 'Unita di misura dell area ~ 10.000 m²', 'Circa 1,2 campi da calcio o 14 piscine olimpioniche'],
+      ]
+      autoTable(doc, {
+        startY: y,
+        head: [['Termine', 'Significato tecnico', 'Spiegazione semplice']],
+        body: glossaryRows,
+        margin: { left: margin, right: margin },
+        theme: 'grid',
+        headStyles: { fillColor: [180, 180, 180], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
+        bodyStyles: { fontSize: 8, fillColor: TABLE_BODY_GRAY },
+        columnStyles: {
+          0: { cellWidth: 22 },
+          1: { cellWidth: 76 },
+          2: { cellWidth: pageW - 2 * margin - 98 },
+        },
+        pageBreak: 'auto',
+      })
+      y = (docWithTable.lastAutoTable?.finalY ?? y) + 10
+    }
   }
 
   // 6. Disclaimer at the end (more space above)
@@ -701,27 +811,13 @@ function buildPdf(
     doc.addPage()
     y = 20
   }
+  drawSectionDivider('Disclaimer')
   y += 18
   doc.setFontSize(8)
   doc.setFont('helvetica', 'normal')
   const disclaimer = (disclaimerText || (resolvedVariant === 'EUDR' ? DISCLAIMER_EUDR : DISCLAIMER_EUTR)).trim()
   const disclaimerLines = doc.splitTextToSize(disclaimer, pageW - 2 * margin)
   doc.text(disclaimerLines, margin, y)
-
-  // Logo bottom-right on last page only
-  if (logoResult) {
-    const last = doc.getNumberOfPages()
-    doc.setPage(last)
-    const w = doc.internal.pageSize.getWidth()
-    const h = doc.internal.pageSize.getHeight()
-    const x = w - margin - FOOTER_LOGO_W
-    const yFooter = h - margin - FOOTER_LOGO_H - FOOTER_Y_PAD
-    try {
-      doc.addImage(logoResult.dataUrl, logoResult.format, x, yFooter, FOOTER_LOGO_W, FOOTER_LOGO_H)
-    } catch {
-      /* ignore */
-    }
-  }
 
   return doc
 }

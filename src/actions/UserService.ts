@@ -87,7 +87,10 @@ export class UserService {
           settore_merceologico,
           attivita,
           sito_internet,
-          username
+          username,
+          onboarding_completed,
+          invited_at,
+          onboarding_completed_at
         )
       `)
       .eq('tool_id', toolId)
@@ -133,7 +136,10 @@ export class UserService {
           settore_merceologico,
           attivita,
           sito_internet,
-          username
+          username,
+          onboarding_completed,
+          invited_at,
+          onboarding_completed_at
         )
       `,
         { count: 'exact' }

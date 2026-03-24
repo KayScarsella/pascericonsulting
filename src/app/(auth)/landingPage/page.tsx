@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button"
 import { Database } from "@/types/supabase"
 
 import { signOutAction } from "@/actions/auth" // O il percorso corretto della tua action
+import { isOnboardingComplete } from "@/lib/onboarding"
 
 // Aggiungiamo base_path ai dati richiesti
 type ToolData = Pick<Database['public']['Tables']['tools']['Row'], 'name' | 'description' | 'is_active' | 'base_path'>
@@ -48,6 +49,11 @@ export default async function LandingPage() {
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) {
     redirect("/login")
+  }
+
+  const onboardingComplete = await isOnboardingComplete()
+  if (!onboardingComplete) {
+    redirect("/onboarding")
   }
 
   // Fetch dei tool e del percorso base_path

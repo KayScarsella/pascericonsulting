@@ -70,3 +70,74 @@ export async function signOutAction() {
   // 2. Reindirizza alla pagina di login
   redirect("/login")
 }
+
+export async function completeOnboardingAction(formData: FormData) {
+  const fullName = String(formData.get("fullName") ?? "").trim()
+  const password = String(formData.get("password") ?? "")
+  const confirmPassword = String(formData.get("confirmPassword") ?? "")
+  const username = String(formData.get("username") ?? "").trim()
+  const ragioneSociale = String(formData.get("ragioneSociale") ?? "").trim()
+  const cfPartitaIva = String(formData.get("cfPartitaIva") ?? "").trim()
+  const indirizzo = String(formData.get("indirizzo") ?? "").trim()
+  const cap = String(formData.get("cap") ?? "").trim()
+  const citta = String(formData.get("citta") ?? "").trim()
+  const provincia = String(formData.get("provincia") ?? "").trim()
+  const recapitoTelefonico = String(formData.get("recapitoTelefonico") ?? "").trim()
+  const sitoInternet = String(formData.get("sitoInternet") ?? "").trim()
+  const settoreMerceologico = String(formData.get("settoreMerceologico") ?? "").trim()
+  const attivita = String(formData.get("attivita") ?? "").trim()
+
+  if (!fullName) return { error: "Inserisci il nome." }
+  if (fullName.length > 120) return { error: "Il nome e' troppo lungo." }
+  if (password.length < 8) return { error: "La password deve essere di almeno 8 caratteri." }
+  if (password !== confirmPassword) return { error: "Le password non coincidono." }
+
+  const supabase = await createSupabaseServerClient()
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser()
+
+  if (userError || !user) {
+    return { error: "Sessione non valida. Effettua di nuovo l'accesso dal link invito." }
+  }
+
+  const { error: updateUserError } = await supabase.auth.updateUser({ password })
+  if (updateUserError) {
+    const isSamePassword = updateUserError.message
+      .toLowerCase()
+      .includes("different from the old password")
+    if (!isSamePassword) {
+      return { error: updateUserError.message }
+    }
+  }
+
+  const { error: profileError } = await supabase.from("profiles").upsert(
+    {
+      id: user.id,
+      full_name: fullName,
+      email: user.email ?? null,
+      onboarding_completed: true,
+      onboarding_completed_at: new Date().toISOString(),
+      username: username || null,
+      ragione_sociale: ragioneSociale || null,
+      cf_partita_iva: cfPartitaIva || null,
+      indirizzo: indirizzo || null,
+      cap: cap || null,
+      citta: citta || null,
+      provincia: provincia || null,
+      recapito_telefonico: recapitoTelefonico || null,
+      sito_internet: sitoInternet || null,
+      settore_merceologico: settoreMerceologico || null,
+      attivita: attivita || null,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "id" }
+  )
+
+  if (profileError) {
+    return { error: profileError.message }
+  }
+
+  redirect("/landingPage")
+}
