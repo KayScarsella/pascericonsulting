@@ -14,6 +14,18 @@ Quando si elimina una riga figlia (`parent_session_id IS NOT NULL`):
 
 **Implicazione:** Eliminando l'unica analisi_finale (figlio), il trigger elimina automaticamente la verifica (padre). Il codice applicativo deve pre-pulpare i file storage del padre prima della delete.
 
+## Automazioni (Edge Functions + schedule)
+
+### Reminder email scadenza (`expiry-reminders`)
+
+Invia email automatiche quando una sessione completata ha `assessment_sessions.metadata.expiry_date` uguale a **\(current_date + 7\)** (formato `YYYY-MM-DD`).
+
+- **Outbox/log**: `public.email_reminders`
+  - **Idempotenza**: vincolo unico su `(user_id, session_id, reminder_type, target_date)` per evitare doppi invii anche se la schedule gira più volte.
+  - **Campi principali**: `sent_at`, `provider_id`, `error`.
+
+File funzione: `supabase/functions/expiry-reminders/index.ts` (usa Resend via API HTTP).
+
 ## Tabelle principali
 
 - `assessment_sessions`: sessioni di valutazione (verifica → analisi_finale)

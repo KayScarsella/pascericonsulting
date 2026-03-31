@@ -619,10 +619,25 @@ function buildPdf(
     if (ddPdfPayload.dd_snapshot_image_data_url) {
       drawSectionDivider('Foto mappa AOI salvata')
       try {
-        const imgW = pageW - 2 * margin
-        const imgH = 85
-        doc.addImage(ddPdfPayload.dd_snapshot_image_data_url, 'PNG', margin, y, imgW, imgH)
-        y += imgH + 4
+        const maxMapW = pageW - 2 * margin
+        const maxMapH = 115
+        const props = doc.getImageProperties(ddPdfPayload.dd_snapshot_image_data_url)
+        const iw = props.width || 1
+        const ih = props.height || 1
+        const ratio = ih / iw
+        let drawW = maxMapW
+        let drawH = drawW * ratio
+        if (drawH > maxMapH) {
+          drawH = maxMapH
+          drawW = drawH / ratio
+        }
+        const imgX = margin + (maxMapW - drawW) / 2
+        if (y + drawH > pageH - margin - 12) {
+          doc.addPage()
+          y = margin
+        }
+        doc.addImage(ddPdfPayload.dd_snapshot_image_data_url, 'PNG', imgX, y, drawW, drawH)
+        y += drawH + 4
         doc.setFontSize(7)
         doc.setTextColor(90, 90, 90)
         doc.text('Mappa AOI (Sentinel-2/JRC/Hansen) — immagine generata e salvata su storage', margin, y)

@@ -42,15 +42,27 @@ export function LossYearChart({ histogram, cuttingDateIso }: Props) {
     cuttingYear != null &&
     allFromEudr.some((e) => e.calendarYear >= cuttingYear && e.count > 0)
 
+  const explicitResultMessage =
+    cuttingYear == null
+      ? null
+      : hasLossFromCutYearOnward
+        ? "LE COORDINATE INSERITE EVIDENZIANO LA PRESENZA DI DEFORESTAZIONE PER L'ANNO DI TAGLIO (VEDI GRAFICO IN ROSSO)."
+        : "LE COORDINATE INSERITE NON EVIDENZIANO LA PRESENZA DI DEFORESTAZIONE PER L'ANNO DI TAGLIO."
+
   if (entries.length === 0) {
     if (cuttingYear != null) {
       return (
-        <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-4 text-sm text-emerald-900">
-          <p className="font-medium">Nessuna perdita forestale rilevata dal 2021 in poi nell&apos;AOI</p>
-          <p className="mt-1 text-emerald-800/90 text-xs">
-            Nessun pixel Hansen negli anni {EUDR_MIN_YEAR}+. Data di taglio {cuttingYear} — nessuna loss da
-            evidenziare in rosso.
-          </p>
+        <div className="space-y-3">
+          <div className="rounded-lg border border-slate-300 bg-slate-50 p-3 text-xs font-semibold text-slate-900">
+            {explicitResultMessage}
+          </div>
+          <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-4 text-sm text-emerald-900">
+            <p className="font-medium">Nessuna perdita forestale rilevata dal 2021 in poi nell&apos;AOI</p>
+            <p className="mt-1 text-emerald-800/90 text-xs">
+              Nessun pixel Hansen negli anni {EUDR_MIN_YEAR}+. Data di taglio {cuttingYear} — nessuna loss da
+              evidenziare in rosso.
+            </p>
+          </div>
         </div>
       )
     }
@@ -102,6 +114,11 @@ export function LossYearChart({ histogram, cuttingDateIso }: Props) {
   // Blu = anni prima del taglio; rosso = anno taglio e successivi (come mappa — loss nell'anno inserito è rossa)
   return (
     <div className="space-y-3">
+      {explicitResultMessage && (
+        <div className="rounded-lg border border-slate-300 bg-slate-50 p-3 text-xs font-semibold text-slate-900">
+          {explicitResultMessage}
+        </div>
+      )}
       <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
         <p className="text-sm font-semibold text-slate-800">
           Pixel di forest loss (Hansen) — <strong>rosso dall&apos;anno {cuttingYear} in poi</strong>

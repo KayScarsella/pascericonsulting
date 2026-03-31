@@ -1,6 +1,6 @@
 /**
  * AOI screening EUDR: gate "non accettabile" quando vi è evidenza di loss dopo il 31/12/2020
- * o dopo la data di taglio dichiarata.
+ * e, se è nota la data di taglio, con anno di loss ≥ max(2021, anno di taglio) (non basta loss solo negli anni prima del taglio).
  *
  * Logica raffinata (consigliata per EUDR):
  * - JRC GFC2020 V3 definisce "foresta" al cut-off come da regolamento.
@@ -41,6 +41,17 @@ export type DdLastRunSnapshot = {
 
 export const AOI_GATE_QUESTION_ID = 'aoi-hansen-gate'
 const AOI_GATE_RISK_INDEX = 1.0
+
+/** Primo anno di loss Hansen rilevante per screening EUDR (post 31/12/2020). */
+const EUDR_FIRST_LOSS_CALENDAR_YEAR = 2021
+
+/**
+ * Con data di taglio: il gate considera solo pixel con anno di loss ≥ max(2021, anno taglio).
+ * Così loss solo negli anni prima del taglio (ma ancora post-2020) non attiva l'esito negativo.
+ */
+function effectiveGateMinCalendarYear(cuttingCalendarYear: number): number {
+  return Math.max(EUDR_FIRST_LOSS_CALENDAR_YEAR, cuttingCalendarYear)
+}
 
 /** Hansen lossyear band → calendar year (v1.12: 1–24 → 2001–2024; band N → 2000+N) */
 export function lossyearBandToCalendarYear(band: number): number {
@@ -93,80 +104,90 @@ export function buildDdLastRunSnapshot(meta: RunMetadata): DdLastRunSnapshot {
   const histogramAll = meta.lossyear_histogram
   const refined = meta.eudr_refined
   const lossHaOnForest = refined?.loss_on_forest_2020_post_eudr_ha ?? null
+  const forestHist = refined?.lossyear_histogram_on_forest_2020
   const jrcOk = refined?.jrc_assessment_ok === true
   const minHa = DEFAULT_MIN_LOSS_ON_FOREST_HA
 
-  // Istogramma per gate post-2020: raffinato se JRC ok e ha evidenza sopra soglia, altrimenti tutto
-  let histogramForEudrCutoff: LossYearHistogram | undefined = histogramAll
   let gateUsesJrc = false
-
   if (jrcOk && lossHaOnForest != null && lossHaOnForest >= minHa) {
-    // Gate basato su area significativa di loss su foresta al 2020
     gateUsesJrc = true
-    // Per "has_loss_after_eudr_cutoff" usiamo refined: se ha >= minHa, c'è almeno un anno >2020 su foresta
-    histogramForEudrCutoff = undefined // useremo flag diretto da ha
   }
 
   const has_loss_after_eudr_cutoff = gateUsesJrc
     ? true
     : hasLossAfterCalendarYear(histogramAll, 2020)
 
+  const cuttingYear =
+    meta.cutting_date_iso && /^\d{4}/.test(meta.cutting_date_iso)
+      ? parseInt(meta.cutting_date_iso.slice(0, 4), 10)
+      : null
+  const hasValidCutting = cuttingYear != null && Number.isFinite(cuttingYear)
+  const minGateYear = hasValidCutting ? effectiveGateMinCalendarYear(cuttingYear!) : null
+
+  /** Loss nell'AOI dall'anno effettivo di gate in poi (≥ max(2021, anno taglio)) se c'è data taglio. */
   let has_loss_after_cutting_date = false
-  if (meta.cutting_date_iso && /^\d{4}/.test(meta.cutting_date_iso)) {
-    const cuttingYear = parseInt(meta.cutting_date_iso.slice(0, 4), 10)
-    if (Number.isFinite(cuttingYear)) {
-      // Se JRC ok, ideale filtrare per anno su refined — non abbiamo histogram refined in snapshot;
-      // conservativo: dopo taglio usa histogramAll se non gateUsesJrc; se gateUsesJrc e ha loss su foresta,
-      // verifichiamo ancora dopo taglio su all (se loss dopo taglio su non-forest non dovrebbe bastare da sola per EUDR)
-      // Dal anno di taglio in poi (>=), non solo anni successivi — altrimenti loss nello stesso anno non conta
-      has_loss_after_cutting_date = hasLossFromCalendarYearInclusive(histogramAll, cuttingYear)
-    }
+  if (minGateYear != null) {
+    has_loss_after_cutting_date = hasLossFromCalendarYearInclusive(histogramAll, minGateYear)
   }
 
   const lossPixelCount = meta.loss_pixel_count ?? 0
+
+  let triggersFromRefined = false
+  if (gateUsesJrc && lossHaOnForest != null && lossHaOnForest >= minHa) {
+    if (minGateYear != null) {
+      const histForHarvest =
+        forestHist && typeof forestHist === 'object' && Object.keys(forestHist).length > 0
+          ? forestHist
+          : null
+      triggersFromRefined =
+        histForHarvest != null && hasLossFromCalendarYearInclusive(histForHarvest, minGateYear)
+    } else {
+      triggersFromRefined = true
+    }
+  }
+
+  let triggersFromHansenFallback = false
+  if (!gateUsesJrc && lossPixelCount > 0) {
+    if (minGateYear != null) {
+      triggersFromHansenFallback = hasLossFromCalendarYearInclusive(histogramAll, minGateYear)
+    } else {
+      triggersFromHansenFallback = has_loss_after_eudr_cutoff
+    }
+  }
+
+  const triggers_non_accettabile = triggersFromRefined || triggersFromHansenFallback
+
   const reasons: string[] = []
-
-  if (gateUsesJrc && lossHaOnForest != null) {
-    reasons.push(
-      `Evidenza EUDR-raffinata: loss Hansen post-31/12/2020 su area classificata foresta al 2020 (JRC GFC2020), circa ${lossHaOnForest.toFixed(2)} ha (soglia ${minHa} ha).`
-    )
-  } else if (has_loss_after_eudr_cutoff && !gateUsesJrc) {
-    reasons.push(
-      'Rilevata perdita forestale Hansen (stand-replacement) nell’AOI in anni successivi al 31/12/2020 (screening senza intersect JRC o sotto soglia ha).'
-    )
+  if (triggers_non_accettabile) {
+    if (triggersFromRefined && lossHaOnForest != null) {
+      reasons.push(
+        `Evidenza EUDR-raffinata: loss su foresta al 2020 (JRC GFC2020) con anno di loss ≥ ${minGateYear ?? EUDR_FIRST_LOSS_CALENDAR_YEAR}, circa ${lossHaOnForest.toFixed(2)} ha (soglia ${minHa} ha).`
+      )
+    } else if (triggersFromHansenFallback) {
+      reasons.push(
+        minGateYear != null
+          ? `Rilevata perdita forestale Hansen nell'AOI con anno di loss ≥ ${minGateYear} (allineato a data di taglio e cutoff EUDR).`
+          : 'Rilevata perdita forestale Hansen (stand-replacement) nell’AOI in anni successivi al 31/12/2020 (screening senza intersect JRC o sotto soglia ha).'
+      )
+    }
   }
 
-  if (has_loss_after_cutting_date && meta.cutting_date_iso) {
-    reasons.push(
-      `Rilevata perdita forestale nell'AOI dall'anno della data di taglio in poi (≥ ${meta.cutting_date_iso.slice(0, 4)}).`
-    )
-  }
-
-  // Hansen assegna un solo anno al pixel — non distingue mese. Se il taglio è a fine anno e c'è loss nello stesso anno, non si sa se prima/dopo.
   const advisory_notes: string[] = []
   advisory_notes.push(
     'Hansen fornisce un anno di loss per pixel, non la data esatta. Per una visione più vicina alla data di taglio servono immagini Sentinel-2 (compositi per anno nella mappa) o analisi mensile dedicate.'
   )
   if (meta.cutting_date_iso && /^\d{4}/.test(meta.cutting_date_iso)) {
-    const cuttingYear = parseInt(meta.cutting_date_iso.slice(0, 4), 10)
-    const cuttingBand = cuttingYear - 2000
+    const cy = parseInt(meta.cutting_date_iso.slice(0, 4), 10)
+    const cuttingBand = cy - 2000
     if (Number.isFinite(cuttingBand) && cuttingBand >= 1 && cuttingBand <= 24) {
       const sameYearCount = Number(histogramAll?.[String(cuttingBand)] ?? 0) || 0
       if (sameYearCount > 0) {
         advisory_notes.push(
-          `Nel ${cuttingYear} risultano pixel di loss nell'AOI: Hansen non distingue il mese — se il taglio è a fine anno, la loss nello stesso anno potrebbe essere anteriore al taglio; usare immagini per anno o verifica manuale. Il gate considera loss dall'anno ${cuttingYear} in poi (≥).`
+          `Nel ${cy} risultano pixel di loss nell'AOI: Hansen non distingue il mese — se il taglio è a fine anno, la loss nello stesso anno potrebbe essere anteriore al taglio; usare immagini per anno o verifica manuale. Il gate considera loss dall'anno ${minGateYear ?? cy} in poi (≥).`
         )
       }
     }
   }
-
-  // Gate: (loss su foresta 2020 ≥ soglia) OR (fallback Hansen con pixel dopo cutoff) OR (dopo taglio)
-  const triggersFromRefined =
-    gateUsesJrc && lossHaOnForest != null && lossHaOnForest >= minHa
-  const triggersFromHansenFallback =
-    !gateUsesJrc && lossPixelCount > 0 && has_loss_after_eudr_cutoff
-  const triggers_non_accettabile =
-    triggersFromRefined || triggersFromHansenFallback || has_loss_after_cutting_date
 
   const logic_mode: 'raffinata' | 'base' = gateUsesJrc ? 'raffinata' : 'base'
 
@@ -198,7 +219,7 @@ export function applyAoiGateToEudrRiskResult(
   const gateDetail: RiskDetail = {
     questionId: AOI_GATE_QUESTION_ID,
     label:
-      'Screening geospaziale AOI (Hansen + JRC GFC2020 dove applicabile): evidenza dopo cutoff EUDR o dopo data di taglio',
+      'Screening geospaziale AOI (Hansen + JRC GFC2020 dove applicabile): evidenza post-cutoff EUDR; con data di taglio, solo loss con anno ≥ max(2021, anno taglio)',
     shortLabel: 'Screening AOI (EUDR)',
     riskIndex: AOI_GATE_RISK_INDEX,
     answerRaw: 'triggered',
@@ -213,7 +234,7 @@ export function applyAoiGateToEudrRiskResult(
     overallRisk,
     outcome: 'non accettabile',
     outcomeDescription:
-      'Esito non accettabile per evidenza geospaziale nell’AOI (perdita su foresta al 2020 dopo il 31/12/2020, oppure screening Hansen/post-taglio). Sono necessarie verifiche e/o mitigazione.',
+      'Esito non accettabile per evidenza geospaziale nell’AOI (perdita rilevante dopo il 31/12/2020 e, se nota la data di taglio, con anno di loss dall’anno di taglio in poi). Sono necessarie verifiche e/o mitigazione.',
     expiryDate: null,
   }
 }

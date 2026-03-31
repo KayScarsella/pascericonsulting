@@ -30,6 +30,49 @@ type Props = {
   sessionId: string
 }
 
+const MAX_POINT_BUFFER_HA = 4
+
+function hasPointLikeGeometry(aoi: unknown): boolean {
+  if (!aoi || typeof aoi !== 'object') return false
+  const o = aoi as Record<string, unknown>
+
+  if (o.type === 'Point' || o.type === 'MultiPoint') return true
+  if (o.type === 'Feature' && o.geometry && typeof o.geometry === 'object') {
+    const g = o.geometry as Record<string, unknown>
+    return g.type === 'Point' || g.type === 'MultiPoint'
+  }
+  if (o.type === 'FeatureCollection' && Array.isArray(o.features)) {
+    return o.features.some((f) => {
+      if (!f || typeof f !== 'object') return false
+      const ff = f as Record<string, unknown>
+      const g = ff.geometry
+      if (!g || typeof g !== 'object') return false
+      const gg = g as Record<string, unknown>
+      return gg.type === 'Point' || gg.type === 'MultiPoint'
+    })
+  }
+  if (o.type === 'GeometryCollection' && Array.isArray(o.geometries)) {
+    return o.geometries.some((g) => {
+      if (!g || typeof g !== 'object') return false
+      const gg = g as Record<string, unknown>
+      return gg.type === 'Point' || gg.type === 'MultiPoint'
+    })
+  }
+  return false
+}
+
+function hasLossFromCutYear(metadata: RunMetadata): boolean {
+  const iso = metadata.cutting_date_iso
+  if (!iso || !/^\d{4}/.test(iso)) return false
+  const y = parseInt(iso.slice(0, 4), 10)
+  if (!Number.isFinite(y) || !metadata.lossyear_histogram) return false
+  return Object.entries(metadata.lossyear_histogram).some(([key, count]) => {
+    const band = Number(key)
+    const calendarYear = band >= 1 && band <= 99 ? 2000 + band : band
+    return calendarYear >= y && Number(count) > 0
+  })
+}
+
 export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [cuttingDate, setCuttingDate] = useState('')
@@ -47,6 +90,8 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
   const [sentinel2Attribution, setSentinel2Attribution] = useState<string | undefined>(undefined)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [pendingAoi, setPendingAoi] = useState<unknown>(null)
+  const [pendingAoiHasPoint, setPendingAoiHasPoint] = useState(false)
+  const [pointBufferAreaHa, setPointBufferAreaHa] = useState('')
   const lastRunIdRef = useRef<string | null>(null)
 
   async function runAnalysis(aoi: unknown) {
@@ -58,7 +103,11 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
     setLoading(true)
     try {
       const cuttingIso = cuttingDate.trim()
-      const res = await runDueDiligenceAoiAnalysis(sessionId, aoi, cuttingIso)
+      const trimmedArea = pointBufferAreaHa.trim()
+      const parsedArea = trimmedArea ? Number(trimmedArea) : null
+      const pointBufferArea =
+        pendingAoiHasPoint && parsedArea != null && Number.isFinite(parsedArea) ? parsedArea : null
+      const res = await runDueDiligenceAoiAnalysis(sessionId, aoi, cuttingIso, pointBufferArea)
       if (res.error && !res.metadata) {
         setError(res.error)
         return
@@ -109,6 +158,7 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
         }
         const aoi = JSON.parse(text)
         setPendingAoi(aoi)
+        setPendingAoiHasPoint(hasPointLikeGeometry(aoi))
         setConfirmOpen(true)
       } catch {
         setError('File non valido: servono GeoJSON/JSON con Point/MultiPoint/Polygon/MultiPolygon (WGS84).')
@@ -127,6 +177,7 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
     try {
       const aoi = JSON.parse(aoiText)
       setPendingAoi(aoi)
+      setPendingAoiHasPoint(hasPointLikeGeometry(aoi))
       setConfirmOpen(true)
     } catch {
       setError('JSON non valido. Usa il file oppure incolla GeoJSON valido.')
@@ -134,9 +185,17 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
   }
 
   async function confirmAndRun() {
+    if (pendingAoiHasPoint) {
+      const parsed = Number(pointBufferAreaHa)
+      if (!Number.isFinite(parsed) || parsed <= 0 || parsed > MAX_POINT_BUFFER_HA) {
+        setError(`Per geometrie Point/MultiPoint inserire una superficie valida (ha) tra 0 e ${MAX_POINT_BUFFER_HA}.`)
+        return
+      }
+    }
     setConfirmOpen(false)
     if (pendingAoi != null) await runAnalysis(pendingAoi)
     setPendingAoi(null)
+    setPendingAoiHasPoint(false)
   }
 
   return (
@@ -175,6 +234,26 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
                 <p className="text-amber-800">
                   Un eventuale risultato precedente per questa sessione verrà sostituito (artifact su storage aggiornati).
                 </p>
+                {pendingAoiHasPoint && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+                    <label className="block text-xs font-medium text-amber-900 mb-1">
+                      Superficie di analisi intorno al punto (ha) — obbligatoria, massimo {MAX_POINT_BUFFER_HA} ha
+                    </label>
+                    <input
+                      type="number"
+                      min={0.01}
+                      max={MAX_POINT_BUFFER_HA}
+                      step={0.01}
+                      value={pointBufferAreaHa}
+                      onChange={(e) => setPointBufferAreaHa(e.target.value)}
+                      className="w-full rounded-md border border-amber-300 bg-white px-2 py-1 text-sm text-slate-900"
+                      placeholder="Es. 1.50"
+                    />
+                    <p className="mt-1 text-[11px] text-amber-900/90">
+                      Verrà usata quest&apos;area per costruire il buffer del punto. Senza questo valore l&apos;analisi non parte.
+                    </p>
+                  </div>
+                )}
               </div>
             </DialogDescription>
           </DialogHeader>
@@ -186,6 +265,13 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
               type="button"
               className="bg-[#967635] hover:bg-[#856625]"
               onClick={confirmAndRun}
+              disabled={
+                loading ||
+                (pendingAoiHasPoint &&
+                  (!Number.isFinite(Number(pointBufferAreaHa)) ||
+                    Number(pointBufferAreaHa) <= 0 ||
+                    Number(pointBufferAreaHa) > MAX_POINT_BUFFER_HA))
+              }
             >
               Avvia analisi
             </Button>
@@ -214,9 +300,10 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
           <input
             type="date"
             required
+            disabled={loading}
             min="2000-01-01"
             max={new Date().toISOString().slice(0, 10)}
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm disabled:opacity-50"
             value={cuttingDate}
             onChange={(e) => setCuttingDate(e.target.value)}
           />
@@ -239,6 +326,10 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
             className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-md file:border file:border-slate-300 file:bg-white file:px-3 file:py-2 file:text-sm file:font-medium file:text-[#3d2b1a] hover:file:bg-slate-50 disabled:opacity-50 disabled:pointer-events-none"
             onChange={onFileSelected}
           />
+          <p className="text-xs text-slate-500 mt-1">
+            Una sola AOI per analisi: ogni nuova esecuzione sostituisce file e risultati precedenti per questa
+            sessione nello storage.
+          </p>
         </div>
 
         {/* Incolla + esegui */}
@@ -247,7 +338,8 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
             Oppure incolla AOI (GeoJSON)
           </label>
           <textarea
-            className="w-full min-h-[100px] rounded-md border border-slate-300 p-3 font-mono text-xs"
+            className="w-full min-h-[100px] rounded-md border border-slate-300 p-3 font-mono text-xs disabled:opacity-50"
+            disabled={loading}
             placeholder='{"type":"Polygon","coordinates":[...]}'
             value={aoiText}
             onChange={(e) => setAoiText(e.target.value)}
@@ -315,6 +407,13 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
               )}
               {metadata && (
                 <div className="mt-3 space-y-2">
+                  {metadata.cutting_date_iso && (
+                    <p className="rounded-md border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-900">
+                      {hasLossFromCutYear(metadata)
+                        ? "LE COORDINATE INSERITE EVIDENZIANO LA PRESENZA DI DEFORESTAZIONE PER L'ANNO DI TAGLIO (VEDI GRAFICO IN ROSSO)."
+                        : "LE COORDINATE INSERITE NON EVIDENZIANO LA PRESENZA DI DEFORESTAZIONE PER L'ANNO DI TAGLIO."}
+                    </p>
+                  )}
                   <p className="text-xs text-slate-600">
                     <strong>Risultato:</strong> pixel Hansen con loss (tutti gli anni) ≈{' '}
                     <span className="tabular-nums font-medium">{metadata.loss_pixel_count ?? '—'}</span>

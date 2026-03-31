@@ -34,7 +34,8 @@ const METHODOLOGY_BULLETS = [
 export function buildDdReportPayload(
   meta: RunMetadata,
   ddSnapshot: DdLastRunSnapshot,
-  dualClassMode: boolean
+  dualClassMode: boolean,
+  snapshot?: { hasSnapshot: boolean }
 ): DdReportPayload {
   const base = buildDdReplicatePayload({
     runId: meta.run_id,
@@ -49,6 +50,26 @@ export function buildDdReportPayload(
   })
 
   const ui_blocks: { heading?: string; body: string }[] = []
+  const cuttingYear =
+    meta.cutting_date_iso && /^\d{4}/.test(meta.cutting_date_iso)
+      ? parseInt(meta.cutting_date_iso.slice(0, 4), 10)
+      : null
+  const hasLossFromCutYearOnward =
+    cuttingYear != null &&
+    Object.entries(meta.lossyear_histogram || {}).some(([key, count]) => {
+      const band = Number(key)
+      const calendarYear = band >= 1 && band <= 99 ? 2000 + band : band
+      return calendarYear >= cuttingYear && Number(count) > 0
+    })
+
+  if (cuttingYear != null) {
+    ui_blocks.push({
+      heading: 'Messaggio sintetico',
+      body: hasLossFromCutYearOnward
+        ? "LE COORDINATE INSERITE EVIDENZIANO LA PRESENZA DI DEFORESTAZIONE PER L'ANNO DI TAGLIO (VEDI GRAFICO IN ROSSO)."
+        : "LE COORDINATE INSERITE NON EVIDENZIANO LA PRESENZA DI DEFORESTAZIONE PER L'ANNO DI TAGLIO.",
+    })
+  }
 
   // Badge / logica
   const r = meta.eudr_refined
@@ -114,7 +135,7 @@ export function buildDdReportPayload(
     ...baseRest,
     v: DD_REPORT_VERSION,
     snapshot_storage_filename: 'aoi_map_render.png',
-    has_snapshot: false,
+    has_snapshot: snapshot?.hasSnapshot ?? false,
     ui_blocks,
     methodology_bullets: METHODOLOGY_BULLETS,
     gate_triggers_non_accettabile: ddSnapshot.triggers_non_accettabile,

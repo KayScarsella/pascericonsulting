@@ -445,7 +445,7 @@ export default async function EudrRisultatoPage({
     })
     .filter((s) => s.questions.length > 0)
 
-  // Carica dd_report.json da storage per PDF (senza GEE) (stessi colori grafico/mappa) — come mitigazioni, cancellato con deleteRecords
+  // Carica dd_report.json da storage per PDF (layout flat per sessione; fallback cartella legacy runId)
   let ddPdfPayload: import("@/components/ExportAnalysisPdfButton").DdPdfPayload | null = null
   if (ddLastRun?.run_id) {
     const artifactSessionId = ddLastRun.dd_artifact_session_id ?? sessionId
@@ -455,16 +455,31 @@ export default async function EudrRisultatoPage({
       .eq("id", artifactSessionId)
       .single()
     if (artifactSession?.user_id) {
-      const path = `${artifactSession.user_id}/eudr-due-diligence/${artifactSessionId}/${ddLastRun.run_id}/dd_report.json`
-      const { data: blob, error: dlErr } = await supabase.storage.from("user-uploads").download(path)
-      if (!dlErr && blob) {
+      const uid = artifactSession.user_id
+      const base = `${uid}/eudr-due-diligence/${artifactSessionId}`
+      const reportCandidates: { path: string; artifactPrefix: string }[] = [
+        { path: `${base}/dd_report.json`, artifactPrefix: base },
+        { path: `${base}/${ddLastRun.run_id}/dd_report.json`, artifactPrefix: `${base}/${ddLastRun.run_id}` },
+      ]
+      let blob: Blob | null = null
+      let artifactPrefix = base
+      for (const c of reportCandidates) {
+        const { data, error: dlErr } = await supabase.storage.from("user-uploads").download(c.path)
+        if (!dlErr && data) {
+          blob = data
+          artifactPrefix = c.artifactPrefix
+          break
+        }
+      }
+      if (blob) {
         try {
           const parsed = JSON.parse(await blob.text()) as import("@/components/ExportAnalysisPdfButton").DdPdfPayload
           if (parsed?.lossyear_histogram && parsed?.cutting_date_iso) {
             const payload = parsed as import("@/components/ExportAnalysisPdfButton").DdPdfPayload
             if (payload.has_snapshot) {
-              const snapName = payload.snapshot_storage_filename?.trim() || "aoi_map_snapshot.png"
-              const snapPath = `${artifactSession.user_id}/eudr-due-diligence/${artifactSessionId}/${ddLastRun.run_id}/${snapName}`
+              const snapName =
+                payload.snapshot_storage_filename?.trim() || "aoi_map_render.png"
+              const snapPath = `${artifactPrefix}/${snapName}`
               const { data: snapSigned } = await supabase.storage
                 .from("user-uploads")
                 .createSignedUrl(snapPath, 3600, { download: false })

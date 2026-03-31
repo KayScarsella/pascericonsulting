@@ -1,9 +1,10 @@
 /**
  * Composito mediano Sentinel-2 (Harmonized) per anno solare, clip ad AOI.
- * Confronto visivo tra anni; ~10 m. Fallisce per anno se poche scene o errore.
+ * Stessa pipeline di buildSentinel2MedianRgbImage + SENTINEL2_TRUECOLOR_VIS.
  */
 
 import { ensureEarthEngineInitialized } from './initialize'
+import { buildSentinel2MedianRgbImage, SENTINEL2_TRUECOLOR_VIS } from './aoiMapLayerSpecs'
 
 export type YearTileEntry = { year: number; tilesUrlTemplate: string }
 
@@ -12,8 +13,9 @@ function getMapIdPromise(
   visParams: Record<string, unknown>
 ): Promise<{ urlFormat: string }> {
   return new Promise((resolve, reject) => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    /* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any */
     const ee = require('@google/earthengine') as any
+    /* eslint-enable @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any */
     ee.Image(image).getMapId(visParams, (mapId: { urlFormat?: string } | null, error?: Error) => {
       if (error || !mapId?.urlFormat) reject(error || new Error('getMapId failed'))
       else resolve(mapId as { urlFormat: string })
@@ -23,19 +25,12 @@ function getMapIdPromise(
 
 async function compositeForYear(aoiGeometry: unknown, year: number): Promise<YearTileEntry | null> {
   await ensureEarthEngineInitialized()
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  /* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any */
   const ee = require('@google/earthengine') as any
+  /* eslint-enable @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any */
   const geometry = ee.Geometry(aoiGeometry)
-  const start = ee.Date.fromYMD(year, 1, 1)
-  const end = ee.Date.fromYMD(year, 12, 31)
-  const s2 = ee
-    .ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-    .filterBounds(geometry)
-    .filterDate(start, end)
-    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 70))
-  const median = s2.median().clip(geometry).select(['B4', 'B3', 'B2'])
-  const vis = { bands: ['B4', 'B3', 'B2'], min: 0, max: 3500, gamma: 1.15 }
-  const mapId = await getMapIdPromise(median, vis)
+  const median = ee.Image(buildSentinel2MedianRgbImage(geometry, year)).clip(geometry)
+  const mapId = await getMapIdPromise(median, SENTINEL2_TRUECOLOR_VIS)
   return { year, tilesUrlTemplate: mapId.urlFormat }
 }
 

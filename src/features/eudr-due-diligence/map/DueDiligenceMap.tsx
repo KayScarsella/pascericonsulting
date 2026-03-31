@@ -8,17 +8,11 @@ import { COLOR_POST_CUT, COLOR_POST_EU_ONLY } from '../constants/hansen-visual'
 
 const MAP_STYLE_LIGHT = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
 
-/** Esri World Imagery — copertura globale; oltre ~18–19 spesso upscaling → pixeloso */
 const SATELLITE_TILES_ESRI = [
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
 ]
 
-/**
- * Opzionale: URL template tile ad alta risoluzione (es. WMTS Maxar 30cm/15cm con API key).
- * Impostare NEXT_PUBLIC_SATELLITE_TILES_HIGH_RES con {z}/{x}/{y} o {z}/{y}/{x} come da fornitore.
- * Le tile XYZ sono a risoluzione fissa per zoom: non esiste “più nitido allo zoom” senza
- * cambiare sorgente (es. passare a WMTS con livelli nativi o servizi commerciali).
- */
+/** Opzionale: basemap raster da env (stesso schema URL tile XYZ Esri). */
 function getHighResTilesTemplate(): string | null {
   if (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_SATELLITE_TILES_HIGH_RES?.trim()) {
     return process.env.NEXT_PUBLIC_SATELLITE_TILES_HIGH_RES.trim()
@@ -43,7 +37,7 @@ type Props = {
   /** Overlay verde: foresta JRC al 31/12/2020 */
   forest2020TilesUrlTemplate?: string | null
   forest2020Attribution?: string
-  /** Compositi Sentinel-2 per anno — sostituiscono il basemap quando selezionati (zoom ~10 m) */
+  /** Compositi Sentinel-2 per anno (clip AOI) — overlay opzionale sul satellite */
   sentinel2YearTiles?: YearTileEntry[]
   sentinel2Attribution?: string
   className?: string
@@ -78,14 +72,18 @@ export function DueDiligenceMap({
   const [showBasemap, setShowBasemap] = useState(true)
   const [showForest2020, setShowForest2020] = useState(true)
   const [showLoss, setShowLoss] = useState(true)
-  const [basemapOpacity, setBasemapOpacity] = useState(0.95)
+  /** Sentinel-2 annual composite — solo AOI; satellite Esri resta sempre a opacità massima */
+  const [sentinel2Opacity, setSentinel2Opacity] = useState(0)
   const [forestOpacity, setForestOpacity] = useState(0.45)
   const [lossOpacity, setLossOpacity] = useState(0.78)
   const [selectedYear, setSelectedYear] = useState<number | null>(null)
   const mapRef = useRef<MapRef>(null)
 
   const highResTiles = useMemo(() => getHighResTilesTemplate(), [])
-  const yearsAvailable = sentinel2YearTiles?.map((e) => e.year) ?? []
+  const yearsAvailable = useMemo(
+    () => sentinel2YearTiles?.map((e) => e.year) ?? [],
+    [sentinel2YearTiles]
+  )
   const activeYearEntry =
     selectedYear != null ? sentinel2YearTiles?.find((e) => e.year === selectedYear) : null
 
@@ -105,7 +103,6 @@ export function DueDiligenceMap({
     fetch(geoJsonUrl)
       .then((r) => r.json())
       .then((data: FeatureCollection) => {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
         setGeojson(data)
         const geom = data.features?.[0]?.geometry
         if (geom && 'coordinates' in geom && geom.coordinates) {
@@ -130,7 +127,6 @@ export function DueDiligenceMap({
               // Fit bounds once the AOI is known (better than a fixed zoom).
               // If the map isn't ready yet, fall back to a reasonable centered view.
               const center = { longitude: (minLon + maxLon) / 2, latitude: (minLat + maxLat) / 2 }
-              // eslint-disable-next-line react-hooks/set-state-in-effect
               setViewState((prev) => ({ ...prev, ...center, zoom: Math.max(prev.zoom, 10) }))
               try {
                 const m = mapRef.current?.getMap() as unknown as {
@@ -198,7 +194,6 @@ export function DueDiligenceMap({
                 </option>
               ))}
             </select>
-            <span className="text-slate-500">— zoom fino ~18–20 su AOI</span>
           </span>
         )}
       </div>
@@ -224,6 +219,21 @@ export function DueDiligenceMap({
           {/* Basemap: composito anno selezionato oppure Esri */}
           {showBasemap && activeYearEntry && (
             <Source
+              id="satellite-under-s2"
+              type="raster"
+              tiles={SATELLITE_TILES_ESRI}
+              tileSize={256}
+              attribution="Esri"
+            >
+              <Layer
+                id="satellite-under-s2-layer"
+                type="raster"
+                paint={{ 'raster-opacity': 1 }}
+              />
+            </Source>
+          )}
+          {showBasemap && activeYearEntry && (
+            <Source
               id="s2-year"
               type="raster"
               tiles={[activeYearEntry.tilesUrlTemplate]}
@@ -233,7 +243,7 @@ export function DueDiligenceMap({
               <Layer
                 id="s2-year-layer"
                 type="raster"
-                paint={{ 'raster-opacity': basemapOpacity }}
+                paint={{ 'raster-opacity': sentinel2Opacity }}
               />
             </Source>
           )}
@@ -248,7 +258,7 @@ export function DueDiligenceMap({
               <Layer
                 id="satellite-hires-layer"
                 type="raster"
-                paint={{ 'raster-opacity': basemapOpacity }}
+                paint={{ 'raster-opacity': 1 }}
               />
             </Source>
           )}
@@ -263,7 +273,7 @@ export function DueDiligenceMap({
               <Layer
                 id="satellite-layer"
                 type="raster"
-                paint={{ 'raster-opacity': basemapOpacity }}
+                paint={{ 'raster-opacity': 1 }}
               />
             </Source>
           )}
@@ -306,43 +316,47 @@ export function DueDiligenceMap({
         </Map>
       </div>
 
-      {/* Opacità rapide */}
-      <div className="flex flex-wrap gap-4 text-[11px] text-slate-600">
-        <label className="inline-flex items-center gap-2">
-          Opacità basemap
-          <input
-            type="range"
-            min={0}
-            max={100}
-            value={Math.round(basemapOpacity * 100)}
-            onChange={(e) => setBasemapOpacity(Number(e.target.value) / 100)}
-          />
-        </label>
-        {forest2020TilesUrlTemplate && (
-          <label className="inline-flex items-center gap-2">
-            Opacità foresta 2020
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={Math.round(forestOpacity * 100)}
-              onChange={(e) => setForestOpacity(Number(e.target.value) / 100)}
-            />
-          </label>
-        )}
-        {lossTilesUrlTemplate && (
-          <label className="inline-flex items-center gap-2">
-            Opacità loss
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={Math.round(lossOpacity * 100)}
-              onChange={(e) => setLossOpacity(Number(e.target.value) / 100)}
-            />
-          </label>
-        )}
-      </div>
+      {/* Opacità (satellite Esri sempre al 100%; qui solo overlay) */}
+      {(activeYearEntry || forest2020TilesUrlTemplate || lossTilesUrlTemplate) && (
+        <div className="flex flex-wrap gap-4 text-[11px] text-slate-600">
+          {activeYearEntry && (
+            <label className="inline-flex items-center gap-2">
+              Opacità Sentinel-2 (solo AOI)
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(sentinel2Opacity * 100)}
+                onChange={(e) => setSentinel2Opacity(Number(e.target.value) / 100)}
+              />
+            </label>
+          )}
+          {forest2020TilesUrlTemplate && (
+            <label className="inline-flex items-center gap-2">
+              Opacità foresta 2020
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(forestOpacity * 100)}
+                onChange={(e) => setForestOpacity(Number(e.target.value) / 100)}
+              />
+            </label>
+          )}
+          {lossTilesUrlTemplate && (
+            <label className="inline-flex items-center gap-2">
+              Opacità loss
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(lossOpacity * 100)}
+                onChange={(e) => setLossOpacity(Number(e.target.value) / 100)}
+              />
+            </label>
+          )}
+        </div>
+      )}
 
       <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-xs text-slate-700 space-y-2">
         {lossTilesUrlTemplate && lossDualClassMode && (
@@ -365,31 +379,10 @@ export function DueDiligenceMap({
         )}
         {activeYearEntry && (
           <p>
-            <strong>Sentinel-2 {selectedYear}:</strong> composito ~10 m — zoomando oltre la risoluzione nativa
-            l&apos;immagine diventa pixelosa (non c&apos;è “più dettaglio” nello stesso tile).
+            <strong>Sentinel-2 {selectedYear}:</strong> composito annuale ad alta risoluzione sull&apos;area di
+            interesse; regolare l&apos;opacità sopra per sovrapporlo al satellite.
           </p>
         )}
-        <details className="text-slate-600">
-          <summary className="cursor-pointer font-medium">Perché a zoom alto è pixeloso? Immagini più nitide?</summary>
-          <ul className="mt-2 list-disc pl-4 space-y-1">
-            <li>
-              Ogni livello zoom XYZ ha una <strong>risoluzione fissa</strong> (es. Esri spesso ~1 m equivalente
-              fino a z~19; oltre si ingrandisce il pixel). Sentinel-2 L2A è ~10 m: zoom molto alto = sempre più
-              a blocchi.
-            </li>
-            <li>
-              Per basemap <strong>30 cm / 15 cm</strong> servono servizi commerciali (es.{' '}
-              <strong>Maxar Vivid Mosaic</strong> WMTS/API) con chiave — si può impostare{' '}
-              <code className="bg-slate-100 px-1 rounded">NEXT_PUBLIC_SATELLITE_TILES_HIGH_RES</code> con il
-              template URL del fornitore (stesso ordine {'{z}/{y}/{x}'} di Esri) per sostituire il basemap quando
-              non usi un anno Sentinel-2.
-            </li>
-            <li>
-              <strong>Zoom-adattivo vero</strong> = WMTS con livelli nativi multipli o più sorgenti raster con
-              minzoom/maxzoom diversi; richiede configurazione per fornitore.
-            </li>
-          </ul>
-        </details>
         {!lossTilesUrlTemplate && (
           <p className="text-amber-800">Solo AOI — rieseguire l&apos;analisi per i layer Hansen/foresta.</p>
         )}

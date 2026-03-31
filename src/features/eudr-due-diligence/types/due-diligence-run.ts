@@ -40,6 +40,8 @@ export interface RunMetadata {
     loss_pixel_count_on_forest_2020_post_eudr: number | null
     jrc_assessment_ok: boolean
     jrc_assessment_error?: string
+    /** Istogramma lossyear su pixel foresta JRC 2020 (solo band ≥21) — per gate rispetto all'anno di taglio */
+    lossyear_histogram_on_forest_2020?: LossYearHistogram | null
   }
   /**
    * Contesto degrado forestale: tipi foresta JRC al 2020 nell'AOI (snapshot, non gate).

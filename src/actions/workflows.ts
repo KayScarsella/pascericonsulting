@@ -216,7 +216,10 @@ export async function finalizeEudrAnalisi(sessionId: string): Promise<{ redirect
             aoi_gate_triggered: true,
             aoi_gate_reasons: ddLastRun.reasons,
           }
-        : {}),
+        : {
+            aoi_gate_triggered: false,
+            aoi_gate_reasons: [],
+          }),
     }
 
     await supabase

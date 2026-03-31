@@ -265,13 +265,17 @@ export function SectionList({
 
             if (onCompleteAction) {
                 // 🛠️ MODIFICA: Ricerca di un'eccezione attiva da passare al backend
-                const activeException = Object.values(processedForm.exceptions).find(e => e !== null);
+                const activeException = Object.values(processedForm.exceptions).find(
+                    (e) => e !== null && e.variant !== 'silent'
+                );
                 
                 // Formattiamo rigorosamente i dati per TypeScript
                 const exceptionData = activeException ? {
                     isBlocked: true,
-                    blockReason: activeException.message,
-                    blockVariant: activeException.variant as 'success' | 'warning' | 'error'
+                    blockReason: activeException.message || '',
+                    blockVariant: (activeException.variant === 'success' || activeException.variant === 'warning')
+                        ? activeException.variant
+                        : 'warning'
                 } : undefined;
 
                 // Passiamo i dati dell'eccezione (se presente) al server
@@ -429,15 +433,23 @@ export function SectionList({
                                 </div>
 
                                 {/* MESSAGGIO DI ECCEZIONE (BLOCCO) */}
-                                {activeException && (
+                                {activeException && activeException.variant !== 'silent' && (activeException.message?.trim() ?? '') !== '' && (
                                     <div className={cn(
                                         "p-5 rounded-xl border flex gap-4 bg-gradient-to-r",
                                         activeException.variant === 'warning'
                                             ? "from-amber-50 to-white border-amber-200 text-amber-900"
-                                            : "from-emerald-50 to-white border-emerald-200 text-emerald-900"
+                                            : activeException.variant === 'info'
+                                                ? "from-sky-50 to-white border-sky-200 text-sky-900"
+                                                : "from-emerald-50 to-white border-emerald-200 text-emerald-900"
                                     )}>
                                         <div className="mt-0.5">
-                                            {activeException.variant === 'warning' ? <AlertCircle className="w-5 h-5 text-amber-600" /> : <CheckCircle className="w-5 h-5 text-emerald-600" />}
+                                            {activeException.variant === 'warning' ? (
+                                                <AlertCircle className="w-5 h-5 text-amber-600" />
+                                            ) : activeException.variant === 'info' ? (
+                                                <AlertCircle className="w-5 h-5 text-sky-600" />
+                                            ) : (
+                                                <CheckCircle className="w-5 h-5 text-emerald-600" />
+                                            )}
                                         </div>
                                         <div>
                                             <p className="text-sm font-semibold leading-relaxed">{activeException.message}</p>

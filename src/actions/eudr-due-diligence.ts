@@ -5,7 +5,12 @@ import type { Json } from '@/types/supabase'
 import { validateSessionAccess } from '@/actions/questions'
 import { EUDR_TOOL_ID } from '@/lib/constants'
 import { randomUUID } from 'crypto'
-import { aoiGeoJsonPath, ddReportJsonPath } from '@/features/eudr-due-diligence/storage/paths'
+import {
+  aoiGeoJsonSessionPath,
+  ddReportJsonSessionPath,
+  aoiMapRenderSessionPath,
+  AOI_MAP_RENDER_FILENAME,
+} from '@/features/eudr-due-diligence/storage/paths'
 import { buildDdReportPayload } from '@/features/eudr-due-diligence/storage/buildDdReportPayload'
 import { runEudrAoiAssessment } from '@/features/eudr-due-diligence/server/earthengine/runEudrAoiAssessment'
 import { getHansenLossTilesForAoi } from '@/features/eudr-due-diligence/server/earthengine/getHansenLossTiles'
@@ -16,55 +21,28 @@ import type { RunMetadata } from '@/features/eudr-due-diligence/types/due-dilige
 import { normalizeAoiInput } from '@/features/eudr-due-diligence/server/earthengine/normalizeAoi'
 import { buildDdLastRunSnapshot } from '@/features/eudr-due-diligence/aoiRiskGate'
 import { removePreviousDueDiligenceRuns } from '@/features/eudr-due-diligence/storage/cleanupSessionRuns'
-import { HANSEN_ASSET } from '@/features/eudr-due-diligence/server/earthengine/runForestLossForAoi'
-import { JRC_GFC2020_ASSET } from '@/features/eudr-due-diligence/server/earthengine/runEudrAoiAssessment'
-import { COLOR_POST_CUT, COLOR_POST_EU_ONLY, HANSEN_EUDR_MIN_BAND } from '@/features/eudr-due-diligence/constants/hansen-visual'
-import { HANSEN_LOSSYEAR_MAX_BAND } from '@/features/eudr-due-diligence/constants/hansen-version'
+import { composeAoiPosterEeImage } from '@/features/eudr-due-diligence/server/earthengine/aoiMapLayerSpecs'
+import { point, multiPoint, polygon, multiPolygon, buffer as turfBuffer, featureCollection } from '@turf/turf'
+import type { SupabaseClient } from '@supabase/supabase-js'
 
-const EUDR_CUTOFF = '2020-12-31' // informational; align with reg guidance when publishing
-const DEFAULT_POINT_BUFFER_METERS = 500
-
-/** Minimum seconds between completed runs per session (anti-spam / EE load). */
+const EUDR_CUTOFF = '2020-12-31'
+const MAX_POINT_BUFFER_HA = 4
 const DD_ANALYSIS_COOLDOWN_SEC = 90
-
-const AOI_MAP_RENDER_FILENAME = 'aoi_map_render.png'
+/** After this, an orphaned in-progress flag is ignored (crash / timeout). */
+const DD_ANALYSIS_LOCK_STALE_MS = 20 * 60 * 1000
+/** EE getThumbURL max dimension — lower = faster PNG + PDF embed; still fine for A4. */
+const AOI_MAP_THUMB_PX = 1920
 
 type EeImage = {
   getThumbURL: (params: Record<string, unknown>, cb: (url: string | null, error?: Error) => void) => void
-  select: (bands: string[] | string) => EeImage
-  visualize: (params: Record<string, unknown>) => unknown
-  eq: (value: number) => EeImage
-  selfMask: () => EeImage
-  clip: (geom: unknown) => EeImage
-  buffer: (meters: number) => EeImage
   union: (other: unknown, maxError: number) => EeImage
-  gt: (value: number) => EeImage
-  gte: (value: number) => EeImage
-  lt: (value: number) => EeImage
-  and: (other: unknown) => EeImage
-  updateMask: (mask: unknown) => EeImage
-  where: (cond: unknown, value: number) => EeImage
-  blend: (img: unknown) => EeImage
-  byte: () => EeImage
-  paint: (fc: unknown, color: number, width: number) => EeImage
+  buffer: (meters: number) => EeImage
   bounds?: (maxError: number) => unknown
-}
-
-type EeImageCollection = {
-  filterBounds: (geom: unknown) => EeImageCollection
-  filterDate: (start: unknown, end: unknown) => EeImageCollection
-  filter: (filter: unknown) => EeImageCollection
-  median: () => unknown
 }
 
 type EeModule = {
   Image: (image?: unknown) => EeImage
   Geometry: (geom: unknown) => EeImage
-  Date: { fromYMD: (year: number, month: number, day: number) => unknown }
-  Filter: { lt: (field: string, value: number) => unknown }
-  ImageCollection: (id: string) => EeImageCollection
-  Feature: (geom: unknown) => unknown
-  FeatureCollection: (items: unknown[]) => unknown
 }
 
 function getEe(): EeModule {
@@ -72,10 +50,7 @@ function getEe(): EeModule {
   return require('@google/earthengine') as unknown as EeModule
 }
 
-function getThumbUrlPromise(
-  image: unknown,
-  params: Record<string, unknown>
-): Promise<string> {
+function getThumbUrlPromise(image: unknown, params: Record<string, unknown>): Promise<string> {
   return new Promise((resolve, reject) => {
     try {
       getEe().Image(image).getThumbURL(params, (url: string | null, error?: Error) => {
@@ -89,86 +64,88 @@ function getThumbUrlPromise(
   })
 }
 
-function parseCuttingYearBand(iso: string): number | null {
-  if (!iso || !/^\d{4}/.test(iso)) return null
-  const y = parseInt(iso.slice(0, 4), 10)
-  if (!Number.isFinite(y)) return null
-  const band = y - 2000
-  if (band < 1 || band > HANSEN_LOSSYEAR_MAX_BAND) return null
-  return band
+function isAnalysisLockStale(startedAt: unknown): boolean {
+  if (typeof startedAt !== 'string') return true
+  const t = Date.parse(startedAt)
+  if (!Number.isFinite(t)) return true
+  return Date.now() - t > DD_ANALYSIS_LOCK_STALE_MS
 }
 
-async function renderAoiMapPng(aoiEe: unknown, cuttingDateIso: string): Promise<Buffer | null> {
+async function clearDdAnalysisLock(supabase: SupabaseClient, sessionId: string): Promise<void> {
+  const { data } = await supabase
+    .from('assessment_sessions')
+    .select('metadata')
+    .eq('id', sessionId)
+    .single()
+  const m = { ...((data?.metadata as Record<string, unknown>) || {}) }
+  delete m.dd_analysis_in_progress
+  delete m.dd_analysis_started_at
+  delete m.dd_analysis_run_id
+  await supabase.from('assessment_sessions').update({ metadata: m as Json }).eq('id', sessionId)
+}
+
+function hasPointGeometries(geometries: Array<{ type: string }>): boolean {
+  return geometries.some((g) => g.type === 'Point' || g.type === 'MultiPoint')
+}
+
+function radiusMetersFromAreaHa(areaHa: number): number {
+  return Math.sqrt((areaHa * 10000) / Math.PI)
+}
+
+function buildStorageFeatureCollection(
+  geometries: Array<{
+    type: 'Polygon' | 'MultiPolygon' | 'Point' | 'MultiPoint'
+    coordinates: unknown
+  }>,
+  pointBufferAreaHa: number | null
+): unknown {
+  if (!hasPointGeometries(geometries)) {
+    return featureCollection(
+      geometries.map((g) => {
+        if (g.type === 'Polygon') return polygon(g.coordinates as number[][][])
+        return multiPolygon(g.coordinates as number[][][][])
+      }) as GeoJSON.Feature[]
+    )
+  }
+
+  const radiusKm = Math.sqrt((pointBufferAreaHa! * 10000) / Math.PI) / 1000
+  return featureCollection(
+    geometries.flatMap((g) => {
+      if (g.type === 'Point') {
+        return [turfBuffer(point(g.coordinates as number[]), radiusKm, { units: 'kilometers' })]
+      }
+      if (g.type === 'MultiPoint') {
+        return [turfBuffer(multiPoint(g.coordinates as number[][]), radiusKm, { units: 'kilometers' })]
+      }
+      if (g.type === 'Polygon') return [polygon(g.coordinates as number[][][])]
+      return [multiPolygon(g.coordinates as number[][][][])]
+    }) as GeoJSON.Feature[]
+  )
+}
+
+async function renderAoiMapPng(
+  aoiEe: unknown,
+  cuttingDateIso: string,
+  sentinel2Year: number
+): Promise<Buffer | null> {
   try {
     await ensureEarthEngineInitialized()
     const ee = getEe()
-
     const geometry = ee.Geometry(aoiEe)
-    // Render area: buffered AOI bounds so the output is centered with margin (like a "fit bounds" view).
-    // We buffer in meters to work at any latitude.
     const buffered = geometry.buffer(800)
     const bounds = buffered.bounds?.(1)
     if (!bounds) return null
 
-    // Use a single Sentinel-2 year for background to keep render stable/fast.
-    // We pick the latest year we know is available in this project context (2024).
-    const year = 2024
-    const start = ee.Date.fromYMD(year, 1, 1)
-    const end = ee.Date.fromYMD(year, 12, 31)
-
-    const s2Median = ee
-      .ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-      .filterBounds(bounds)
-      .filterDate(start, end)
-      .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 70))
-      .median()
-    const s2Rgb = ee
-      .Image(s2Median)
-      .select(['B4', 'B3', 'B2'])
-      .visualize({ bands: ['B4', 'B3', 'B2'], min: 0, max: 3500, gamma: 1.15 })
-
-    // JRC forest 2020 overlay (green)
-    const jrcForest = ee.Image(JRC_GFC2020_ASSET).select('Map').eq(1).selfMask()
-    const forestVis = jrcForest.visualize({ min: 1, max: 1, palette: ['#15803d'], opacity: 0.35 })
-
-    // Hansen loss overlay (blue/red) masked to post-EUDR only; optionally classify by cutting year band
-    const gf = ee.Image(HANSEN_ASSET).clip(bounds)
-    const lossyear = gf.select('lossyear')
-    const hasLoss = lossyear.gt(0)
-    const postEu = lossyear.gte(HANSEN_EUDR_MIN_BAND).and(hasLoss)
-    const cutBand = parseCuttingYearBand(cuttingDateIso)
-
-    let lossVis: unknown
-    if (cutBand != null) {
-      const postCut = lossyear.gte(cutBand).and(hasLoss)
-      const postEuOnly = postEu.and(lossyear.lt(cutBand))
-      const classified = ee.Image(0).where(postEuOnly, 1).where(postCut, 2).updateMask(postEu)
-      lossVis = ee.Image(classified).visualize({
-        min: 1,
-        max: 2,
-        palette: [COLOR_POST_EU_ONLY, COLOR_POST_CUT],
-        opacity: 0.80,
-      })
-    } else {
-      const masked = lossyear.updateMask(postEu)
-      lossVis = ee.Image(masked).visualize({
-        min: HANSEN_EUDR_MIN_BAND,
-        max: HANSEN_LOSSYEAR_MAX_BAND,
-        palette: ['#93c5fd', '#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8', '#1e40af', '#172554'],
-        opacity: 0.80,
-      })
-    }
-
-    // AOI outline (dark blue)
-    const outlineFc = ee.FeatureCollection([ee.Feature(geometry)])
-    const outline = ee.Image().byte().paint(outlineFc, 1, 2)
-    const outlineVis = outline.visualize({ min: 0, max: 1, palette: ['#1e3a8a'], opacity: 0.95 })
-
-    const poster = ee.Image(s2Rgb).blend(forestVis).blend(lossVis).blend(outlineVis)
+    const poster = composeAoiPosterEeImage({
+      aoiGeometry: aoiEe,
+      exportBounds: bounds,
+      cuttingDateIso,
+      sentinel2Year,
+    })
 
     const thumbUrl = await getThumbUrlPromise(poster, {
       region: bounds,
-      dimensions: 1400,
+      dimensions: AOI_MAP_THUMB_PX,
       format: 'png',
     })
 
@@ -184,20 +161,62 @@ async function renderAoiMapPng(aoiEe: unknown, cuttingDateIso: string): Promise<
 }
 
 /**
- * Run Hansen forest loss histogram for AOI; saves AOI GeoJSON + metadata to user-uploads.
+ * Same EE recipe as the interactive tiles, but persisted asynchronously so the action can return
+ * immediately with tile URLs. Patches dd_report.json only if run_id still matches (avoids races).
+ */
+function schedulePersistAoiMapPng(
+  supabase: SupabaseClient,
+  params: {
+    reportPath: string
+    pngPath: string
+    runId: string
+    aoiEe: unknown
+    cuttingDateIso: string
+    sentinel2Year: number
+  }
+): void {
+  const { reportPath, pngPath, runId, aoiEe, cuttingDateIso, sentinel2Year } = params
+  void (async () => {
+    try {
+      const renderBuf = await renderAoiMapPng(aoiEe, cuttingDateIso, sentinel2Year)
+      if (!renderBuf) return
+      const { error: renderUpErr } = await supabase.storage.from('user-uploads').upload(pngPath, renderBuf, {
+        contentType: 'image/png',
+        upsert: true,
+      })
+      if (renderUpErr) return
+
+      const { data: fileData, error: dlErr } = await supabase.storage.from('user-uploads').download(reportPath)
+      if (dlErr || !fileData) return
+      const report = JSON.parse(await fileData.text()) as { run_id?: string; has_snapshot?: boolean; snapshot_storage_filename?: string }
+      if (report.run_id !== runId) return
+
+      report.has_snapshot = true
+      report.snapshot_storage_filename = AOI_MAP_RENDER_FILENAME
+      await supabase.storage.from('user-uploads').upload(reportPath, JSON.stringify(report), {
+        contentType: 'application/json',
+        upsert: true,
+      })
+    } catch {
+      /* ignore */
+    }
+  })()
+}
+
+/**
+ * Run Hansen forest loss histogram for AOI; saves AOI GeoJSON + dd_report + PNG to user-uploads (flat per session).
  */
 export async function runDueDiligenceAoiAnalysis(
   sessionId: string,
   aoi: unknown,
-  /** Obbligatorio: ISO date YYYY-MM-DD — data di taglio; senza non si esegue l'analisi */
-  cuttingDateIso?: string | null
+  cuttingDateIso?: string | null,
+  pointBufferAreaHa?: number | null
 ): Promise<{
   runId?: string
   error?: string
   metadata?: RunMetadata
   lossTiles?: { tilesUrlTemplate: string; attribution: string; dualClassMode?: boolean }
   forest2020Tiles?: { tilesUrlTemplate: string; attribution: string }
-  /** Compositi Sentinel-2 per anno (zoom elevato, confronto temporale) */
   sentinel2YearTiles?: { years: Array<{ year: number; tilesUrlTemplate: string }>; attribution: string }
 }> {
   if (!isEarthEngineConfigured()) {
@@ -218,10 +237,25 @@ export async function runDueDiligenceAoiAnalysis(
   if (!cuttingDateRaw || !/^\d{4}-\d{2}-\d{2}$/.test(cuttingDateRaw)) {
     return {
       error:
-        'Data di taglio obbligatoria: inserire una data valida (YYYY-MM-DD) prima di eseguire l\'analisi.',
+        "Data di taglio obbligatoria: inserire una data valida (YYYY-MM-DD) prima di eseguire l'analisi.",
     }
   }
   const cuttingDate = cuttingDateRaw
+  const hasPoints = hasPointGeometries(normalized.geometries)
+  let validPointBufferAreaHa: number | null = null
+  if (hasPoints) {
+    if (pointBufferAreaHa == null || !Number.isFinite(pointBufferAreaHa)) {
+      return {
+        error: `Per geometrie Point/MultiPoint indicare la superficie di analisi in ettari (max ${MAX_POINT_BUFFER_HA} ha).`,
+      }
+    }
+    if (pointBufferAreaHa <= 0 || pointBufferAreaHa > MAX_POINT_BUFFER_HA) {
+      return {
+        error: `Superficie non valida: inserire un valore tra 0 e ${MAX_POINT_BUFFER_HA} ha.`,
+      }
+    }
+    validPointBufferAreaHa = pointBufferAreaHa
+  }
 
   const supabase = await createClient()
   const {
@@ -235,16 +269,25 @@ export async function runDueDiligenceAoiAnalysis(
     return { error: e instanceof Error ? e.message : 'Accesso negato' }
   }
 
-  // Cooldown: avoid spamming Earth Engine / storage (one analysis per session should be enough in short window)
-  const { data: sessionForCooldown } = await supabase
+  const { data: sessionRow0 } = await supabase
     .from('assessment_sessions')
     .select('metadata')
     .eq('id', sessionId)
     .single()
-  const metaCooldown = (sessionForCooldown?.metadata as Record<string, unknown>) || {}
-  const ddLastRun = metaCooldown.dd_last_run as { completed_at?: string } | undefined
-  if (ddLastRun?.completed_at) {
-    const lastCompleted = Date.parse(ddLastRun.completed_at)
+
+  const meta0 = (sessionRow0?.metadata as Record<string, unknown>) || {}
+  const inProgress = meta0.dd_analysis_in_progress === true
+  const startedAt = meta0.dd_analysis_started_at
+  if (inProgress && !isAnalysisLockStale(startedAt)) {
+    return {
+      error:
+        "Un'analisi AOI è già in corso per questa sessione. Attendere il completamento o riprovare tra qualche minuto.",
+    }
+  }
+
+  const ddLastRunCooldown = meta0.dd_last_run as { completed_at?: string } | undefined
+  if (ddLastRunCooldown?.completed_at) {
+    const lastCompleted = Date.parse(ddLastRunCooldown.completed_at)
     if (Number.isFinite(lastCompleted)) {
       const elapsedSec = (Date.now() - lastCompleted) / 1000
       if (elapsedSec < DD_ANALYSIS_COOLDOWN_SEC) {
@@ -256,48 +299,51 @@ export async function runDueDiligenceAoiAnalysis(
     }
   }
 
-  // One run per session in storage: delete previous run folders before creating a new runId
-  await removePreviousDueDiligenceRuns(supabase, user.id, sessionId)
-
-  const runId = randomUUID()
-  const userId = user.id
-  const aoiPath = aoiGeoJsonPath(userId, sessionId, runId)
-  const reportPath = ddReportJsonPath(userId, sessionId, runId)
-
-  const aoiFeatureCollection = normalized.featureCollection
-
-  const { error: uploadAoiError } = await supabase.storage
-    .from('user-uploads')
-    .upload(aoiPath, JSON.stringify(aoiFeatureCollection), {
-      contentType: 'application/geo+json',
-      upsert: true,
+  const lockStarted = new Date().toISOString()
+  const lockRunId = randomUUID()
+  await supabase
+    .from('assessment_sessions')
+    .update({
+      metadata: {
+        ...meta0,
+        dd_analysis_in_progress: true,
+        dd_analysis_started_at: lockStarted,
+        dd_analysis_run_id: lockRunId,
+      } as Json,
     })
-  if (uploadAoiError) return { error: uploadAoiError.message }
+    .eq('id', sessionId)
 
-  const pendingMeta: RunMetadata = {
-    run_id: runId,
-    session_id: sessionId,
-    user_id: userId,
-    status: 'running',
-    created_at: new Date().toISOString(),
-    dataset_id: 'UMD/hansen/global_forest_change_2024_v1_12',
-    eudr_cutoff_date: EUDR_CUTOFF,
-    pixel_area_m2: 900,
-    artifact_paths: {
-      aoi_geojson: aoiPath,
-      metadata_json: reportPath,
-    },
-    cutting_date_iso: cuttingDate,
-  }
+  let runId: string | undefined
 
   try {
-    // Earth Engine: build a single AOI geometry (polygonal union) from mixed inputs.
+    await removePreviousDueDiligenceRuns(supabase, user.id, sessionId)
+
+    runId = randomUUID()
+    const userId = user.id
+    const aoiPath = aoiGeoJsonSessionPath(userId, sessionId)
+    const reportPath = ddReportJsonSessionPath(userId, sessionId)
+    const pngPath = aoiMapRenderSessionPath(userId, sessionId)
+
+    const aoiFeatureCollection = buildStorageFeatureCollection(normalized.geometries, validPointBufferAreaHa)
+
+    const { error: uploadAoiError } = await supabase.storage
+      .from('user-uploads')
+      .upload(aoiPath, JSON.stringify(aoiFeatureCollection), {
+        contentType: 'application/geo+json',
+        upsert: true,
+      })
+    if (uploadAoiError) {
+      await clearDdAnalysisLock(supabase, sessionId)
+      return { error: uploadAoiError.message }
+    }
+
     const ee = getEe()
     await ensureEarthEngineInitialized()
     const parts = normalized.geometries.map((g) => {
       const geom = ee.Geometry(g)
       if (g.type === 'Point' || g.type === 'MultiPoint') {
-        return geom.buffer(DEFAULT_POINT_BUFFER_METERS)
+        const radiusMeters = radiusMetersFromAreaHa(validPointBufferAreaHa!)
+        return geom.buffer(radiusMeters)
       }
       return geom
     })
@@ -327,14 +373,31 @@ export async function runDueDiligenceAoiAnalysis(
       forest2020TilesPromise,
       sentinel2YearTilesPromise,
     ])
+
+    const sentinel2YearForPoster =
+      sentinel2YearTilesResolved?.years?.length &&
+      sentinel2YearTilesResolved.years[sentinel2YearTilesResolved.years.length - 1]?.year != null
+        ? sentinel2YearTilesResolved.years[sentinel2YearTilesResolved.years.length - 1].year
+        : 2024
+
     const completedMeta: RunMetadata = {
-      ...pendingMeta,
+      run_id: runId,
+      session_id: sessionId,
+      user_id: userId,
       status: 'completed',
+      created_at: lockStarted,
       completed_at: new Date().toISOString(),
       aoi_area_ha: assessment.aoi_area_ha,
       loss_pixel_count: assessment.loss_pixel_count_all,
       lossyear_histogram: assessment.lossyear_histogram_all,
       dataset_id: assessment.hansen_dataset_id,
+      eudr_cutoff_date: EUDR_CUTOFF,
+      pixel_area_m2: 900,
+      artifact_paths: {
+        aoi_geojson: aoiPath,
+        metadata_json: reportPath,
+      },
+      cutting_date_iso: cuttingDate,
       eudr_refined: {
         jrc_gfc2020_dataset_id: assessment.jrc_gfc2020_dataset_id,
         forest_2020_ha_in_aoi: assessment.forest_2020_ha_in_aoi,
@@ -343,6 +406,9 @@ export async function runDueDiligenceAoiAnalysis(
         loss_pixel_count_on_forest_2020_post_eudr:
           assessment.loss_pixel_count_on_forest_2020_post_eudr,
         jrc_assessment_ok: assessment.jrc_assessment_ok,
+        ...(assessment.lossyear_histogram_on_forest_2020
+          ? { lossyear_histogram_on_forest_2020: assessment.lossyear_histogram_on_forest_2020 }
+          : {}),
         ...(assessment.jrc_assessment_error
           ? { jrc_assessment_error: assessment.jrc_assessment_error }
           : {}),
@@ -362,17 +428,14 @@ export async function runDueDiligenceAoiAnalysis(
             },
           }
         : {}),
-      cutting_date_iso: cuttingDate,
     }
 
     const ddSnapshot = buildDdLastRunSnapshot(completedMeta)
-
-    // Storage: AOI geojson + dd_report.json (tutto per PDF/replica senza GEE) + PNG snapshot per PDF.
-    // Prefer server-side render (no CORS/taint). Client snapshot is best-effort fallback.
     const reportPayload = buildDdReportPayload(
       completedMeta,
       ddSnapshot,
-      Boolean(lossTiles?.dualClassMode)
+      Boolean(lossTiles?.dualClassMode),
+      { hasSnapshot: false }
     )
 
     await supabase.storage.from('user-uploads').upload(reportPath, JSON.stringify(reportPayload), {
@@ -380,50 +443,40 @@ export async function runDueDiligenceAoiAnalysis(
       upsert: true,
     })
 
-    // Fire-and-forget: generate a stable map PNG server-side (same conceptual layers: S2 + JRC + Hansen)
-    // We intentionally do NOT await this to keep the analysis response fast.
-    void (async () => {
-      try {
-        const renderBuf = await renderAoiMapPng(aoiEe, cuttingDate)
-        if (!renderBuf) return
-        const pngPath = `${userId}/eudr-due-diligence/${sessionId}/${runId}/${AOI_MAP_RENDER_FILENAME}`
-        const { error: renderUpErr } = await supabase.storage.from('user-uploads').upload(pngPath, renderBuf, {
-          contentType: 'image/png',
-          upsert: true,
-        })
-        if (renderUpErr) return
+    schedulePersistAoiMapPng(supabase, {
+      reportPath,
+      pngPath,
+      runId,
+      aoiEe,
+      cuttingDateIso: cuttingDate,
+      sentinel2Year: sentinel2YearForPoster,
+    })
 
-        // Update dd_report.json with snapshot info (best-effort)
-        const { data: fileData, error: dlErr } = await supabase.storage.from('user-uploads').download(reportPath)
-        if (dlErr || !fileData) return
-        const report = JSON.parse(await fileData.text()) as {
-          has_snapshot?: boolean
-          snapshot_storage_filename?: string
-        }
-        report.has_snapshot = true
-        report.snapshot_storage_filename = AOI_MAP_RENDER_FILENAME
-        await supabase.storage.from('user-uploads').upload(reportPath, JSON.stringify(report), {
-          contentType: 'application/json',
-          upsert: true,
-        })
-      } catch {
-        /* ignore */
-      }
-    })()
-
-    // Persist AOI run summary on session so finalize/risultato can apply hard gate (non accettabile)
     const { data: sessionRow } = await supabase
       .from('assessment_sessions')
       .select('metadata')
       .eq('id', sessionId)
       .single()
     const prevMeta = (sessionRow?.metadata as Record<string, unknown>) || {}
+    const {
+      dd_analysis_in_progress: _p,
+      dd_analysis_started_at: _s,
+      dd_analysis_run_id: _r,
+      ...prevWithoutLock
+    } = prevMeta
+
     await supabase
       .from('assessment_sessions')
       .update({
         metadata: {
-          ...prevMeta,
+          ...prevWithoutLock,
           dd_last_run: ddSnapshot,
+          ...(!ddSnapshot.triggers_non_accettabile
+            ? {
+                aoi_gate_triggered: false,
+                aoi_gate_reasons: [],
+              }
+            : {}),
         } as Json,
       })
       .eq('id', sessionId)
@@ -436,14 +489,11 @@ export async function runDueDiligenceAoiAnalysis(
       ...(sentinel2YearTilesResolved ? { sentinel2YearTiles: sentinel2YearTilesResolved } : {}),
     }
   } catch (err) {
-    // Nessun file "failed" su storage — solo risposta errore (evita orphan inutili)
+    await clearDdAnalysisLock(supabase, sessionId)
     return { runId, error: err instanceof Error ? err.message : String(err) }
   }
 }
 
-/**
- * Signed URL to download AOI GeoJSON for map display.
- */
 export async function getDueDiligenceArtifactUrl(
   sessionId: string,
   storagePath: string
@@ -471,5 +521,3 @@ export async function getDueDiligenceArtifactUrl(
   if (error) return { error: error.message }
   return { signedUrl: data.signedUrl }
 }
-
-// (Client-side AOI map screenshots have been deprecated; rely on server-rendered PNG only.)

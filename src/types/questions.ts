@@ -44,6 +44,6 @@ export type LogicCondition = {
 export type SectionLogicRule = {
   conditions: LogicCondition[]; // Array di condizioni (TUTTE devono essere vere)
   action: 'stop_section';       // Per ora gestiamo solo lo stop
-  message: string;              // Il testo dell'Alert personalizzato
-  variant?: 'info' | 'warning' | 'success'; // Per colorare l'alert (opzionale)
+  message?: string;             // Testo dell'Alert (opzionale: per variant "silent")
+  variant?: 'info' | 'warning' | 'success' | 'silent'; // "silent" = blocca senza mostrare banner
 }
