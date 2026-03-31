@@ -18,6 +18,37 @@ function addDaysUtcDateString(days: number): string {
   return utcMidnight.toISOString().slice(0, 10) // YYYY-MM-DD
 }
 
+function formatItDateFromYmd(ymd: string): string {
+  // Expecting YYYY-MM-DD
+  const [y, m, d] = ymd.split('-')
+  if (!y || !m || !d) return ymd
+  return `${d}/${m}/${y}`
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+async function safeReadJson(req: Request): Promise<Record<string, unknown>> {
+  const contentType = req.headers.get('content-type') ?? ''
+  if (!contentType.toLowerCase().includes('application/json')) return {}
+  try {
+    const parsed = await req.json()
+    return isRecord(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function parseDaysAhead(v: unknown, fallback: number): number {
+  if (typeof v === 'number' && Number.isFinite(v)) return Math.trunc(v)
+  if (typeof v === 'string' && v.trim()) {
+    const n = Number(v)
+    if (Number.isFinite(n)) return Math.trunc(n)
+  }
+  return fallback
+}
+
 async function sendResendEmail(args: {
   apiKey: string
   from: string
@@ -50,7 +81,7 @@ async function sendResendEmail(args: {
   return { id }
 }
 
-serve(async () => {
+serve(async (req) => {
   try {
     const supabaseUrl = requireEnv('SUPABASE_URL')
     const serviceRoleKey = requireEnv('SUPABASE_SERVICE_ROLE_KEY')
@@ -61,15 +92,25 @@ serve(async () => {
       auth: { persistSession: false, autoRefreshToken: false },
     })
 
-    const reminderType = 'expiry_7d'
-    const targetDate = addDaysUtcDateString(7) // matches metadata.expiry_date format used in app
+    // Defaults for scheduled runs (no body)
+    const body = await safeReadJson(req)
+    const daysAhead = parseDaysAhead(body.daysAhead, 7)
+    const requestedReminderType = typeof body.reminderType === 'string' ? body.reminderType.trim() : ''
+    const toolId = typeof body.toolId === 'string' ? body.toolId.trim() : ''
 
-    const { data: sessions, error: sessionsError } = await supabase
+    const reminderType = requestedReminderType || `expiry_${daysAhead}d`
+    const targetDate = addDaysUtcDateString(daysAhead) // matches metadata.expiry_date format used in app
+
+    let sessionsQuery = supabase
       .from('assessment_sessions')
-      .select('id,user_id,tool_id,metadata')
+      .select('id,user_id,tool_id,metadata,evaluation_code,parent_session_id')
       .eq('status', 'completed')
       // PostgREST supports JSON path filters in column name
       .eq('metadata->>expiry_date', targetDate)
+
+    if (toolId) sessionsQuery = sessionsQuery.eq('tool_id', toolId)
+
+    const { data: sessions, error: sessionsError } = await sessionsQuery
 
     if (sessionsError) throw new Error(`assessment_sessions: ${sessionsError.message}`)
 
@@ -77,12 +118,32 @@ serve(async () => {
       id: string
       user_id: string
       tool_id: string
+      evaluation_code: number
+      parent_session_id: string | null
     }>
 
     if (candidates.length === 0) {
       return new Response(JSON.stringify({ ok: true, targetDate, candidates: 0 }), {
         headers: { 'Content-Type': 'application/json' },
       })
+    }
+
+    // Map parent_session_id -> evaluation_code, so the email uses the "base analysis" number.
+    const parentIds = Array.from(
+      new Set(candidates.map((c) => c.parent_session_id).filter((v): v is string => Boolean(v)))
+    )
+    const parentCodeById = new Map<string, number>()
+    if (parentIds.length > 0) {
+      const { data: parents, error: parentsError } = await supabase
+        .from('assessment_sessions')
+        .select('id,evaluation_code')
+        .in('id', parentIds)
+      if (parentsError) throw new Error(`assessment_sessions parents: ${parentsError.message}`)
+      for (const p of parents ?? []) {
+        const id = String((p as any).id ?? '')
+        const code = Number((p as any).evaluation_code ?? NaN)
+        if (id && Number.isFinite(code)) parentCodeById.set(id, code)
+      }
     }
 
     const userIds = Array.from(new Set(candidates.map((c) => c.user_id)))
@@ -93,11 +154,11 @@ serve(async () => {
 
     if (profilesError) throw new Error(`profiles: ${profilesError.message}`)
 
-    const emailByUserId = new Map<string, { email: string; full_name: string | null }>()
+    const profileByUserId = new Map<string, { email: string; full_name: string | null }>()
     for (const p of profiles ?? []) {
       const email = String((p as any).email ?? '').trim()
       if (!email) continue
-      emailByUserId.set(String((p as any).id), {
+      profileByUserId.set(String((p as any).id), {
         email,
         full_name: ((p as any).full_name as string | null) ?? null,
       })
@@ -109,7 +170,8 @@ serve(async () => {
     const errors: Array<{ sessionId: string; error: string }> = []
 
     for (const c of candidates) {
-      const to = emailByUserId.get(c.user_id)?.email
+      const profile = profileByUserId.get(c.user_id)
+      const to = profile?.email
       if (!to) {
         skipped++
         continue
@@ -143,12 +205,21 @@ serve(async () => {
 
       // 2) Send email
       try {
-        const subject = `Promemoria: scadenza tra 7 giorni (${targetDate})`
+        const baseCode =
+          c.parent_session_id ? parentCodeById.get(c.parent_session_id) : undefined
+        const analysisNumber = String(baseCode ?? c.evaluation_code ?? '')
+        const subject = `Scadenza analisi n. ${analysisNumber}`
+        const recipientName = (profile?.full_name ?? '').trim() || 'Gentile Cliente'
+        const itDate = formatItDateFromYmd(targetDate)
         const html = `
           <div style="font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;">
-            <p>Ciao,</p>
-            <p>ti ricordiamo che una tua analisi/strumento risulta in scadenza il <strong>${targetDate}</strong>.</p>
-            <p>Se hai bisogno di assistenza, rispondi a questa email.</p>
+            <p>${recipientName},</p>
+            <p>
+              comunichiamo che l’analisi n. <strong>${analysisNumber}</strong> scade il <strong>${itDate}</strong>.
+              Si prega di aggiornarla entro tale termine per garantire conformità al Regolamento UE 2023/1115.
+              Restiamo a disposizione per supporto.
+            </p>
+            <p>Cordiali saluti,<br />Vincenzo</p>
           </div>
         `
         const { id: providerId } = await sendResendEmail({
@@ -179,7 +250,9 @@ serve(async () => {
       JSON.stringify({
         ok: true,
         reminderType,
+        daysAhead,
         targetDate,
+        toolId: toolId || null,
         candidates: candidates.length,
         inserted,
         sent,

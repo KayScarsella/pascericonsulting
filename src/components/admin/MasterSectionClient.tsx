@@ -47,6 +47,7 @@ import {
   deleteUserFromToolAction,
   cleanupPendingOnboardingUsersAction,
 } from '@/actions/users'
+import { triggerExpiryRemindersNowAction } from '@/actions/email-reminders'
 import type { ToolUserRow } from '@/actions/users'
 import type { Database } from '@/types/supabase'
 import { toast } from 'sonner'
@@ -142,6 +143,7 @@ export function MasterSectionClient({
   const [inviteRole, setInviteRole] = useState<'standard' | 'premium'>('standard')
   const [inviteLoading, setInviteLoading] = useState(false)
   const [cleanupLoading, setCleanupLoading] = useState(false)
+  const [expirySending, setExpirySending] = useState(false)
 
   if (section === 'users') {
     const data = usersData ?? []
@@ -358,6 +360,35 @@ export function MasterSectionClient({
     return (
       <>
         <div className="mb-4 flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              if (
+                !confirm(
+                  'Inviare ORA le email di scadenza (oggi) a tutti gli utenti con sessioni completate in scadenza oggi? L’operazione è idempotente (non reinvia se già fatto).'
+                )
+              ) {
+                return
+              }
+              setExpirySending(true)
+              const res = await triggerExpiryRemindersNowAction(toolId)
+              setExpirySending(false)
+              if (res.success) {
+                toast.success('Invio promemoria avviato.', {
+                  description: `targetDate=${res.data.targetDate} • candidates=${res.data.candidates} • sent=${res.data.sent} • skipped=${res.data.skipped}`,
+                })
+                router.refresh()
+              } else {
+                toast.error(res.error ?? 'Invio promemoria fallito.')
+              }
+            }}
+            disabled={expirySending}
+            title="Invia subito le email di scadenza (oggi)"
+          >
+            {expirySending ? 'Invio...' : 'Invia email scadenze (oggi)'}
+          </Button>
           <Button
             type="button"
             variant="outline"
