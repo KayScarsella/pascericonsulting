@@ -110,14 +110,15 @@ export class UserService {
   async getToolUsersPaginated(
     toolId: string,
     page: number,
-    limit: number
+    limit: number,
+    opts?: { q?: string }
   ): Promise<{ data: Awaited<ReturnType<UserService["getToolUsers"]>>; totalCount: number }> {
     await this.verifyToolAdmin(toolId);
 
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
-    const { data, error, count } = await this.supabase
+    const query = this.supabase
       .from('tool_access')
       .select(
         `
@@ -150,6 +151,19 @@ export class UserService {
       .eq('tool_id', toolId)
       .order('created_at', { ascending: false })
       .range(from, to);
+
+    const q = (opts?.q ?? '').trim()
+    if (q) {
+      query.or(
+        [
+          `profiles.full_name.ilike.%${q}%`,
+          `profiles.email.ilike.%${q}%`,
+          `profiles.ragione_sociale.ilike.%${q}%`,
+        ].join(',')
+      )
+    }
+
+    const { data, error, count } = await query;
     // #region agent log
     fetch('http://127.0.0.1:7443/ingest/e3f27f07-b7f1-4eb5-9645-5d724b3a3d9b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1c1df8'},body:JSON.stringify({sessionId:'1c1df8',runId:'pre-fix',hypothesisId:'H2',location:'src/actions/UserService.ts:getToolUsersPaginated',message:'Paginated users query result',data:{toolId,page,limit,hasError:Boolean(error),errorMessage:error?.message ?? null,count:count ?? null,rowsCount:Array.isArray(data)?data.length:null,firstProfilesIsArray:Array.isArray(data)&&data.length>0?Array.isArray(data[0]?.profiles):null},timestamp:Date.now()})}).catch(()=>{});
     // #endregion

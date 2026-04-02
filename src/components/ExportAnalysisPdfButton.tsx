@@ -263,13 +263,23 @@ function buildPdf(
   doc.text(`${formatValue(userProfile?.recapito_telefonico)} · — · — · —`, supplierX, y, { maxWidth: 120 })
   y = barTop + barH + 7
 
-  // Esito in evidenza prima della sintesi analisi
+  const outcomeLabels = {
+    acceptable: 'Rischio Trascurabile',
+    unacceptable: 'Rischio Non Trascurabile',
+  } as const
+
+  // Esito in evidenza prima della sintesi analisi (dettaglio dentro il box verde/rosso)
   const nonAcceptableMessage =
-    'Esito non accettabile non è conforme alla normativa EUDR a causa di evidenza geospaziale di deforestazione. Sono necessarie verifiche e/o mitigazione.'
+    'Esito non trascurabile non è conforme alla normativa EUDR a causa di evidenza geospaziale di possibile deforestazione. Sono necessarie verifiche e/o mitigazione.'
   const outcomeDetailLines = !isAccettabile
     ? doc.splitTextToSize(nonAcceptableMessage, pageW - 2 * margin - 10)
     : []
-  const outcomeBoxH = !isAccettabile ? 16 + outcomeDetailLines.length * 4.2 : 18
+  const acceptableDetailLines = isAccettabile
+    ? doc.splitTextToSize((outcomeDescription || '').trim() || '—', pageW - 2 * margin - 10)
+    : []
+  const outcomeBoxH =
+    16 +
+    (isAccettabile ? acceptableDetailLines.length : outcomeDetailLines.length) * 4.2
   const outcomeColor: [number, number, number] = isAccettabile ? [74, 124, 46] : [185, 28, 28]
   const outcomeBg: [number, number, number] = isAccettabile ? [232, 245, 226] : [254, 242, 242]
   doc.setFillColor(outcomeBg[0], outcomeBg[1], outcomeBg[2])
@@ -280,11 +290,15 @@ function buildPdf(
   doc.setFontSize(13)
   doc.setFont('helvetica', 'bold')
   doc.setTextColor(outcomeColor[0], outcomeColor[1], outcomeColor[2])
-  doc.text(isAccettabile ? 'Rischio Accettabile' : 'Rischio Non Accettabile', margin + 6, y + 7)
+  doc.text(isAccettabile ? outcomeLabels.acceptable : outcomeLabels.unacceptable, margin + 6, y + 7)
   doc.setFontSize(9)
   doc.setFont('helvetica', 'normal')
   doc.text(`Indice massimo: ${overallRisk.toFixed(2)}`, margin + 6, y + 13)
-  if (!isAccettabile) {
+  if (isAccettabile) {
+    doc.setFontSize(8.5)
+    doc.setTextColor(outcomeColor[0], outcomeColor[1], outcomeColor[2])
+    doc.text(acceptableDetailLines, margin + 6, y + 17)
+  } else {
     doc.setFontSize(8.5)
     doc.text(outcomeDetailLines, margin + 6, y + 17)
   }
@@ -302,7 +316,7 @@ function buildPdf(
       ['Paese', countryName + (countryHasConflicts ? ' (Conflitti)' : '')],
       ['Scadenza', expiryDate ? new Date(expiryDate).toLocaleDateString('it-IT') : '—'],
       ['Rischio complessivo (MAX)', overallRisk.toFixed(2)],
-      ['Esito', isAccettabile ? 'Rischio Accettabile' : 'Rischio Non Accettabile'],
+      ['Esito', isAccettabile ? outcomeLabels.acceptable : outcomeLabels.unacceptable],
     ],
     margin: { left: margin, right: margin },
     theme: 'grid',
@@ -338,13 +352,7 @@ function buildPdf(
     pageBreak: 'auto',
   })
   y = (docWithTableHeader.lastAutoTable?.finalY ?? y) + 6
-  if (isAccettabile) {
-    doc.setFontSize(10)
-    doc.setFont('helvetica', 'normal')
-    const descLines = doc.splitTextToSize(outcomeDescription, pageW - 2 * margin)
-    doc.text(descLines, margin, y)
-    y += descLines.length * 5 + 8
-  } else {
+  if (!isAccettabile) {
     y += 2
   }
   drawSectionDivider('Risposte del questionario')
@@ -378,6 +386,13 @@ function buildPdf(
     }
   }
 
+  const withSequentialLetterPrefix = (title: string, index: number): string => {
+    const letter = String.fromCharCode('A'.charCodeAt(0) + (index % 26))
+    const t = normalizePdfText(title).trim()
+    const rest = t.replace(/^[A-Z][).]\s*/i, '').trim()
+    return `${letter}) ${rest || t}`
+  }
+
   if (sectionsForPdfMerged.length > 0) {
     if (y > 230) {
       doc.addPage()
@@ -387,7 +402,7 @@ function buildPdf(
   }
 
   const docWithTable = doc as jsPDF & { lastAutoTable?: { finalY: number } }
-  for (const section of sectionsForPdfMerged) {
+  for (const [idx, section] of sectionsForPdfMerged.entries()) {
     if (y > 260) {
       doc.addPage()
       y = margin
@@ -395,7 +410,10 @@ function buildPdf(
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(13)
     if (isEudrPdf) {
-      const titleLines = doc.splitTextToSize(normalizePdfText(section.sectionTitle), pageW - 2 * margin)
+      const titleLines = doc.splitTextToSize(
+        withSequentialLetterPrefix(section.sectionTitle, idx),
+        pageW - 2 * margin
+      )
       const lineH = 6
       // Se il titolo occupa troppo spazio a fondo pagina, vai a pagina nuova.
       if (y + titleLines.length * lineH > pageH - margin - 10) {
@@ -405,7 +423,7 @@ function buildPdf(
       doc.text(titleLines, margin, y)
       y += titleLines.length * lineH + 5
     } else {
-      doc.text(section.sectionTitle, margin, y)
+      doc.text(withSequentialLetterPrefix(section.sectionTitle, idx), margin, y)
       y += 11
     }
 
@@ -422,20 +440,20 @@ function buildPdf(
       if (q.mitigation && q.mitigation.length > 0) {
         tableBody.push([
           { content: '' },
-          { content: 'Mitigazione', styles: { fontStyle: 'italic' } },
+          { content: 'Mitigazione', styles: { fontStyle: 'bold' } },
         ])
         for (const m of q.mitigation) {
           tableBody.push([
             { content: '' },
             {
               content: `${m.date}: da "${m.previousLabel}" a "${m.newLabel}".`,
-              styles: { fontStyle: 'italic' },
+              styles: { fontStyle: 'bold' },
             },
           ])
           if (m.comment) {
             tableBody.push([
               { content: '' },
-              { content: `Commento: ${m.comment}`, styles: { fontStyle: 'italic' } },
+              { content: `Commento: ${m.comment}`, styles: { fontStyle: 'bold' } },
             ])
           }
         }
@@ -575,7 +593,7 @@ function buildPdf(
 
       const aoiSummaryRows: Array<[string, string]> = [
         ['Data di taglio', normalizePdfText(`${ddPdfPayload.cutting_date_iso} (anno ${ddPdfPayload.cutting_year})`)],
-        ['Esito gate AOI', normalizePdfText(gateActive ? 'NON ACCETTABILE' : 'nessun gate attivato')],
+        ['Esito gate AOI', normalizePdfText(gateActive ? 'NON TRASCURABILE' : 'nessun gate attivato')],
       ]
       autoTable(doc, {
         startY: y,
@@ -707,7 +725,7 @@ function buildPdf(
       detailRowsFromPayload.length > 0
         ? detailRowsFromPayload
         : [
-            ['Logica screening', gateActive ? 'Gate AOI attivato (esito non accettabile).' : 'Nessun gate AOI attivato.'],
+            ['Logica screening', gateActive ? 'Gate AOI attivato (esito non trascurabile).' : 'Nessun gate AOI attivato.'],
             [
               'Risultato numerico',
               `Pixel Hansen con loss ~ ${ddPdfPayload.loss_pixel_count ?? '—'} · AOI ~ ${ddPdfPayload.aoi_area_ha?.toFixed(2) ?? '—'} ha`,

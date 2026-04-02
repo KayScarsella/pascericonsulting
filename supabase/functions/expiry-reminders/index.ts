@@ -1,9 +1,12 @@
+// @ts-nocheck
 /// <reference types="https://deno.land/x/typescript_types@v1.0.0/index.d.ts" />
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.94.0'
+import { createClient } from 'npm:@supabase/supabase-js@2.94.0'
 
 type Json = Record<string, unknown>
+
+const TEMPLATE_VERSION = '2026-03-31-v2'
 
 function requireEnv(name: string): string {
   const v = Deno.env.get(name)?.trim()
@@ -123,9 +126,24 @@ serve(async (req) => {
     }>
 
     if (candidates.length === 0) {
-      return new Response(JSON.stringify({ ok: true, targetDate, candidates: 0 }), {
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          templateVersion: TEMPLATE_VERSION,
+          reminderType,
+          daysAhead,
+          targetDate,
+          toolId: toolId || null,
+          candidates: 0,
+          inserted: 0,
+          sent: 0,
+          skipped: 0,
+          errors: [],
+        }),
+        {
         headers: { 'Content-Type': 'application/json' },
-      })
+        }
+      )
     }
 
     // Map parent_session_id -> evaluation_code, so the email uses the "base analysis" number.
@@ -213,6 +231,7 @@ serve(async (req) => {
         const itDate = formatItDateFromYmd(targetDate)
         const html = `
           <div style="font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;">
+            <!-- template_version:${TEMPLATE_VERSION} -->
             <p>${recipientName},</p>
             <p>
               comunichiamo che l’analisi n. <strong>${analysisNumber}</strong> scade il <strong>${itDate}</strong>.
@@ -249,6 +268,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         ok: true,
+        templateVersion: TEMPLATE_VERSION,
         reminderType,
         daysAhead,
         targetDate,

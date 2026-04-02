@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import {
   DataManagementTable,
@@ -67,58 +67,31 @@ export function EudrSearchView({
   isAdmin,
 }: EudrSearchViewProps) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const isAnalisi = tab !== "verifiche"
 
-  const [filterStato, setFilterStato] = useState<string>("all")
-  const [sortField, setSortField] = useState<VerificheSortField | null>(null)
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
+  const filterStato = searchParams.get("stato") ?? "all"
+  const vq = searchParams.get("vq") ?? ""
+  const vsort = searchParams.get("vsort") ?? "created_at"
+  const vdir = (searchParams.get("vdir") === "asc" ? "asc" : "desc") as "asc" | "desc"
 
-  const verificheFilteredByStato = useMemo(() => {
-    if (filterStato === "all") return verifications
-    return verifications.filter((row) => {
-      const s = getStatusLabel(row)
-      if (filterStato === "conclusa" && s.key === "esente") return true
-      return s.key === filterStato
-    })
-  }, [verifications, filterStato])
-
-  const handleVerificheSort = (field: string) => {
-    const f = field as VerificheSortField
-    if (sortField === f) setSortDir((d) => (d === "asc" ? "desc" : "asc"))
-    else {
-      setSortField(f)
-      setSortDir("asc")
+  const pushParams = (next: Record<string, string | null | undefined>) => {
+    const sp = new URLSearchParams(searchParams.toString())
+    for (const [k, v] of Object.entries(next)) {
+      if (v == null || v === "") sp.delete(k)
+      else sp.set(k, v)
     }
+    router.push(`/EUDR/search?${sp.toString()}`)
   }
 
-  const verificheSortCompare = (
-    a: EudrVerificationRow,
-    b: EudrVerificationRow,
-    field: string,
-    dir: "asc" | "desc"
-  ) => {
-    let va: string | number = ""
-    let vb: string | number = ""
-
-    if (field === "created_at") {
-      va = a.created_at
-      vb = b.created_at
-    } else if (field === "nomeCommerciale") {
-      va = (a.metadata?.nome_commerciale ?? "").toLowerCase()
-      vb = (b.metadata?.nome_commerciale ?? "").toLowerCase()
-    } else if (field === "stato") {
-      va = getStatusLabel(a).key
-      vb = getStatusLabel(b).key
-    }
-
-    if (va < vb) return dir === "asc" ? -1 : 1
-    if (va > vb) return dir === "asc" ? 1 : -1
-    return 0
+  const handleVerificheSort = (field: string) => {
+    const nextDir = vsort === field ? (vdir === "asc" ? "desc" : "asc") : "asc"
+    pushParams({ vsort: field, vdir: nextDir, vpage: "1" })
   }
 
   const handleVerifichePageChange = (newPage: number) => {
     if (newPage < 1 || newPage > totalPagesV) return
-    router.push(`/EUDR/search?tab=verifiche&vpage=${newPage}`)
+    pushParams({ tab: "verifiche", vpage: String(newPage) })
   }
 
   const handleOpen = (row: EudrVerificationRow) => {
@@ -129,7 +102,6 @@ export function EudrSearchView({
     {
       id: "nomeCommerciale",
       header: "Nome Commerciale",
-      sortKey: "nomeCommerciale",
       render: (row) => (
         <span className="font-medium text-slate-900">
           {row.metadata?.nome_commerciale ?? (
@@ -166,7 +138,6 @@ export function EudrSearchView({
     {
       id: "stato",
       header: "Stato",
-      sortKey: "stato",
       render: (row) => {
         const status = getStatusLabel(row)
         return (
@@ -197,7 +168,7 @@ export function EudrSearchView({
               ? "rounded-full px-4 py-1 h-8 text-sm"
               : "rounded-full px-4 py-1 h-8 text-sm text-slate-600"
           }
-          onClick={() => router.push("/EUDR/search?tab=analisi&page=1")}
+          onClick={() => pushParams({ tab: "analisi", page: "1" })}
         >
           Analisi finali
         </Button>
@@ -210,7 +181,7 @@ export function EudrSearchView({
               ? "rounded-full px-4 py-1 h-8 text-sm"
               : "rounded-full px-4 py-1 h-8 text-sm text-slate-600"
           }
-          onClick={() => router.push("/EUDR/search?tab=verifiche&vpage=1")}
+          onClick={() => pushParams({ tab: "verifiche", vpage: "1" })}
         >
           Verifiche
         </Button>
@@ -226,31 +197,32 @@ export function EudrSearchView({
       ) : (
         <DataManagementTable<EudrVerificationRow>
           title="Verifiche preliminari EUDR"
-          data={verificheFilteredByStato}
+          data={verifications}
           columns={columns}
           getRowId={(row) => row.id}
           searchPlaceholder="Cerca per nome commerciale..."
-          filterPredicate={(row, q) =>
-            (row.metadata?.nome_commerciale ?? "").toLowerCase().includes(q)
-          }
+          searchMode="server"
+          search={{
+            value: vq,
+            onChange: (next) => pushParams({ vq: next, vpage: "1" }),
+          }}
           sortConfig={{
-            field: sortField,
-            dir: sortDir,
+            field: vsort,
+            dir: vdir,
             onSort: handleVerificheSort,
           }}
-          sortCompare={verificheSortCompare}
           toolbarExtra={
             <select
               className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300"
               value={filterStato}
-              onChange={(e) => setFilterStato(e.target.value)}
+              onChange={(e) => pushParams({ stato: e.target.value, vpage: "1" })}
             >
               <option value="all">Tutti gli stati</option>
               <option value="in_corso">In corso</option>
               <option value="conclusa">Concluse / Esenti</option>
             </select>
           }
-          resultCountLabel={`${verificheFilteredByStato.length} risultati`}
+          resultCountLabel={`${verifications.length} risultati`}
           selectable
           onBulkDelete={async (ids) => {
             const res = await deleteRecords(ids)

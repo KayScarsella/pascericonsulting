@@ -8,6 +8,15 @@ import { Lock } from "lucide-react"
 
 import { AssessmentSessionRow, SessionMetadata } from "@/components/TimberAnalisiTable"
 import { VerificationRow, TimberSearchView } from "@/components/TimberSearchView"
+import {
+  parsePageParam,
+  parseSearchParam,
+  parseSortDirParam,
+} from "@/lib/table-query"
+import {
+  ANALISI_FINALE_GOOD_OUTCOMES,
+  ANALISI_FINALE_NEGATIVE_OUTCOMES,
+} from "@/lib/final-outcome"
 
 // ID della domanda "Nome Commerciale" nelle verifiche Timber
 const NOME_COMMERCIALE_QUESTION_ID = '8e2d4d57-161c-4f37-8089-04ab947389e1'
@@ -19,8 +28,16 @@ export default async function SearchPage({
 }) {
   const params = await searchParams
   const tab = (params.tab as string) || 'analisi'
-  const page = Math.max(1, parseInt((params.page as string) || '1', 10))
-  const vpage = Math.max(1, parseInt((params.vpage as string) || '1', 10))
+  const page = parsePageParam(params.page, 1)
+  const vpage = parsePageParam(params.vpage, 1)
+  const q = parseSearchParam(params.q)
+  const vq = parseSearchParam(params.vq)
+  const sort = (params.sort as string) || 'created_at'
+  const dir = parseSortDirParam(params.dir)
+  const vsort = (params.vsort as string) || 'created_at'
+  const vdir = parseSortDirParam(params.vdir)
+  const esito = (params.esito as string) || 'all'
+  const stato = (params.stato as string) || 'all'
   const limit = 25
   const start = (page - 1) * limit
   const end = start + limit - 1
@@ -65,8 +82,28 @@ export default async function SearchPage({
     .eq('tool_id', TIMBER_TOOL_ID)
     .eq('session_type', 'analisi_finale')
   if (!isAdmin) analisiQuery.eq('user_id', user.id)
+  if (esito === 'in_corso') {
+    analisiQuery.neq('status', 'completed')
+  } else if (esito === 'accettabile') {
+    analisiQuery.eq('status', 'completed')
+    analisiQuery.in('final_outcome', [...ANALISI_FINALE_GOOD_OUTCOMES])
+  } else if (esito === 'non_accettabile') {
+    analisiQuery.eq('status', 'completed')
+    analisiQuery.in('final_outcome', [...ANALISI_FINALE_NEGATIVE_OUTCOMES])
+  }
+  if (q) {
+    const n = Number.parseInt(q, 10)
+    const numericClause = Number.isFinite(n) ? `,evaluation_code.eq.${n}` : ""
+    analisiQuery.or(
+      [
+        `metadata->>nome_operazione.ilike.%${q}%`,
+        `metadata->>operation_name.ilike.%${q}%`,
+        `profiles.full_name.ilike.%${q}%`,
+      ].join(",") + numericClause
+    )
+  }
   const { data, count, error } = await analisiQuery
-    .order('created_at', { ascending: false })
+    .order(sort, { ascending: dir === 'asc' })
     .range(start, end)
 
   if (error) {
@@ -132,8 +169,23 @@ export default async function SearchPage({
     .eq('tool_id', TIMBER_TOOL_ID)
     .eq('session_type', 'verifica')
   if (!isAdmin) verifListQuery.eq('user_id', user.id)
+  if (stato === 'in_corso') {
+    verifListQuery.neq('status', 'completed')
+  } else if (stato === 'conclusa') {
+    verifListQuery.eq('status', 'completed')
+  }
+  if (vq) {
+    const n = Number.parseInt(vq, 10)
+    const numericClause = Number.isFinite(n) ? `,evaluation_code.eq.${n}` : ""
+    verifListQuery.or(
+      [
+        `metadata->>nome_commerciale.ilike.%${vq}%`,
+        `profiles.full_name.ilike.%${vq}%`,
+      ].join(",") + numericClause
+    )
+  }
   const { data: baseSessions } = await verifListQuery
-    .order('created_at', { ascending: false })
+    .order(vsort, { ascending: vdir === 'asc' })
     .range(vstart, vend)
 
   let verificationRows: VerificationRow[] = []

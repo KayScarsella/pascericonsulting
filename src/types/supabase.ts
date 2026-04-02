@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -84,7 +84,6 @@ export type Database = {
           corruption_code: Database["public"]["Enums"]["Corruption_Code"] | null
           country_name: string | null
           country_risk: Database["public"]["Enums"]["country_risk"] | null
-          cpi: number | null
           extra_eu: boolean | null
           fao: number | null
           FSI: number | null
@@ -100,7 +99,6 @@ export type Database = {
             | null
           country_name?: string | null
           country_risk?: Database["public"]["Enums"]["country_risk"] | null
-          cpi?: number | null
           extra_eu?: boolean | null
           fao?: number | null
           FSI?: number | null
@@ -116,7 +114,6 @@ export type Database = {
             | null
           country_name?: string | null
           country_risk?: Database["public"]["Enums"]["country_risk"] | null
-          cpi?: number | null
           extra_eu?: boolean | null
           fao?: number | null
           FSI?: number | null

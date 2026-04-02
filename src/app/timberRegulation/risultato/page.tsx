@@ -127,7 +127,7 @@ export default async function RisultatoPage({
   if (session.status !== 'completed' || !session.final_outcome) {
     const updatePayload: Record<string, unknown> = {
       status: 'completed',
-      final_outcome: result.outcome === 'accettabile' ? 'Rischio accettabile' : 'Rischio non accettabile',
+      final_outcome: result.outcome === 'accettabile' ? 'Rischio Trascurabile' : 'Rischio Non Trascurabile',
       metadata: {
         ...(metadata || {}),
         risk_score: result.overallRisk,
@@ -200,7 +200,7 @@ export default async function RisultatoPage({
   }
   type SupplierRecord = { name: string; vat_number: string | null; eori_number: string | null; address: string | null; phone: string | null; email: string | null; website: string | null; contact_person: string | null }
   const supplierRecordsById: Record<string, SupplierRecord> = {}
-  let supplierDetailsMap: Record<string, string> = {}
+  const supplierDetailsMap: Record<string, string> = {}
   if (supplierIds.size > 0) {
     const { data: suppliersRows } = await supabase
       .from('suppliers')
@@ -374,7 +374,7 @@ export default async function RisultatoPage({
               Esito Analisi
             </p>
             <h1 className="text-2xl md:text-3xl font-bold text-slate-900 tracking-tight">
-              {isAccettabile ? 'Rischio Accettabile' : 'Rischio Non Accettabile'}
+              {isAccettabile ? 'Rischio Trascurabile' : 'Rischio Non Trascurabile'}
             </h1>
             <p className="mt-2 text-slate-600 text-sm leading-relaxed max-w-2xl">
               {result.outcomeDescription}

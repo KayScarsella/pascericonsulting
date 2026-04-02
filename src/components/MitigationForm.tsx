@@ -110,15 +110,6 @@ export function MitigationForm({
             return
         }
 
-        const missingFile = mitigations.some(m => {
-            const q = failingQuestions.find(f => f.questionId === m.questionId)
-            return q?.requiresFile && !m.filePath
-        })
-        if (missingFile) {
-            toast.warning("Allega il file richiesto per le domande che lo prevedono.")
-            return
-        }
-
         setIsSaving(true)
         const toastId = toast.loading("Salvataggio mitigazione...")
 
@@ -260,7 +251,7 @@ export function MitigationForm({
                             {q.requiresFile && selectedAnswer && selectedAnswer !== (q.currentAnswer || '') && (
                                 <div>
                                     <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
-                                        File allegato <span className="text-red-500">*</span>
+                                        File allegato (opzionale)
                                     </label>
                                     {files[q.questionId] ? (
                                         <div className="flex items-center gap-2 p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm">
@@ -285,7 +276,7 @@ export function MitigationForm({
                                                 className="absolute inset-0 opacity-0 cursor-pointer z-10"
                                                 onChange={e => handleFileUpload(q.questionId, e)}
                                                 disabled={fileUploading[q.questionId]}
-                                                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp"
+                                                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.txt"
                                             />
                                             <Button
                                                 type="button"

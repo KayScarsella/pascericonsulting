@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import {
   DataManagementTable,
@@ -17,6 +17,7 @@ import {
   CheckCircle2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { finalOutcomeIsNegative } from '@/lib/final-outcome'
 
 export type SessionMetadata = {
   nome_operazione?: string
@@ -50,64 +51,32 @@ type SortField = 'base_evaluation_code' | 'date' | 'nome_operazione' | 'final_ou
 
 export function TimberAnalisiTable({ data, page, totalPages, isAdmin }: TimberAnalisiTableProps) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [currentTime] = useState(() => Date.now())
-  const [filterEsito, setFilterEsito] = useState<string>('all')
-  const [sortField, setSortField] = useState<SortField | null>(null)
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const filterEsito = searchParams.get('esito') ?? 'all'
+  const q = searchParams.get('q') ?? ''
+  const sortField = searchParams.get('sort') ?? 'created_at'
+  const sortDir = (searchParams.get('dir') === 'asc' ? 'asc' : 'desc') as 'asc' | 'desc'
 
-  const dataFilteredByEsito = useMemo(() => {
-    if (filterEsito === 'all') return data
-    return data.filter((row) => {
-      const isAcceptable =
-        row.final_outcome?.toLowerCase().includes('accettabile') &&
-        !row.final_outcome?.toLowerCase().includes('non accettabile')
-      if (filterEsito === 'in_corso') return row.status !== 'completed'
-      if (filterEsito === 'accettabile') return row.status === 'completed' && isAcceptable
-      if (filterEsito === 'non_accettabile') return row.status === 'completed' && !isAcceptable
-      return true
-    })
-  }, [data, filterEsito])
-
-  const handleSort = (field: string) => {
-    const f = field as SortField
-    if (sortField === f) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-    else {
-      setSortField(f)
-      setSortDir('asc')
+  const pushParams = (next: Record<string, string | null | undefined>) => {
+    const sp = new URLSearchParams(searchParams.toString())
+    for (const [k, v] of Object.entries(next)) {
+      if (v == null || v === '') sp.delete(k)
+      else sp.set(k, v)
     }
+    router.push(`/timberRegulation/search?${sp.toString()}`)
   }
 
-  const sortCompare: (a: AssessmentSessionRow, b: AssessmentSessionRow, field: string, dir: 'asc' | 'desc') => number = (
-    a,
-    b,
-    field,
-    dir
-  ) => {
-    let va: string | number = ''
-    let vb: string | number = ''
-    if (field === 'base_evaluation_code') {
-      va = a.base_evaluation_code
-      vb = b.base_evaluation_code
-    } else if (field === 'date') {
-      va = a.metadata?.expiry_date || a.created_at || ''
-      vb = b.metadata?.expiry_date || b.created_at || ''
-    } else if (field === 'nome_operazione') {
-      va = (a.metadata?.nome_operazione || a.metadata?.operation_name || '').toLowerCase()
-      vb = (b.metadata?.nome_operazione || b.metadata?.operation_name || '').toLowerCase()
-    } else if (field === 'final_outcome') {
-      va = (a.final_outcome || '').toLowerCase()
-      vb = (b.final_outcome || '').toLowerCase()
-    }
-    if (va < vb) return dir === 'asc' ? -1 : 1
-    if (va > vb) return dir === 'asc' ? 1 : -1
-    return 0
+  const handleSort = (field: string) => {
+    const nextDir = sortField === field ? (sortDir === 'asc' ? 'desc' : 'asc') : 'asc'
+    pushParams({ sort: field, dir: nextDir, page: '1' })
   }
 
   const columns: DataManagementColumn<AssessmentSessionRow>[] = [
     {
       id: 'codice',
       header: 'Codice',
-      sortKey: 'base_evaluation_code',
+      sortKey: 'evaluation_code',
       render: (row) => (
         <span className="w-fit bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs font-mono border border-slate-200">
           {String(row.base_evaluation_code ?? row.evaluation_code ?? 0)}
@@ -117,7 +86,7 @@ export function TimberAnalisiTable({ data, page, totalPages, isAdmin }: TimberAn
     {
       id: 'date',
       header: 'Data',
-      sortKey: 'date',
+      sortKey: 'created_at',
       render: (row) => {
         const expiryDateStr = row.metadata?.expiry_date as string | undefined
         const isExpired = expiryDateStr
@@ -150,7 +119,6 @@ export function TimberAnalisiTable({ data, page, totalPages, isAdmin }: TimberAn
     {
       id: 'nome_operazione',
       header: 'Nome Operazione',
-      sortKey: 'nome_operazione',
       render: (row) => {
         const meta = row.metadata || {}
         return (
@@ -172,9 +140,7 @@ export function TimberAnalisiTable({ data, page, totalPages, isAdmin }: TimberAn
         const isExpired = expiryDateStr
           ? new Date(expiryDateStr).getTime() < currentTime
           : false
-        const isNonAccettabile = row.final_outcome
-          ?.toLowerCase()
-          .includes('non accettabile')
+        const isNonAccettabile = finalOutcomeIsNegative(row.final_outcome)
         if (row.status !== 'completed') {
           return (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 text-xs font-semibold border border-slate-200">
@@ -224,45 +190,41 @@ export function TimberAnalisiTable({ data, page, totalPages, isAdmin }: TimberAn
 
   const handlePageChange = (newPage: number) => {
     if (newPage < 1 || newPage > totalPages) return
-    router.push(`/timberRegulation/search?tab=analisi&page=${newPage}`)
+    pushParams({ tab: 'analisi', page: String(newPage) })
   }
 
   return (
     <DataManagementTable<AssessmentSessionRow>
       title="Archivio Analisi"
-      data={dataFilteredByEsito}
+      data={data}
       columns={columns}
       getRowId={(row) => row.id}
       searchPlaceholder="Cerca per nome operazione o codice..."
-      filterPredicate={(row, q) => {
-        const nome = (
-          row.metadata?.nome_operazione ||
-          row.metadata?.operation_name ||
-          ''
-        ).toLowerCase()
-        return nome.includes(q) || String(row.base_evaluation_code).includes(q)
+      searchMode="server"
+      search={{
+        value: q,
+        onChange: (next) => pushParams({ q: next, page: '1' }),
       }}
       sortConfig={{
         field: sortField,
         dir: sortDir,
         onSort: handleSort,
       }}
-      sortCompare={sortCompare}
       toolbarExtra={
         <select
           className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300"
           value={filterEsito}
-          onChange={(e) => setFilterEsito(e.target.value)}
+          onChange={(e) => pushParams({ esito: e.target.value, page: '1' })}
         >
           <option value="all">Tutti gli stati</option>
           <option value="in_corso">In compilazione</option>
-          <option value="accettabile">Rischio accettabile (Valide)</option>
-          <option value="non_accettabile">Rischio alto (Da mitigare)</option>
+          <option value="accettabile">Rischio trascurabile (Valide)</option>
+          <option value="non_accettabile">Rischio non trascurabile (Da mitigare)</option>
         </select>
       }
       resultCountLabel={
         <>
-          {dataFilteredByEsito.length} risultati
+          {data.length} risultati
           {isAdmin && (
             <span className="ml-2 bg-blue-100 text-blue-800 text-xs font-medium px-2.5 py-0.5 rounded border border-blue-200">
               Vista Admin

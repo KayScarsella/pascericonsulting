@@ -1,6 +1,6 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -29,10 +29,12 @@ import {
   updateSpecies,
   deleteSpecies,
   deleteSpeciesBulk,
+  updateSpeciesBulk,
   createCountry,
   updateCountry,
   deleteCountry,
   deleteCountriesBulk,
+  updateCountriesBulk,
 } from '@/actions/master-data'
 import { updateProfileAdmin } from '@/actions/profiles-admin'
 import { inviteUserToToolAction } from '@/actions/invite'
@@ -41,13 +43,14 @@ import {
   updateNotification,
   deleteNotification,
   deleteNotificationsBulk,
+  updateNotificationsBulk,
 } from '@/actions/notifications'
 import {
   updateUserRoleAction,
   deleteUserFromToolAction,
   cleanupPendingOnboardingUsersAction,
+  updateUsersRoleBulkAction,
 } from '@/actions/users'
-import { triggerExpiryRemindersNowAction } from '@/actions/email-reminders'
 import type { ToolUserRow } from '@/actions/users'
 import type { Database } from '@/types/supabase'
 import { toast } from 'sonner'
@@ -65,6 +68,19 @@ const ROLE_LABELS: Record<string, string> = {
   admin: 'Admin',
   premium: 'Premium',
   standard: 'Standard',
+}
+
+function formatCountryNumber(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(Number(v))) return '—'
+  return String(v)
+}
+
+function parseOptionalCountryNumber(raw: string): number | null | false {
+  const t = raw.trim()
+  if (!t) return null
+  const n = Number(t.replace(',', '.'))
+  if (!Number.isFinite(n)) return false
+  return n
 }
 
 export interface MasterSectionClientProps {
@@ -94,13 +110,28 @@ export function MasterSectionClient({
   basePath,
 }: MasterSectionClientProps) {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const q = searchParams.get('q') ?? ''
+  const sort = searchParams.get('sort')
+  const dir = (searchParams.get('dir') === 'asc' ? 'asc' : 'desc') as 'asc' | 'desc'
+
+  const pushParams = (next: Record<string, string | null | undefined>) => {
+    const sp = new URLSearchParams(searchParams.toString())
+    for (const [k, v] of Object.entries(next)) {
+      if (v == null || v === '') sp.delete(k)
+      else sp.set(k, v)
+    }
+    if (basePath) router.push(`${basePath}?${sp.toString()}`)
+    else router.push(`?${sp.toString()}`)
+  }
+
   const hasPagination = typeof basePath === 'string' && totalPagesProp > 1
   const paginationConfig = hasPagination && basePath
     ? {
         page,
         totalPages: totalPagesProp,
         onPageChange: (newPage: number) => {
-          router.push(`${basePath}?page=${newPage}`)
+          pushParams({ page: String(newPage) })
         },
       }
     : undefined
@@ -115,8 +146,13 @@ export function MasterSectionClient({
   const [conflicts, setConflicts] = useState(false)
   const [sanction, setSanction] = useState(false)
   const [corruptionCode, setCorruptionCode] = useState('')
-  const [sortField, setSortField] = useState<string | null>(null)
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [countryRiskSel, setCountryRiskSel] = useState<'none' | 'RA' | 'RB' | 'RS'>(
+    'none'
+  )
+  const [faoStr, setFaoStr] = useState('')
+  const [fsiStr, setFsiStr] = useState('')
+  const [rliStr, setRliStr] = useState('')
+  const [iloStr, setIloStr] = useState('')
   const [notifTitle, setNotifTitle] = useState('')
   const [notifMessage, setNotifMessage] = useState('')
   const [notifExpiresAt, setNotifExpiresAt] = useState('')
@@ -143,10 +179,13 @@ export function MasterSectionClient({
   const [inviteRole, setInviteRole] = useState<'standard' | 'premium'>('standard')
   const [inviteLoading, setInviteLoading] = useState(false)
   const [cleanupLoading, setCleanupLoading] = useState(false)
-  const [expirySending, setExpirySending] = useState(false)
+  const [selectionResetKey, setSelectionResetKey] = useState(0)
 
   if (section === 'users') {
     const data = usersData ?? []
+    const [selectedUserIds, setSelectedUserIds] = useState<string[]>([])
+    const [bulkUserRole, setBulkUserRole] = useState<'standard' | 'premium' | 'admin'>('standard')
+    const [bulkUsersLoading, setBulkUsersLoading] = useState(false)
     const handleRoleChange = async (
       userId: string,
       newRole: 'standard' | 'premium' | 'admin'
@@ -365,35 +404,6 @@ export function MasterSectionClient({
             variant="outline"
             size="sm"
             onClick={async () => {
-              if (
-                !confirm(
-                  'Inviare ORA le email di scadenza (oggi) a tutti gli utenti con sessioni completate in scadenza oggi? L’operazione è idempotente (non reinvia se già fatto).'
-                )
-              ) {
-                return
-              }
-              setExpirySending(true)
-              const res = await triggerExpiryRemindersNowAction(toolId)
-              setExpirySending(false)
-              if (res.success) {
-                toast.success('Invio promemoria avviato.', {
-                  description: `targetDate=${res.data.targetDate} • candidates=${res.data.candidates} • sent=${res.data.sent} • skipped=${res.data.skipped}`,
-                })
-                router.refresh()
-              } else {
-                toast.error(res.error ?? 'Invio promemoria fallito.')
-              }
-            }}
-            disabled={expirySending}
-            title="Invia subito le email di scadenza (oggi)"
-          >
-            {expirySending ? 'Invio...' : 'Invia email scadenze (oggi)'}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={async () => {
               setCleanupLoading(true)
               const res = await cleanupPendingOnboardingUsersAction(toolId, 7)
               setCleanupLoading(false)
@@ -471,21 +481,17 @@ export function MasterSectionClient({
           columns={columns}
           getRowId={(row) => row.user_id}
           searchPlaceholder="Cerca per nome, email o ragione sociale..."
-          filterPredicate={(row, q) => {
-            const profile = row.profiles as ProfileRow | null
-            const name = (profile?.full_name ?? '').toLowerCase()
-            const email = (profile?.email ?? '').toLowerCase()
-            const rs = (profile?.ragione_sociale ?? '').toLowerCase()
-            const term = q.toLowerCase()
-            return (
-              name.includes(term) ||
-              email.includes(term) ||
-              rs.includes(term)
-            )
+          searchMode="server"
+          search={{
+            value: q,
+            onChange: (next) => pushParams({ q: next, page: '1' }),
           }}
           emptyMessage="Nessun utente con accesso al tool."
           resultCountLabel={`${data.length} utenti`}
           pagination={paginationConfig}
+          selectable
+          selectionResetKey={selectionResetKey}
+          onSelectionChange={setSelectedUserIds}
           renderRowActions={(row) => (
             <div className="flex justify-end gap-1">
               <Button
@@ -514,6 +520,43 @@ export function MasterSectionClient({
             </div>
           )}
         />
+
+        {selectedUserIds.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+            <span className="text-sm text-slate-700">{selectedUserIds.length} selezionati</span>
+            <Select value={bulkUserRole} onValueChange={(v) => setBulkUserRole(v as any)}>
+              <SelectTrigger className="h-8 w-[160px] bg-white">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="standard">Standard</SelectItem>
+                <SelectItem value="premium">Premium</SelectItem>
+                <SelectItem value="admin">Admin</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              type="button"
+              size="sm"
+              className="h-8"
+              disabled={bulkUsersLoading}
+              onClick={async () => {
+                setBulkUsersLoading(true)
+                const res = await updateUsersRoleBulkAction(toolId, selectedUserIds, bulkUserRole)
+                setBulkUsersLoading(false)
+                if (res.success) {
+                  toast.success('Ruoli aggiornati.')
+                  setSelectionResetKey((k) => k + 1)
+                  router.refresh()
+                } else toast.error(res.error ?? 'Aggiornamento ruoli fallito.')
+              }}
+            >
+              {bulkUsersLoading ? 'Applico…' : 'Applica ruolo'}
+            </Button>
+            <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => setSelectionResetKey((k) => k + 1)}>
+              Deseleziona
+            </Button>
+          </div>
+        )}
 
         <Dialog
           open={dialogOpen}
@@ -651,30 +694,10 @@ export function MasterSectionClient({
 
   if (section === 'species') {
     const data = speciesData ?? []
-    const handleSort = (field: string) => {
-      if (sortField === field) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-      else {
-        setSortField(field)
-        setSortDir('asc')
-      }
-    }
-    const sortCompareSpecies = (a: SpeciesRow, b: SpeciesRow, field: string, dir: 'asc' | 'desc') => {
-      let va: string | number = ''
-      let vb: string | number = ''
-      if (field === 'scientific_name') {
-        va = (a.scientific_name ?? '').toLowerCase()
-        vb = (b.scientific_name ?? '').toLowerCase()
-      } else if (field === 'common_name') {
-        va = (a.common_name ?? '').toLowerCase()
-        vb = (b.common_name ?? '').toLowerCase()
-      } else if (field === 'cites') {
-        va = a.cites ?? -1
-        vb = b.cites ?? -1
-      }
-      if (va < vb) return dir === 'asc' ? -1 : 1
-      if (va > vb) return dir === 'asc' ? 1 : -1
-      return 0
-    }
+    const [selectedSpeciesIds, setSelectedSpeciesIds] = useState<string[]>([])
+    const [bulkSpeciesCites, setBulkSpeciesCites] = useState<string>('0')
+    const [bulkSpeciesMode, setBulkSpeciesMode] = useState<'set' | 'clear'>('set')
+    const [bulkSpeciesLoading, setBulkSpeciesLoading] = useState(false)
     const resetForm = () => {
       setEditingId(null)
       setScientificName('')
@@ -759,7 +782,56 @@ export function MasterSectionClient({
     ]
     return (
       <div className="space-y-4">
-        <div className="flex justify-end">
+        <div className="flex flex-wrap justify-end gap-2">
+          {selectedSpeciesIds.length > 0 && (
+            <div className="mr-auto flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+              <span className="text-sm text-slate-700">{selectedSpeciesIds.length} selezionati</span>
+              <Select value={bulkSpeciesMode} onValueChange={(v) => setBulkSpeciesMode(v as any)}>
+                <SelectTrigger className="h-8 w-[160px] bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="set">Imposta CITES</SelectItem>
+                  <SelectItem value="clear">Svuota CITES</SelectItem>
+                </SelectContent>
+              </Select>
+              {bulkSpeciesMode === 'set' && (
+                <Input
+                  className="h-8 w-[120px] bg-white"
+                  inputMode="numeric"
+                  value={bulkSpeciesCites}
+                  onChange={(e) => setBulkSpeciesCites(e.target.value)}
+                  placeholder="CITES"
+                />
+              )}
+              <Button
+                type="button"
+                size="sm"
+                className="h-8"
+                disabled={bulkSpeciesLoading}
+                onClick={async () => {
+                  setBulkSpeciesLoading(true)
+                  const cites =
+                    bulkSpeciesMode === 'clear'
+                      ? null
+                      : Number.parseInt(bulkSpeciesCites.trim(), 10)
+                  const patch = bulkSpeciesMode === 'clear' ? { cites: null } : { cites }
+                  const res = await updateSpeciesBulk(toolId, selectedSpeciesIds, patch)
+                  setBulkSpeciesLoading(false)
+                  if (res.success) {
+                    toast.success('Aggiornamento massivo completato.')
+                    setSelectionResetKey((k) => k + 1)
+                    router.refresh()
+                  } else toast.error(res.error ?? 'Aggiornamento massivo fallito.')
+                }}
+              >
+                {bulkSpeciesLoading ? 'Applico…' : 'Applica'}
+              </Button>
+              <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => setSelectionResetKey((k) => k + 1)}>
+                Deseleziona
+              </Button>
+            </div>
+          )}
           <Button onClick={openCreate} className="gap-2">
             <Plus className="h-4 w-4" /> Aggiungi specie
           </Button>
@@ -770,18 +842,22 @@ export function MasterSectionClient({
           columns={columns}
           getRowId={(row) => row.id}
           searchPlaceholder="Cerca per nome scientifico o comune..."
-          filterPredicate={(row, q) => {
-            const sci = (row.scientific_name ?? '').toLowerCase()
-            const common = (row.common_name ?? '').toLowerCase()
-            return sci.includes(q) || common.includes(q)
+          searchMode="server"
+          search={{
+            value: q,
+            onChange: (next) => pushParams({ q: next, page: '1' }),
           }}
           sortConfig={{
-            field: sortField,
-            dir: sortDir,
-            onSort: handleSort,
+            field: sort ?? 'scientific_name',
+            dir,
+            onSort: (field) => {
+              const nextDir = sort === field ? (dir === 'asc' ? 'desc' : 'asc') : 'asc'
+              pushParams({ sort: field, dir: nextDir, page: '1' })
+            },
           }}
-          sortCompare={sortCompareSpecies}
           selectable
+          selectionResetKey={selectionResetKey}
+          onSelectionChange={setSelectedSpeciesIds}
           onBulkDelete={async (ids) => deleteSpeciesBulk(toolId, ids)}
           bulkDeleteLabel="Elimina"
           emptyMessage="Nessuna specie."
@@ -864,6 +940,11 @@ export function MasterSectionClient({
 
   if (section === 'notifications') {
     const data = notificationsData ?? []
+    const [selectedNotifIds, setSelectedNotifIds] = useState<string[]>([])
+    const [bulkNotifField, setBulkNotifField] = useState<'is_active' | 'expires_at'>('is_active')
+    const [bulkNotifBool, setBulkNotifBool] = useState<'true' | 'false'>('true')
+    const [bulkNotifExpiryMode, setBulkNotifExpiryMode] = useState<'clear'>('clear')
+    const [bulkNotifLoading, setBulkNotifLoading] = useState(false)
 
     const resetNotifForm = () => {
       setEditingId(null)
@@ -974,37 +1055,68 @@ export function MasterSectionClient({
       },
     ]
 
-    const handleNotifSort = (field: string) => {
-      if (sortField === field) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-      else {
-        setSortField(field)
-        setSortDir('asc')
-      }
-    }
-    const sortCompareNotif = (a: NotificationRow, b: NotificationRow, field: string, dir: 'asc' | 'desc') => {
-      let va: string | number | boolean = ''
-      let vb: string | number | boolean = ''
-      if (field === 'title') {
-        va = (a.title ?? '').toLowerCase()
-        vb = (b.title ?? '').toLowerCase()
-      } else if (field === 'created_at') {
-        va = a.created_at ?? ''
-        vb = b.created_at ?? ''
-      } else if (field === 'expires_at') {
-        va = a.expires_at ?? ''
-        vb = b.expires_at ?? ''
-      } else if (field === 'is_active') {
-        va = a.is_active ? 1 : 0
-        vb = b.is_active ? 1 : 0
-      }
-      if (va < vb) return dir === 'asc' ? -1 : 1
-      if (va > vb) return dir === 'asc' ? 1 : -1
-      return 0
-    }
-
     return (
       <div className="space-y-4">
-        <div className="flex justify-end">
+        <div className="flex flex-wrap justify-end gap-2">
+          {selectedNotifIds.length > 0 && (
+            <div className="mr-auto flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+              <span className="text-sm text-slate-700">{selectedNotifIds.length} selezionati</span>
+              <Select value={bulkNotifField} onValueChange={(v) => setBulkNotifField(v as any)}>
+                <SelectTrigger className="h-8 w-[180px] bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="is_active">Imposta “Attiva”</SelectItem>
+                  <SelectItem value="expires_at">Svuota “Scadenza”</SelectItem>
+                </SelectContent>
+              </Select>
+              {bulkNotifField === 'is_active' ? (
+                <Select value={bulkNotifBool} onValueChange={(v) => setBulkNotifBool(v as any)}>
+                  <SelectTrigger className="h-8 w-[110px] bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="true">Sì</SelectItem>
+                    <SelectItem value="false">No</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Select value={bulkNotifExpiryMode} onValueChange={(v) => setBulkNotifExpiryMode(v as any)}>
+                  <SelectTrigger className="h-8 w-[140px] bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="clear">Svuota</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                className="h-8"
+                disabled={bulkNotifLoading}
+                onClick={async () => {
+                  setBulkNotifLoading(true)
+                  const patch =
+                    bulkNotifField === 'is_active'
+                      ? { is_active: bulkNotifBool === 'true' }
+                      : { expires_at: null }
+                  const res = await updateNotificationsBulk(toolId, selectedNotifIds, patch)
+                  setBulkNotifLoading(false)
+                  if (res.success) {
+                    toast.success('Aggiornamento massivo completato.')
+                    setSelectionResetKey((k) => k + 1)
+                    router.refresh()
+                  } else toast.error(res.error ?? 'Aggiornamento massivo fallito.')
+                }}
+              >
+                {bulkNotifLoading ? 'Applico…' : 'Applica'}
+              </Button>
+              <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => setSelectionResetKey((k) => k + 1)}>
+                Deseleziona
+              </Button>
+            </div>
+          )}
           <Button onClick={openCreateNotif} className="gap-2">
             <Plus className="h-4 w-4" /> Nuova notifica
           </Button>
@@ -1015,18 +1127,22 @@ export function MasterSectionClient({
           columns={notifColumns}
           getRowId={(row) => row.id}
           searchPlaceholder="Cerca per titolo o messaggio..."
-          filterPredicate={(row, q) => {
-            const t = (row.title ?? '').toLowerCase()
-            const m = (row.message ?? '').toLowerCase()
-            return t.includes(q) || m.includes(q)
+          searchMode="server"
+          search={{
+            value: q,
+            onChange: (next) => pushParams({ q: next, page: '1' }),
           }}
           sortConfig={{
-            field: sortField,
-            dir: sortDir,
-            onSort: handleNotifSort,
+            field: sort ?? 'created_at',
+            dir,
+            onSort: (field) => {
+              const nextDir = sort === field ? (dir === 'asc' ? 'desc' : 'asc') : 'asc'
+              pushParams({ sort: field, dir: nextDir, page: '1' })
+            },
           }}
-          sortCompare={sortCompareNotif}
           selectable
+          selectionResetKey={selectionResetKey}
+          onSelectionChange={setSelectedNotifIds}
           onBulkDelete={async (ids) => deleteNotificationsBulk(toolId, ids)}
           bulkDeleteLabel="Elimina"
           emptyMessage="Nessuna notifica."
@@ -1112,36 +1228,11 @@ export function MasterSectionClient({
 
   // section === 'countries'
   const data = countriesData ?? []
-  const handleSortCountry = (field: string) => {
-    if (sortField === field) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-    else {
-      setSortField(field)
-      setSortDir('asc')
-    }
-  }
-  const sortCompareCountry = (a: CountryRow, b: CountryRow, field: string, dir: 'asc' | 'desc') => {
-    let va: string | number | boolean = ''
-    let vb: string | number | boolean = ''
-    if (field === 'country_name') {
-      va = (a.country_name ?? '').toLowerCase()
-      vb = (b.country_name ?? '').toLowerCase()
-    } else if (field === 'extra_eu') {
-      va = a.extra_eu ? 1 : 0
-      vb = b.extra_eu ? 1 : 0
-    } else if (field === 'conflicts') {
-      va = a.conflicts ? 1 : 0
-      vb = b.conflicts ? 1 : 0
-    } else if (field === 'sanction') {
-      va = a.sanction ? 1 : 0
-      vb = b.sanction ? 1 : 0
-    } else if (field === 'corruption_code') {
-      va = (a.corruption_code ?? '').toLowerCase()
-      vb = (b.corruption_code ?? '').toLowerCase()
-    }
-    if (va < vb) return dir === 'asc' ? -1 : 1
-    if (va > vb) return dir === 'asc' ? 1 : -1
-    return 0
-  }
+  const [selectedCountryIds, setSelectedCountryIds] = useState<string[]>([])
+  const [bulkField, setBulkField] = useState<'conflicts' | 'sanction' | 'extra_eu' | 'corruption_code'>('conflicts')
+  const [bulkBoolValue, setBulkBoolValue] = useState<'true' | 'false'>('false')
+  const [bulkCorruptionCode, setBulkCorruptionCode] = useState<string>('MM')
+  const [bulkLoading, setBulkLoading] = useState(false)
   const resetForm = () => {
     setEditingId(null)
     setCountryName('')
@@ -1149,6 +1240,11 @@ export function MasterSectionClient({
     setConflicts(false)
     setSanction(false)
     setCorruptionCode('')
+    setCountryRiskSel('none')
+    setFaoStr('')
+    setFsiStr('')
+    setRliStr('')
+    setIloStr('')
   }
   const openCreate = () => {
     resetForm()
@@ -1160,17 +1256,55 @@ export function MasterSectionClient({
     setExtraEu(row.extra_eu ?? false)
     setConflicts(row.conflicts ?? false)
     setSanction(row.sanction ?? false)
-    setCorruptionCode(row.corruption_code ?? '')
+    const validCorruption = ['AA', 'MA', 'MB', 'MM', 'TT'] as const
+    const cc = row.corruption_code
+    setCorruptionCode(
+      cc && (validCorruption as readonly string[]).includes(cc) ? cc : ''
+    )
+    const r = row.country_risk
+    setCountryRiskSel(r === 'RA' || r === 'RB' || r === 'RS' ? r : 'none')
+    setFaoStr(row.fao != null ? String(row.fao) : '')
+    setFsiStr(row.FSI != null ? String(row.FSI) : '')
+    setRliStr(row.RLI != null ? String(row.RLI) : '')
+    setIloStr(row.ILO != null ? String(row.ILO) : '')
     setDialogOpen(true)
   }
   const handleSubmit = async () => {
+    const fao = parseOptionalCountryNumber(faoStr)
+    const fsi = parseOptionalCountryNumber(fsiStr)
+    const rli = parseOptionalCountryNumber(rliStr)
+    const ilo = parseOptionalCountryNumber(iloStr)
+    if (fao === false) {
+      toast.error('Valore FAO non valido.')
+      return
+    }
+    if (fsi === false) {
+      toast.error('Valore FSI non valido.')
+      return
+    }
+    if (rli === false) {
+      toast.error('Valore RLI non valido.')
+      return
+    }
+    if (ilo === false) {
+      toast.error('Valore ILO non valido.')
+      return
+    }
+    const country_risk =
+      countryRiskSel === 'none' ? null : countryRiskSel
+    const corruptionPayload = corruptionCode.trim() || null
     if (editingId) {
       const res = await updateCountry(toolId, editingId, {
         country_name: countryName.trim() || null,
         extra_eu: extraEu,
         conflicts,
         sanction,
-        corruption_code: corruptionCode.trim() || null,
+        corruption_code: corruptionPayload,
+        country_risk,
+        fao,
+        FSI: fsi,
+        RLI: rli,
+        ILO: ilo,
       })
       if (res.error) {
         toast.error(res.error)
@@ -1183,7 +1317,12 @@ export function MasterSectionClient({
         extra_eu: extraEu,
         conflicts,
         sanction,
-        corruption_code: corruptionCode.trim() || null,
+        corruption_code: corruptionPayload,
+        country_risk,
+        fao,
+        FSI: fsi,
+        RLI: rli,
+        ILO: ilo,
       })
       if (res.error) {
         toast.error(res.error)
@@ -1211,6 +1350,56 @@ export function MasterSectionClient({
       render: (row) => (
         <span className="font-medium text-slate-900">
           {row.country_name ?? '—'}
+        </span>
+      ),
+    },
+    {
+      id: 'country_risk',
+      header: 'Rischio',
+      sortKey: 'country_risk',
+      render: (row) => (
+        <span className="font-mono text-xs text-slate-600">
+          {row.country_risk ?? '—'}
+        </span>
+      ),
+    },
+    {
+      id: 'fao',
+      header: 'FAO',
+      sortKey: 'fao',
+      render: (row) => (
+        <span className="text-slate-600 tabular-nums text-xs">
+          {formatCountryNumber(row.fao)}
+        </span>
+      ),
+    },
+    {
+      id: 'FSI',
+      header: 'FSI',
+      sortKey: 'FSI',
+      render: (row) => (
+        <span className="text-slate-600 tabular-nums text-xs">
+          {formatCountryNumber(row.FSI)}
+        </span>
+      ),
+    },
+    {
+      id: 'RLI',
+      header: 'RLI',
+      sortKey: 'RLI',
+      render: (row) => (
+        <span className="text-slate-600 tabular-nums text-xs">
+          {formatCountryNumber(row.RLI)}
+        </span>
+      ),
+    },
+    {
+      id: 'ILO',
+      header: 'ILO',
+      sortKey: 'ILO',
+      render: (row) => (
+        <span className="text-slate-600 tabular-nums text-xs">
+          {formatCountryNumber(row.ILO)}
         </span>
       ),
     },
@@ -1263,7 +1452,85 @@ export function MasterSectionClient({
   ]
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap justify-end gap-2">
+        {selectedCountryIds.length > 0 && (
+          <div className="mr-auto flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+            <span className="text-sm text-slate-700">
+              {selectedCountryIds.length} selezionati
+            </span>
+            <Select value={bulkField} onValueChange={(v) => setBulkField(v as any)}>
+              <SelectTrigger className="h-8 w-[180px] bg-white">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="conflicts">Imposta “Conflitti”</SelectItem>
+                <SelectItem value="sanction">Imposta “Sanzioni”</SelectItem>
+                <SelectItem value="extra_eu">Imposta “Extra UE”</SelectItem>
+                <SelectItem value="corruption_code">Imposta “Cod. corruzione”</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {bulkField === 'corruption_code' ? (
+              <Select value={bulkCorruptionCode} onValueChange={setBulkCorruptionCode}>
+                <SelectTrigger className="h-8 w-[120px] bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="AA">AA</SelectItem>
+                  <SelectItem value="MA">MA</SelectItem>
+                  <SelectItem value="MB">MB</SelectItem>
+                  <SelectItem value="MM">MM</SelectItem>
+                  <SelectItem value="TT">TT</SelectItem>
+                </SelectContent>
+              </Select>
+            ) : (
+              <Select value={bulkBoolValue} onValueChange={(v) => setBulkBoolValue(v as any)}>
+                <SelectTrigger className="h-8 w-[110px] bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="true">Sì</SelectItem>
+                  <SelectItem value="false">No</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+
+            <Button
+              type="button"
+              size="sm"
+              className="h-8"
+              disabled={bulkLoading}
+              onClick={async () => {
+                setBulkLoading(true)
+                const patch =
+                  bulkField === 'corruption_code'
+                    ? { corruption_code: bulkCorruptionCode }
+                    : { [bulkField]: bulkBoolValue === 'true' } as any
+                const res = await updateCountriesBulk(toolId, selectedCountryIds, patch)
+                setBulkLoading(false)
+                if (res.success) {
+                  toast.success('Aggiornamento massivo completato.')
+                  setSelectionResetKey((k) => k + 1)
+                  router.refresh()
+                } else {
+                  toast.error(res.error ?? 'Aggiornamento massivo fallito.')
+                }
+              }}
+            >
+              {bulkLoading ? 'Applico…' : 'Applica'}
+            </Button>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8"
+              onClick={() => setSelectionResetKey((k) => k + 1)}
+            >
+              Deseleziona
+            </Button>
+          </div>
+        )}
         <Button onClick={openCreate} className="gap-2">
           <Plus className="h-4 w-4" /> Aggiungi paese
         </Button>
@@ -1274,18 +1541,22 @@ export function MasterSectionClient({
         columns={columns}
         getRowId={(row) => row.id}
         searchPlaceholder="Cerca per nome paese..."
-        filterPredicate={(row, q) => {
-          const name = (row.country_name ?? '').toLowerCase()
-          const code = (row.corruption_code ?? '').toLowerCase()
-          return name.includes(q) || code.includes(q)
+        searchMode="server"
+        search={{
+          value: q,
+          onChange: (next) => pushParams({ q: next, page: '1' }),
         }}
         sortConfig={{
-          field: sortField,
-          dir: sortDir,
-          onSort: handleSortCountry,
+          field: sort ?? 'country_name',
+          dir,
+          onSort: (field) => {
+            const nextDir = sort === field ? (dir === 'asc' ? 'desc' : 'asc') : 'asc'
+            pushParams({ sort: field, dir: nextDir, page: '1' })
+          },
         }}
-        sortCompare={sortCompareCountry}
         selectable
+        selectionResetKey={selectionResetKey}
+        onSelectionChange={setSelectedCountryIds}
         onBulkDelete={async (ids) => deleteCountriesBulk(toolId, ids)}
         bulkDeleteLabel="Elimina"
         emptyMessage="Nessun paese."
@@ -1315,7 +1586,7 @@ export function MasterSectionClient({
         )}
       />
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>
               {editingId ? 'Modifica paese' : 'Nuovo paese'}
@@ -1332,13 +1603,65 @@ export function MasterSectionClient({
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="country-corruption">Codice corruzione</Label>
-              <Input
-                id="country-corruption"
-                value={corruptionCode}
-                onChange={(e) => setCorruptionCode(e.target.value)}
-                placeholder="opzionale"
-              />
+              <Label>Rischio paese</Label>
+              <Select
+                value={countryRiskSel}
+                onValueChange={(v) =>
+                  setCountryRiskSel(v as 'none' | 'RA' | 'RB' | 'RS')
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleziona" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Nessuno</SelectItem>
+                  <SelectItem value="RA">RA</SelectItem>
+                  <SelectItem value="RB">RB</SelectItem>
+                  <SelectItem value="RS">RS</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="country-fao">FAO</Label>
+                <Input
+                  id="country-fao"
+                  inputMode="decimal"
+                  value={faoStr}
+                  onChange={(e) => setFaoStr(e.target.value)}
+                  placeholder="opzionale"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="country-fsi">FSI</Label>
+                <Input
+                  id="country-fsi"
+                  inputMode="decimal"
+                  value={fsiStr}
+                  onChange={(e) => setFsiStr(e.target.value)}
+                  placeholder="opzionale"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="country-rli">RLI</Label>
+                <Input
+                  id="country-rli"
+                  inputMode="decimal"
+                  value={rliStr}
+                  onChange={(e) => setRliStr(e.target.value)}
+                  placeholder="opzionale"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="country-ilo">ILO</Label>
+                <Input
+                  id="country-ilo"
+                  inputMode="decimal"
+                  value={iloStr}
+                  onChange={(e) => setIloStr(e.target.value)}
+                  placeholder="opzionale"
+                />
+              </div>
             </div>
             <div className="flex flex-wrap gap-6">
               <label className="flex cursor-pointer items-center gap-2">
@@ -1362,6 +1685,27 @@ export function MasterSectionClient({
                 />
                 <span className="text-sm">Sanzioni</span>
               </label>
+            </div>
+            <div className="grid gap-2">
+              <Label>Codice corruzione</Label>
+              <Select
+                value={corruptionCode || 'none'}
+                onValueChange={(v) =>
+                  setCorruptionCode(v === 'none' ? '' : v)
+                }
+              >
+                <SelectTrigger id="country-corruption">
+                  <SelectValue placeholder="Nessuno" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Nessuno</SelectItem>
+                  <SelectItem value="AA">AA</SelectItem>
+                  <SelectItem value="MA">MA</SelectItem>
+                  <SelectItem value="MB">MB</SelectItem>
+                  <SelectItem value="MM">MM</SelectItem>
+                  <SelectItem value="TT">TT</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <DialogFooter>

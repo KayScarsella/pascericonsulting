@@ -9,6 +9,7 @@ import type { MasterSection } from '@/components/admin/MasterSectionClient'
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { parsePageParam, parseSearchParam, parseSortDirParam } from '@/lib/table-query'
 
 const VALID_SECTIONS: readonly MasterSection[] = ['users', 'species', 'countries', 'notifications']
 const PAGE_SIZE = 25
@@ -28,7 +29,10 @@ export default async function MasterSectionPage({
   if (role !== 'admin') redirect('/landingPage')
 
   const sp = await searchParams
-  const page = Math.max(1, parseInt((sp.page as string) || '1', 10))
+  const page = parsePageParam(sp.page, 1)
+  const q = parseSearchParam(sp.q)
+  const sort = (sp.sort as string) || undefined
+  const dir = parseSortDirParam(sp.dir)
 
   let usersRes: Awaited<ReturnType<typeof getToolUsersForAdminPaginated>> | null = null
   let speciesRes: Awaited<ReturnType<typeof listSpeciesPaginated>> | null = null
@@ -36,13 +40,25 @@ export default async function MasterSectionPage({
   let notificationsRes: Awaited<ReturnType<typeof listNotificationsPaginated>> | null = null
 
   if (section === 'users') {
-    usersRes = await getToolUsersForAdminPaginated(TIMBER_TOOL_ID, page, PAGE_SIZE)
+    usersRes = await getToolUsersForAdminPaginated(TIMBER_TOOL_ID, page, PAGE_SIZE, { q })
   } else if (section === 'species') {
-    speciesRes = await listSpeciesPaginated(TIMBER_TOOL_ID, page, PAGE_SIZE)
+    speciesRes = await listSpeciesPaginated(TIMBER_TOOL_ID, page, PAGE_SIZE, {
+      q,
+      sort: sort as any,
+      dir,
+    })
   } else if (section === 'countries') {
-    countriesRes = await listCountriesPaginated(TIMBER_TOOL_ID, page, PAGE_SIZE)
+    countriesRes = await listCountriesPaginated(TIMBER_TOOL_ID, page, PAGE_SIZE, {
+      q,
+      sort: sort as any,
+      dir,
+    })
   } else if (section === 'notifications') {
-    notificationsRes = await listNotificationsPaginated(TIMBER_TOOL_ID, page, PAGE_SIZE)
+    notificationsRes = await listNotificationsPaginated(TIMBER_TOOL_ID, page, PAGE_SIZE, {
+      q,
+      sort: sort as any,
+      dir,
+    })
   }
 
   const error =

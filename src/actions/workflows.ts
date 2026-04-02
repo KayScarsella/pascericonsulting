@@ -156,7 +156,7 @@ export async function finalizeTimberAnalisi(sessionId: string): Promise<{ redire
 
     await supabase.from('assessment_sessions').update({
       status: 'completed',
-      final_outcome: riskResult.outcome === 'accettabile' ? 'Rischio Accettabile' : 'Rischio Non Accettabile',
+      final_outcome: riskResult.outcome === 'accettabile' ? 'Rischio Trascurabile' : 'Rischio Non Trascurabile',
       metadata: updatedMeta as unknown as Json 
     }).eq('id', sessionId);
 
@@ -228,8 +228,8 @@ export async function finalizeEudrAnalisi(sessionId: string): Promise<{ redirect
         status: "completed",
         final_outcome:
           riskResult.outcome === "accettabile"
-            ? "Rischio Accettabile"
-            : "Rischio Non Accettabile",
+            ? "Rischio Trascurabile"
+            : "Rischio Non Trascurabile",
         metadata: updatedMeta as Json,
       })
       .eq("id", sessionId)

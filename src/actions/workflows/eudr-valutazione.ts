@@ -116,7 +116,7 @@ export async function processEudrValutazione(
 
       const [{ data: speciesData }, { data: countriesData }] = await Promise.all([
         supabase.from('species').select('id, common_name').in('id', specieIdsToFetch),
-        supabase.from('country').select('id, country_name, conflicts, sanction, country_risk, fao, cpi').in('id', paeseIdsToFetch)
+        supabase.from('country').select('id, country_name, conflicts, sanction, country_risk, fao').in('id', paeseIdsToFetch)
       ]);
 
       const speciesMap = new Map(speciesData?.map(s => [s.id, s.common_name]) || []);
@@ -127,7 +127,6 @@ export async function processEudrValutazione(
         (countriesData || []).map(c => [c.id, c.country_risk as string | null | undefined])
       );
       const eudrFaoMap = new Map((countriesData || []).map(c => [c.id, c.fao]));
-      const eudrCpiMap = new Map((countriesData || []).map(c => [c.id, c.cpi]));
 
       const nowStr = new Intl.DateTimeFormat('it-IT', {
         timeZone: 'Europe/Rome',
@@ -216,7 +215,6 @@ export async function processEudrValutazione(
         const countryPrefill: TablesInsert<'user_responses'>[] = [];
 
         let qFaoId: string | null = null;
-        let qCpiId: string | null = null;
         const { data: faoRow } = await supabase
           .from('questions')
           .select('id')
@@ -224,15 +222,7 @@ export async function processEudrValutazione(
           .ilike('text', '%FAO Naturally regenerating%')
           .limit(1)
           .maybeSingle();
-        const { data: cpiRow } = await supabase
-          .from('questions')
-          .select('id')
-          .eq('tool_id', EUDR_TOOL_ID)
-          .ilike('text', '%CPI%')
-          .limit(1)
-          .maybeSingle();
         if (faoRow?.id) qFaoId = faoRow.id;
-        if (cpiRow?.id) qCpiId = cpiRow.id;
 
         const Q_EUDR_PAESE = EUDR_COUNTRY_PREFILL_QUESTION_IDS.PAESE_RACCOLTA;
         const Q_EUDR_SPECIE = EUDR_COUNTRY_PREFILL_QUESTION_IDS.SPECIE;
@@ -305,17 +295,6 @@ export async function processEudrValutazione(
               session_id: sess.id,
               question_id: qFaoId,
               answer_text: String(fao),
-              updated_at: isoDate,
-            });
-          }
-          const cpi = eudrCpiMap.get(countryId);
-          if (qCpiId != null && cpi != null && typeof cpi === 'number') {
-            countryPrefill.push({
-              user_id: user.id,
-              tool_id: EUDR_TOOL_ID,
-              session_id: sess.id,
-              question_id: qCpiId,
-              answer_text: String(cpi),
               updated_at: isoDate,
             });
           }

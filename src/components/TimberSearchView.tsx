@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import {
   DataManagementTable,
@@ -67,50 +67,27 @@ export function TimberSearchView({
   isAdmin,
 }: TimberSearchViewProps) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const isAnalisi = tab !== 'verifiche'
 
   // Verifiche tab: local state for filter + sort
-  const [filterStato, setFilterStato] = useState<string>("all")
-  const [sortField, setSortField] = useState<VerificheSortField | null>(null)
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const filterStato = searchParams.get('stato') ?? 'all'
+  const vq = searchParams.get('vq') ?? ''
+  const vsort = searchParams.get('vsort') ?? 'created_at'
+  const vdir = (searchParams.get('vdir') === 'asc' ? 'asc' : 'desc') as 'asc' | 'desc'
 
-  const verificheFilteredByStato = useMemo(() => {
-    if (filterStato === "all") return verifications
-    return verifications.filter((row) => {
-      const s = getVerificheStatusLabel(row)
-      if (filterStato === "conclusa" && s.key === "esente") return true
-      return s.key === filterStato
-    })
-  }, [verifications, filterStato])
-
-  const handleVerificheSort = (field: string) => {
-    const f = field as VerificheSortField
-    if (sortField === f) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-    else {
-      setSortField(f)
-      setSortDir('asc')
+  const pushParams = (next: Record<string, string | null | undefined>) => {
+    const sp = new URLSearchParams(searchParams.toString())
+    for (const [k, v] of Object.entries(next)) {
+      if (v == null || v === '') sp.delete(k)
+      else sp.set(k, v)
     }
+    router.push(`/timberRegulation/search?${sp.toString()}`)
   }
 
-  const verificheSortCompare = (a: VerificationRow, b: VerificationRow, field: string, dir: 'asc' | 'desc') => {
-    let va: string | number = ""
-    let vb: string | number = ""
-    if (field === "evaluation_code") {
-      va = a.evaluation_code
-      vb = b.evaluation_code
-    } else if (field === "created_at") {
-      va = a.created_at
-      vb = b.created_at
-    } else if (field === "nomeCommerciale") {
-      va = (a.nomeCommerciale ?? "").toLowerCase()
-      vb = (b.nomeCommerciale ?? "").toLowerCase()
-    } else if (field === "stato") {
-      va = getVerificheStatusLabel(a).key
-      vb = getVerificheStatusLabel(b).key
-    }
-    if (va < vb) return dir === 'asc' ? -1 : 1
-    if (va > vb) return dir === 'asc' ? 1 : -1
-    return 0
+  const handleVerificheSort = (field: string) => {
+    const nextDir = vsort === field ? (vdir === 'asc' ? 'desc' : 'asc') : 'asc'
+    pushParams({ vsort: field, vdir: nextDir, vpage: '1' })
   }
 
   const handleVerificheContinue = (row: VerificationRow) => {
@@ -127,7 +104,7 @@ export function TimberSearchView({
 
   const handleVerifichePageChange = (newPage: number) => {
     if (newPage < 1 || newPage > totalPagesV) return
-    router.push(`/timberRegulation/search?tab=verifiche&vpage=${newPage}`)
+    pushParams({ tab: 'verifiche', vpage: String(newPage) })
   }
 
   const verificheColumns: DataManagementColumn<VerificationRow>[] = [
@@ -144,7 +121,6 @@ export function TimberSearchView({
     {
       id: 'nomeCommerciale',
       header: 'Nome Commerciale',
-      sortKey: 'nomeCommerciale',
       render: (row) => (
         <span className="font-medium text-slate-900">
           {row.nomeCommerciale ?? <span className="text-slate-400 italic text-xs">—</span>}
@@ -177,7 +153,6 @@ export function TimberSearchView({
     {
       id: 'stato',
       header: 'Stato',
-      sortKey: 'stato',
       render: (row) => {
         const status = getVerificheStatusLabel(row)
         return (
@@ -208,7 +183,7 @@ export function TimberSearchView({
               ? "rounded-full px-4 py-1 h-8 text-sm"
               : "rounded-full px-4 py-1 h-8 text-sm text-slate-600"
           }
-          onClick={() => router.push('/timberRegulation/search?tab=analisi&page=1')}
+          onClick={() => pushParams({ tab: 'analisi', page: '1' })}
         >
           Analisi finali
         </Button>
@@ -221,7 +196,7 @@ export function TimberSearchView({
               ? "rounded-full px-4 py-1 h-8 text-sm"
               : "rounded-full px-4 py-1 h-8 text-sm text-slate-600"
           }
-          onClick={() => router.push('/timberRegulation/search?tab=verifiche&vpage=1')}
+          onClick={() => pushParams({ tab: 'verifiche', vpage: '1' })}
         >
           Verifiche
         </Button>
@@ -232,32 +207,32 @@ export function TimberSearchView({
       ) : (
         <DataManagementTable<VerificationRow>
           title="Verifiche preliminari"
-          data={verificheFilteredByStato}
+          data={verifications}
           columns={verificheColumns}
           getRowId={(row) => row.id}
           searchPlaceholder="Cerca per nome prodotto o codice..."
-          filterPredicate={(row, q) =>
-            (row.nomeCommerciale ?? "").toLowerCase().includes(q) ||
-            String(row.evaluation_code).includes(q)
-          }
+          searchMode="server"
+          search={{
+            value: vq,
+            onChange: (next) => pushParams({ vq: next, vpage: '1' }),
+          }}
           sortConfig={{
-            field: sortField,
-            dir: sortDir,
+            field: vsort,
+            dir: vdir,
             onSort: handleVerificheSort,
           }}
-          sortCompare={verificheSortCompare}
           toolbarExtra={
             <select
               className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300"
               value={filterStato}
-              onChange={(e) => setFilterStato(e.target.value)}
+              onChange={(e) => pushParams({ stato: e.target.value, vpage: '1' })}
             >
               <option value="all">Tutti gli stati</option>
               <option value="in_corso">In corso</option>
               <option value="conclusa">Conclusa / Esente</option>
             </select>
           }
-          resultCountLabel={`${verificheFilteredByStato.length} risultati`}
+          resultCountLabel={`${verifications.length} risultati`}
           selectable
           onBulkDelete={async (ids) => {
             const res = await deleteRecords(ids)

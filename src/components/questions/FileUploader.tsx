@@ -40,8 +40,13 @@ export function ResponseUploader({
     }
 
     const allowedTypes = [
-        'application/pdf', 'image/jpeg', 'image/png', 'image/webp', 
-        'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        'application/pdf',
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'text/plain',
     ];
     if (!allowedTypes.includes(file.type) && file.type !== '') {
         toast.warning("Formato file potenzialmente non supportato. Consigliati: PDF, Immagini, Word.");
@@ -130,7 +135,7 @@ export function ResponseUploader({
         className="absolute inset-0 opacity-0 cursor-pointer z-10 disabled:cursor-not-allowed" 
         onChange={handleUpload} 
         disabled={isUploading} 
-        accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp" // 🛠️ Aggiunti hint di accettazione file
+        accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.txt" // 🛠️ Aggiunti hint di accettazione file
       />
       <Button 
         variant="outline" 

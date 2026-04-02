@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -33,6 +33,13 @@ export interface DataManagementTableProps<T> {
   columns: DataManagementColumn<T>[]
   getRowId: (row: T) => string
   searchPlaceholder?: string
+  /** When provided, the search input becomes controlled (recommended for server-side search). */
+  search?: { value: string; onChange: (next: string) => void }
+  /**
+   * - `client`: filter/sort happens in-memory over the provided `data`
+   * - `server`: `data` is assumed to already be filtered/sorted; search input should update URL/query upstream
+   */
+  searchMode?: 'client' | 'server'
   filterPredicate?: (row: T, search: string) => boolean
   sortConfig?: {
     field: string | null
@@ -40,6 +47,10 @@ export interface DataManagementTableProps<T> {
     onSort: (field: string) => void
   }
   selectable?: boolean
+  /** Notified when selection changes (selected row ids). */
+  onSelectionChange?: (ids: string[]) => void
+  /** When this value changes, selection is cleared (useful after bulk actions / refresh). */
+  selectionResetKey?: string | number
   onBulkDelete?: (ids: string[]) => Promise<{ success: boolean; error?: string }>
   bulkDeleteLabel?: string
   emptyMessage?: string
@@ -62,9 +73,13 @@ export function DataManagementTable<T>({
   columns,
   getRowId,
   searchPlaceholder = 'Cerca...',
+  search,
+  searchMode = 'client',
   filterPredicate,
   sortConfig,
   selectable = false,
+  onSelectionChange,
+  selectionResetKey,
   onBulkDelete,
   bulkDeleteLabel = 'Elimina',
   emptyMessage = 'Nessun elemento.',
@@ -74,22 +89,48 @@ export function DataManagementTable<T>({
   toolbarExtra,
   sortCompare,
 }: DataManagementTableProps<T>) {
-  const [search, setSearch] = useState('')
+  // Draft input value (what the user is typing)
+  const [draftSearch, setDraftSearch] = useState(search?.value ?? '')
+  // Applied value (what filtering / server query is based on)
+  const [localAppliedSearch, setLocalAppliedSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
 
+  const appliedSearchValue = search ? search.value : localAppliedSearch
+
+  useEffect(() => {
+    // Keep draft in sync when external value changes (e.g. back/forward navigation)
+    setDraftSearch(search?.value ?? localAppliedSearch)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search?.value])
+
+  useEffect(() => {
+    setSelectedIds([])
+  }, [selectionResetKey])
+
+  useEffect(() => {
+    onSelectionChange?.(selectedIds)
+  }, [selectedIds, onSelectionChange])
+
+  const applySearch = (nextApplied: string) => {
+    if (search) search.onChange(nextApplied)
+    else setLocalAppliedSearch(nextApplied)
+  }
+
   const filteredData = useMemo(() => {
-    if (!search.trim() || !filterPredicate) return data
-    const q = search.trim().toLowerCase()
+    if (searchMode !== 'client') return data
+    if (!appliedSearchValue.trim() || !filterPredicate) return data
+    const q = appliedSearchValue.trim().toLowerCase()
     return data.filter((row) => filterPredicate(row, q))
-  }, [data, search, filterPredicate])
+  }, [data, searchMode, appliedSearchValue, filterPredicate])
 
   const sortedData = useMemo(() => {
+    if (searchMode !== 'client') return filteredData
     if (!sortConfig?.field || !sortCompare) return filteredData
     return [...filteredData].sort((a, b) =>
       sortCompare(a, b, sortConfig.field!, sortConfig.dir)
     )
-  }, [filteredData, sortConfig?.field, sortConfig?.dir, sortCompare])
+  }, [filteredData, searchMode, sortConfig?.field, sortConfig?.dir, sortCompare])
 
   const toggleSelection = (id: string) => {
     setSelectedIds((prev) =>
@@ -140,14 +181,22 @@ export function DataManagementTable<T>({
           <Input
             placeholder={searchPlaceholder}
             className="h-9 pl-9"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            value={draftSearch}
+            onChange={(e) => setDraftSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return
+              e.preventDefault()
+              applySearch(draftSearch)
+            }}
           />
-          {search && (
+          {draftSearch && (
             <button
               type="button"
               className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-              onClick={() => setSearch('')}
+              onClick={() => {
+                setDraftSearch('')
+                applySearch('')
+              }}
               aria-label="Cancella ricerca"
             >
               <X className="h-4 w-4" />
@@ -162,7 +211,8 @@ export function DataManagementTable<T>({
           <h2 className="text-xl font-semibold text-slate-800">{title}</h2>
           <span className="text-xs text-slate-400 flex items-center gap-2 flex-wrap">
             {resultCountLabel ?? `${sortedData.length} risultati`}
-            {(search || (filterPredicate && search.trim())) ? (
+            {searchMode === 'client' &&
+            (appliedSearchValue || (filterPredicate && appliedSearchValue.trim())) ? (
               <span className="text-slate-400">(filtrati)</span>
             ) : null}
           </span>

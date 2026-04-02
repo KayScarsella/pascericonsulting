@@ -158,8 +158,8 @@ export default async function EudrRisultatoPage({
       status: "completed",
       final_outcome:
         result.outcome === "accettabile"
-          ? "Rischio Accettabile"
-          : "Rischio Non Accettabile",
+          ? "Rischio Trascurabile"
+          : "Rischio Non Trascurabile",
       metadata: {
         ...(metadata || {}),
         risk_score: result.overallRisk,
@@ -180,13 +180,13 @@ export default async function EudrRisultatoPage({
     await supabase.from("assessment_sessions").update(updatePayload).eq("id", sessionId)
   } else if (
     ddLastRun?.triggers_non_accettabile &&
-    session.final_outcome === "Rischio Accettabile"
+    session.final_outcome === "Rischio Trascurabile"
   ) {
     // AOI run after finalize: align stored outcome with gate (non accettabile)
     await supabase
       .from("assessment_sessions")
       .update({
-        final_outcome: "Rischio Non Accettabile",
+        final_outcome: "Rischio Non Trascurabile",
         metadata: {
           ...(metadata || {}),
           risk_score: result.overallRisk,
@@ -618,6 +618,11 @@ export default async function EudrRisultatoPage({
               <CheckCircle className="w-6 h-6 text-[#4a7c2e] flex-shrink-0 mt-0.5" />
             )}
             <div className="min-w-0 flex-1">
+              <p className="text-sm md:text-base font-black tracking-wide uppercase text-slate-900">
+                {ddLastRun.triggers_non_accettabile
+                  ? "Screening dell’area di interesse soggetta a perdita forestale dopo la data di taglio dichiarata – risultato: rischio non trascurabile"
+                  : "Screening dell’area di interesse non soggetta a perdita forestale dopo la data di taglio dichiarata – risultato: rischio trascurabile"}
+              </p>
               <h3 className="font-bold text-[#3d2b1a]">
                 Screening AOI (EUDR) —{" "}
                 {ddLastRun.triggers_non_accettabile
@@ -626,7 +631,7 @@ export default async function EudrRisultatoPage({
               </h3>
               <p className="text-sm text-slate-600 mt-1">
                 {ddLastRun.triggers_non_accettabile
-                  ? "È stata rilevata perdita forestale nell’AOI dopo il 31/12/2020 o dopo la data di taglio dichiarata. L’esito è stato portato a non accettabile anche se il questionario da solo sarebbe stato più favorevole."
+                  ? 'Verifica: qualunque perdita forestale rilevata dopo il 31/12/2020 all’interno della maschera forestale 2020 costituisce "evidenza" di possibile non conformità.'
                   : "Nell’AOI non risulta evidenza significativa di loss su foresta al 2020 dopo il cutoff (JRC GFC2020 ∩ Hansen), né loss Hansen post-taglio oltre soglia. Il gate AOI non ha alzato il rischio oltre il questionario."}
               </p>
               {ddLastRun.cutting_date_iso && /^\d{4}/.test(ddLastRun.cutting_date_iso) && (
