@@ -9,7 +9,7 @@ import type { RiskDetail } from '@/lib/risk-calculator'
 const DISCLAIMER_EUTR =
   "Il rapporto è stato generato tramite il portale timber tutor di Pasceri Consulting. La responsabilità della valutazione della trascurabilità del rischio ricade esclusivamente sull'operatore EUTR che utilizza tale strumento informatico."
 const DISCLAIMER_EUDR =
-  "Il rapporto è stato generato tramite il portale timber tutor di Pasceri Consulting. La responsabilità della valutazione della trascurabilità del rischio ricade esclusivamente sull'operatore EUDR che utilizza tale strumento informatico."
+  "Il rapporto è stato generato tramite il portale EUDR tutor di Pasceri Consulting. La responsabilità della valutazione della trascurabilità del rischio ricade esclusivamente sul timber operator che utilizza tale strumento informatico."
 
 const THRESHOLD = 0.30
 

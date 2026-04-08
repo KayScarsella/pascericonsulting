@@ -9,7 +9,7 @@ import { Check, CheckCircle2, Circle, ChevronsUpDown, Loader2, Plus, Trash2 } fr
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { QuestionConfig, QuestionType } from "@/types/questions"
-import { fetchDynamicOptions } from "@/actions/questions"
+import { fetchDynamicOptionsByIds, fetchDynamicOptionsPaged } from "@/actions/questions"
 import { toast } from "sonner" 
 import { SupplierManager } from "./SupplierManager"
 
@@ -323,43 +323,76 @@ function AsyncSelect({ config, value, onChange, onExtraChange, readOnly }: Async
     const [open, setOpen] = useState(false)
     const [options, setOptions] = useState<{label: string, value: string, extra?: Record<string, unknown>}[]>([])
     const [loading, setLoading] = useState(false)
+    const [loadingMore, setLoadingMore] = useState(false)
+    const [query, setQuery] = useState('')
+    const [cursor, setCursor] = useState<number | null>(0)
+    const [hasMore, setHasMore] = useState(true)
     
     const hydratedRef = useRef(false) 
+    const listRef = useRef<HTMLDivElement | null>(null)
+    const queryDebounceRef = useRef<number | null>(null)
     const isMulti = config.is_multi === true
     const maxSelections = config.max_selections 
 
     const safeValueString = value === null || value === undefined || Array.isArray(value) ? '' : String(value)
     const selectedValues = isMulti ? (safeValueString ? safeValueString.split(',') : []) : (safeValueString ? [safeValueString] : [])
 
+    const dedupeAppend = (prev: typeof options, next: typeof options) => {
+      if (next.length === 0) return prev
+      const seen = new Set(prev.map((o) => o.value))
+      const merged = [...prev]
+      for (const opt of next) {
+        if (!seen.has(opt.value)) {
+          merged.push(opt)
+          seen.add(opt.value)
+        }
+      }
+      return merged
+    }
+
+    const loadPage = async (args: { reset: boolean; cursorOverride?: number | null }) => {
+      if (!config.source_table) return
+      const nextCursor = args.cursorOverride ?? cursor
+      if (nextCursor == null) return
+
+      const isReset = args.reset
+      if (isReset) {
+        setLoading(true)
+      } else {
+        setLoadingMore(true)
+      }
+      try {
+        const res = await fetchDynamicOptionsPaged({
+          table: config.source_table!,
+          labelCol: config.source_label_col || 'name',
+          valueCol: config.source_value_col || 'id',
+          extraCols: config.source_extra_cols,
+          search: query.trim() || undefined,
+          cursor: nextCursor,
+          pageSize: 60,
+        })
+        setOptions((prev) => (isReset ? res.items : dedupeAppend(prev, res.items)))
+        setCursor(res.nextCursor)
+        setHasMore(res.nextCursor != null)
+      } catch (error) {
+        console.error("Errore caricamento opzioni:", error)
+      } finally {
+        setLoading(false)
+        setLoadingMore(false)
+      }
+    }
+
     useEffect(() => {
         const hasSavedValue = safeValueString !== ''
         if (!open && !hasSavedValue) return
-        
-        if (options.length > 0) return 
         if (!config.source_table) return
-
-        let mounted = true 
-
-        const loadData = async () => {
-            setLoading(true) 
-            try {
-                const data = await fetchDynamicOptions(
-                    config.source_table!, 
-                    config.source_label_col || 'name', 
-                    config.source_value_col || 'id',
-                    config.source_extra_cols
-                )
-                if (mounted) setOptions(data)
-            } catch (error) {
-                console.error("Errore caricamento opzioni:", error)
-            } finally {
-                if (mounted) setLoading(false)
-            }
-        }
-
-        loadData()
-        return () => { mounted = false }
-    }, [open, safeValueString, options.length, config.source_table, config.source_label_col, config.source_value_col, config.source_extra_cols]) 
+        // Always reset paging when opened, so large tables can be fully browsed.
+        setOptions([])
+        setCursor(0)
+        setHasMore(true)
+        hydratedRef.current = false
+        void loadPage({ reset: true, cursorOverride: 0 })
+    }, [open, safeValueString, config.source_table, config.source_label_col, config.source_value_col, config.source_extra_cols]) 
 
     useEffect(() => {
         if (options.length > 0 && selectedValues.length > 0 && !hydratedRef.current && !isMulti) {
@@ -370,6 +403,60 @@ function AsyncSelect({ config, value, onChange, onExtraChange, readOnly }: Async
             hydratedRef.current = true
         }
     }, [options, selectedValues, onExtraChange, isMulti])
+
+    useEffect(() => {
+      // Ensure pre-populated values always show labels (even if not in the first loaded page).
+      if (!config.source_table) return
+      if (selectedValues.length === 0) return
+
+      const missing = selectedValues.filter((id) => !options.some((o) => o.value === id))
+      if (missing.length === 0) return
+
+      let mounted = true
+      ;(async () => {
+        try {
+          const resolved = await fetchDynamicOptionsByIds({
+            table: config.source_table!,
+            labelCol: config.source_label_col || 'name',
+            valueCol: config.source_value_col || 'id',
+            extraCols: config.source_extra_cols,
+            ids: missing,
+          })
+          if (!mounted || resolved.length === 0) return
+          // Prepend resolved items so the current selection can immediately display.
+          setOptions((prev) => dedupeAppend(resolved, prev))
+        } catch {
+          // ignore
+        }
+      })()
+      return () => {
+        mounted = false
+      }
+    }, [
+      config.source_table,
+      config.source_label_col,
+      config.source_value_col,
+      config.source_extra_cols,
+      // selectedValues depends on safeValueString; include both for stability.
+      safeValueString,
+      selectedValues.join(','),
+      options,
+    ])
+
+    useEffect(() => {
+      if (!open) return
+      // Debounce search so we don't hammer the server while typing.
+      if (queryDebounceRef.current) window.clearTimeout(queryDebounceRef.current)
+      queryDebounceRef.current = window.setTimeout(() => {
+        setOptions([])
+        setCursor(0)
+        setHasMore(true)
+        void loadPage({ reset: true, cursorOverride: 0 })
+      }, 250)
+      return () => {
+        if (queryDebounceRef.current) window.clearTimeout(queryDebounceRef.current)
+      }
+    }, [query, open])
 
     const selectedLabels = selectedValues.map(v => options.find(o => o.value === v)?.label || v)
     const displayLabel = selectedLabels.length > 0 ? selectedLabels.join(', ') : (config.placeholder || "Cerca...")
@@ -392,8 +479,22 @@ function AsyncSelect({ config, value, onChange, onExtraChange, readOnly }: Async
         </PopoverTrigger>
         <PopoverContent className="w-[300px] md:w-[400px] p-0">
             <Command>
-            <CommandInput placeholder="Cerca..." />
-            <CommandList>
+            <CommandInput
+              placeholder="Cerca..."
+              value={query}
+              onValueChange={(v) => setQuery(v)}
+            />
+            <CommandList
+              ref={listRef as any}
+              onScroll={(e) => {
+                const el = e.currentTarget
+                const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 40
+                if (!nearBottom) return
+                if (loading || loadingMore) return
+                if (!hasMore) return
+                void loadPage({ reset: false })
+              }}
+            >
                 {loading && <div className="py-6 text-center text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin inline mr-2"/>Caricamento...</div>}
                 {!loading && options.length === 0 && <CommandEmpty>Nessun risultato.</CommandEmpty>}
                 <CommandGroup>
@@ -437,6 +538,17 @@ function AsyncSelect({ config, value, onChange, onExtraChange, readOnly }: Async
                     )
                 })}
                 </CommandGroup>
+                {!loading && options.length > 0 && hasMore && (
+                  <div className="py-3 text-center text-xs text-slate-500">
+                    {loadingMore ? (
+                      <span className="inline-flex items-center gap-2">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Caricamento altri risultati…
+                      </span>
+                    ) : (
+                      'Scorri per caricare altri risultati…'
+                    )}
+                  </div>
+                )}
             </CommandList>
             </Command>
         </PopoverContent>

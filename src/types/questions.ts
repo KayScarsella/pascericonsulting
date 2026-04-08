@@ -24,6 +24,7 @@ export interface QuestionConfig {
   source_table?: keyof Database['public']['Tables']; // Limita alle tabelle esistenti
   source_label_col?: string;
   source_value_col?: string;
+  source_extra_cols?: string[];
   // Configurazione file
   file_upload_enabled?: boolean;
   optional?: boolean; // Indica se la domanda è facoltativa

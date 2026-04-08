@@ -11,7 +11,6 @@ import { calculateRisk, RiskCalculationResult, RISK_THRESHOLD, SCORED_QUESTIONS,
 import { RiskBarChart } from "@/components/RiskBarChart"
 import { MitigationHistorySection } from "@/components/MitigationHistorySection"
 import { ExportAnalysisPdfButton, PDF_DISCLAIMERS } from "@/components/ExportAnalysisPdfButton"
-import { fetchDynamicOptions } from "@/actions/questions"
 import type { QuestionConfig } from "@/types/questions"
 
 export default async function RisultatoPage({
@@ -235,22 +234,54 @@ export default async function RisultatoPage({
     { key: 'contact_person', label: 'Referente' },
   ]
 
-  // Resolve async_select options: unique configs -> fetch options once each
-  const asyncSelectKey = (c: QuestionConfig) =>
-    `${c.source_table ?? ''}|${c.source_label_col ?? 'name'}|${c.source_value_col ?? 'id'}`
-  const asyncSelectOptionsCache = new Map<string, { label: string; value: string }[]>()
+  // Resolve async_select labels by fetching ONLY selected IDs (no full-table prefetch).
+  const idsByAsyncKey = new Map<
+    string,
+    { table: string; labelCol: string; valueCol: string; ids: Set<string> }
+  >()
+
   for (const section of sectionsData) {
     for (const q of section.questions || []) {
       if (q.type !== 'async_select' || !q.config?.source_table) continue
-      const key = asyncSelectKey(q.config)
-      if (asyncSelectOptionsCache.has(key)) continue
-      const opts = await fetchDynamicOptions(
-        q.config.source_table,
-        q.config.source_label_col ?? 'name',
-        q.config.source_value_col ?? 'id'
-      )
-      asyncSelectOptionsCache.set(key, opts)
+      const raw = (answersMap[q.id] ?? '').trim()
+      if (!raw) continue
+
+      const table = String(q.config.source_table)
+      const labelCol = q.config.source_label_col ?? 'name'
+      const valueCol = q.config.source_value_col ?? 'id'
+      const key = `${table}|${labelCol}|${valueCol}`
+      if (!idsByAsyncKey.has(key)) {
+        idsByAsyncKey.set(key, { table, labelCol, valueCol, ids: new Set<string>() })
+      }
+      const bucket = idsByAsyncKey.get(key)!
+      raw
+        .split(',')
+        .map((v) => v.trim())
+        .filter(Boolean)
+        .forEach((id) => bucket.ids.add(id))
     }
+  }
+
+  const chunk = <T,>(arr: T[], size: number) => {
+    const out: T[][] = []
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size))
+    return out
+  }
+
+  const asyncSelectLabelMaps = new Map<string, Map<string, string>>() // key -> (value -> label)
+  for (const [key, bucket] of idsByAsyncKey.entries()) {
+    const ids = [...bucket.ids]
+    const map = new Map<string, string>()
+    for (const idsChunk of chunk(ids, 500)) {
+      const { data } = await supabase
+        .from(bucket.table as any)
+        .select(`${bucket.labelCol}, ${bucket.valueCol}`)
+        .in(bucket.valueCol, idsChunk)
+      for (const row of (data as any[]) || []) {
+        map.set(String(row[bucket.valueCol] ?? ''), String(row[bucket.labelCol] ?? ''))
+      }
+    }
+    asyncSelectLabelMaps.set(key, map)
   }
 
   function resolveDisplayAnswer(
@@ -269,15 +300,21 @@ export default async function RisultatoPage({
       return opt ? opt.label : raw || '—'
     }
     if (q.type === 'async_select' && q.config?.source_table) {
-      const key = asyncSelectKey(q.config)
-      const opts = asyncSelectOptionsCache.get(key) ?? []
+      const table = String(q.config.source_table)
+      const labelCol = q.config.source_label_col ?? 'name'
+      const valueCol = q.config.source_value_col ?? 'id'
+      const key = `${table}|${labelCol}|${valueCol}`
+      const map = asyncSelectLabelMaps.get(key)
       if (raw.includes(',')) {
-        const labels = raw.split(',').map((v) => opts.find((o) => o.value === v.trim())?.label ?? v.trim())
+        const labels = raw
+          .split(',')
+          .map((v) => v.trim())
+          .filter(Boolean)
+          .map((id) => map?.get(id) ?? id)
         return labels.filter(Boolean).length ? labels.join(', ') : raw || '—'
       }
       const rawNorm = raw.trim()
-      const opt = opts.find((o) => o.value === rawNorm)
-      return opt ? opt.label : raw || '—'
+      return (map?.get(rawNorm) || rawNorm) || '—'
     }
     if (q.type === 'repeater' && Array.isArray(answerJson)) {
       return answerJson.length ? `${answerJson.length} elemento/i` : '—'

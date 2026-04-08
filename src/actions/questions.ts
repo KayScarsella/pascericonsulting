@@ -284,6 +284,30 @@ export async function deleteQuestionRow(
 
 type AllowedTable = 'country' | 'eu_products' | 'documents' | 'species' | 'suppliers';
 
+type DynamicOption = {
+  label: string
+  value: string
+  extra?: Record<string, unknown>
+}
+
+function buildDynamicOptionLabel(args: {
+  table: AllowedTable
+  labelCol: string
+  row: Record<string, unknown>
+}): string {
+  const { table, labelCol, row } = args
+
+  // Special case: species selection should show both common + scientific name.
+  if (table === 'species' && labelCol === 'common_name') {
+    const common = String(row.common_name ?? '').trim()
+    const scientific = String(row.scientific_name ?? '').trim()
+    if (common && scientific) return `${common} - ${scientific}`
+    return common || scientific || ''
+  }
+
+  return String(row[labelCol] ?? '')
+}
+
 export async function fetchDynamicOptions(
   table: string,
   labelCol: string,
@@ -318,9 +342,164 @@ export async function fetchDynamicOptions(
     validExtras.forEach(col => { extraData[col] = row[col]; });
 
     return {
-      label: String(row[labelCol] ?? ''),
+      label: buildDynamicOptionLabel({
+        table: table as AllowedTable,
+        labelCol,
+        row,
+      }),
       value: String(row[valueCol] ?? ''),
       extra: extraData
     }
   })
+}
+
+export async function fetchDynamicOptionsPaged(params: {
+  table: string
+  labelCol: string
+  valueCol: string
+  extraCols?: string[]
+  search?: string
+  cursor?: number
+  pageSize?: number
+}): Promise<{ items: DynamicOption[]; nextCursor: number | null }> {
+  const {
+    table,
+    labelCol,
+    valueCol,
+    extraCols,
+    search,
+    cursor = 0,
+    pageSize = 50,
+  } = params
+
+  const supabase = await getSupabase()
+  const ALLOWED_TABLES: AllowedTable[] = ['country', 'eu_products', 'species', 'documents', 'suppliers']
+  if (!ALLOWED_TABLES.includes(table as AllowedTable)) return { items: [], nextCursor: null }
+
+  const isValidColumn = (col: string) => /^[a-zA-Z0-9_]+$/.test(col)
+  if (!isValidColumn(labelCol) || !isValidColumn(valueCol)) return { items: [], nextCursor: null }
+
+  const safeCursor = Number.isFinite(cursor) && cursor > 0 ? Math.floor(cursor) : 0
+  const safePageSizeRaw =
+    Number.isFinite(pageSize) && pageSize > 0 ? Math.floor(pageSize) : 50
+  const safePageSize = Math.min(Math.max(safePageSizeRaw, 10), 200)
+
+  let selectQuery = `${labelCol}, ${valueCol}`
+  const validExtras = (extraCols || []).filter(isValidColumn)
+  if (validExtras.length > 0) selectQuery += `, ${validExtras.join(', ')}`
+
+  const safeSearch = (search ?? '').trim()
+
+  const runQuery = async (withSearch: boolean) => {
+    let q = supabase
+      .from(table as AllowedTable)
+      .select(selectQuery)
+      .order(labelCol, { ascending: true })
+      .range(safeCursor, safeCursor + safePageSize - 1)
+    if (withSearch && safeSearch) {
+      if ((table as AllowedTable) === 'species') {
+        // Species: search both common and scientific name (regardless of labelCol).
+        q = q.or(`common_name.ilike.%${safeSearch}%,scientific_name.ilike.%${safeSearch}%`)
+      } else {
+        q = q.ilike(labelCol, `%${safeSearch}%`)
+      }
+    }
+    return await q
+  }
+
+  // Some label columns might not be text-searchable; fall back gracefully.
+  let data: unknown[] | null = null
+  let error: { message?: string } | null = null
+
+  const primary = await runQuery(true)
+  data = (primary.data as unknown[] | null) ?? null
+  error = (primary.error as { message?: string } | null) ?? null
+
+  if (error && safeSearch) {
+    const fallback = await runQuery(false)
+    data = (fallback.data as unknown[] | null) ?? null
+    error = (fallback.error as { message?: string } | null) ?? null
+  }
+
+  if (error || !data) return { items: [], nextCursor: null }
+
+  const typedData = data as unknown as Record<string, unknown>[]
+  const items: DynamicOption[] = typedData.map((row) => {
+    const extraData: Record<string, unknown> = {}
+    validExtras.forEach((col) => {
+      extraData[col] = row[col]
+    })
+    return {
+      label: buildDynamicOptionLabel({
+        table: table as AllowedTable,
+        labelCol,
+        row,
+      }),
+      value: String(row[valueCol] ?? ''),
+      extra: extraData,
+    }
+  })
+
+  return {
+    items,
+    nextCursor: items.length >= safePageSize ? safeCursor + safePageSize : null,
+  }
+}
+
+export async function fetchDynamicOptionsByIds(params: {
+  table: string
+  labelCol: string
+  valueCol: string
+  ids: string[]
+  extraCols?: string[]
+}): Promise<DynamicOption[]> {
+  const { table, labelCol, valueCol, ids, extraCols } = params
+
+  const supabase = await getSupabase()
+  const ALLOWED_TABLES: AllowedTable[] = ['country', 'eu_products', 'species', 'documents', 'suppliers']
+  if (!ALLOWED_TABLES.includes(table as AllowedTable)) return []
+
+  const isValidColumn = (col: string) => /^[a-zA-Z0-9_]+$/.test(col)
+  if (!isValidColumn(labelCol) || !isValidColumn(valueCol)) return []
+
+  const normalizedIds = (ids || []).map((s) => String(s).trim()).filter(Boolean)
+  if (normalizedIds.length === 0) return []
+
+  let selectQuery = `${labelCol}, ${valueCol}`
+  const validExtras = (extraCols || []).filter(isValidColumn)
+  if (validExtras.length > 0) selectQuery += `, ${validExtras.join(', ')}`
+
+  const chunk = <T,>(arr: T[], size: number) => {
+    const out: T[][] = []
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size))
+    return out
+  }
+
+  const items: DynamicOption[] = []
+  for (const idsChunk of chunk(normalizedIds, 500)) {
+    const { data, error } = await supabase
+      .from(table as AllowedTable)
+      .select(selectQuery)
+      .in(valueCol, idsChunk)
+    if (error || !data) continue
+
+    const typedData = data as unknown as Record<string, unknown>[]
+    for (const row of typedData) {
+      const extraData: Record<string, unknown> = {}
+      validExtras.forEach((col) => {
+        extraData[col] = row[col]
+      })
+      items.push({
+        label: buildDynamicOptionLabel({
+          table: table as AllowedTable,
+          labelCol,
+          row,
+        }),
+        value: String(row[valueCol] ?? ''),
+        extra: extraData,
+      })
+    }
+  }
+
+  return items
 }

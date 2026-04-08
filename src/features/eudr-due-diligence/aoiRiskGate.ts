@@ -159,6 +159,9 @@ export function buildDdLastRunSnapshot(meta: RunMetadata): DdLastRunSnapshot {
 
   const reasons: string[] = []
   if (triggers_non_accettabile) {
+    reasons.push(
+      'Verifica: Ogni perdita FORESTALE rilevata dopo il 31/12/2020 all’interno della maschera forestale 2020 costituisce una "evidenza" di possibile non conformità.'
+    )
     if (triggersFromRefined && lossHaOnForest != null) {
       reasons.push(
         `Evidenza EUDR-raffinata: loss su foresta al 2020 (JRC GFC2020) con anno di loss ≥ ${minGateYear ?? EUDR_FIRST_LOSS_CALENDAR_YEAR}, circa ${lossHaOnForest.toFixed(2)} ha (soglia ${minHa} ha).`
@@ -167,7 +170,7 @@ export function buildDdLastRunSnapshot(meta: RunMetadata): DdLastRunSnapshot {
       reasons.push(
         minGateYear != null
           ? `Rilevata perdita forestale Hansen nell'AOI con anno di loss ≥ ${minGateYear} (allineato a data di taglio e cutoff EUDR).`
-          : 'Rilevata perdita forestale Hansen (stand-replacement) nell’AOI in anni successivi al 31/12/2020 (screening senza intersect JRC o sotto soglia ha).'
+          : 'Verifica: Ogni perdita FORESTALE rilevata dopo il 31/12/2020 all’interno della maschera forestale 2020 costituisce una "evidenza" di possibile non conformità.'
       )
     }
   }
@@ -216,6 +219,12 @@ export function applyAoiGateToEudrRiskResult(
 ): RiskCalculationResult {
   if (!ddLastRun?.triggers_non_accettabile) return result
 
+  const normalizedReasons = (ddLastRun.reasons || []).map((r) =>
+    r.includes('stand-replacement') && r.includes('screening senza intersect JRC')
+      ? 'Verifica: Ogni perdita FORESTALE rilevata dopo il 31/12/2020 all’interno della maschera forestale 2020 costituisce una "evidenza" di possibile non conformità.'
+      : r
+  )
+
   const gateDetail: RiskDetail = {
     questionId: AOI_GATE_QUESTION_ID,
     label:
@@ -223,7 +232,7 @@ export function applyAoiGateToEudrRiskResult(
     shortLabel: 'Screening AOI (EUDR)',
     riskIndex: AOI_GATE_RISK_INDEX,
     answerRaw: 'triggered',
-    answerLabel: ddLastRun.reasons.join(' '),
+    answerLabel: normalizedReasons.join(' '),
   }
 
   const details = [...result.details, gateDetail]

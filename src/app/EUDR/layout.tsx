@@ -8,8 +8,6 @@ const EUDR_NAV_ITEMS: NavItem[] = [
   { label: 'Documentazione', href: '/documentation', iconName: 'FileText', minRole: 'standard' },
   { label: 'Analisi Rischio', href: '/risk-analysis', iconName: 'ShieldAlert', minRole: 'premium' },
   { label: 'Cerca', href: '/search', iconName: 'Search', minRole: 'premium' },
-  { label: 'Registro', href: '/registry', iconName: 'BookOpen', minRole: 'premium' },
-  { label: 'Valuta Fornitore', href: '/supplier-check', iconName: 'UserCheck', minRole: 'premium' },
   { label: 'Master', href: '/master', iconName: 'Database', minRole: 'admin' },
 ]
 

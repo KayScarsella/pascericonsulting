@@ -23,7 +23,6 @@ import type { RiskCalculationResult } from "@/lib/eudr-risk-calculator"
 import { RiskBarChart } from "@/components/RiskBarChart"
 import { MitigationHistorySection } from "@/components/MitigationHistorySection"
 import { ExportAnalysisPdfButton, PDF_DISCLAIMERS } from "@/components/ExportAnalysisPdfButton"
-import { fetchDynamicOptions } from "@/actions/questions"
 import type { QuestionConfig } from "@/types/questions"
 
 export default async function EudrRisultatoPage({
@@ -151,7 +150,17 @@ export default async function EudrRisultatoPage({
 
   let result: RiskCalculationResult = calculateEudrRisk(answersMap)
   const ddLastRun = metadata?.dd_last_run as DdLastRunSnapshot | undefined
-  result = applyAoiGateToEudrRiskResult(result, ddLastRun)
+  const normalizeAoiReasons = (reasons: string[] | undefined) => {
+    const msg =
+      'Verifica: Ogni perdita FORESTALE rilevata dopo il 31/12/2020 all’interno della maschera forestale 2020 costituisce una "evidenza" di possibile non conformità.'
+    return (reasons ?? []).map((r) =>
+      r.includes("stand-replacement") && r.includes("31/12/2020") ? msg : r
+    )
+  }
+  const ddLastRunNormalized = ddLastRun
+    ? { ...ddLastRun, reasons: normalizeAoiReasons(ddLastRun.reasons) }
+    : ddLastRun
+  result = applyAoiGateToEudrRiskResult(result, ddLastRunNormalized)
 
   if (session.status !== "completed" || !session.final_outcome) {
     const updatePayload: Record<string, unknown> = {
@@ -169,17 +178,17 @@ export default async function EudrRisultatoPage({
         })),
         completed_at: new Date().toISOString(),
         expiry_date: result.expiryDate,
-        ...(ddLastRun?.triggers_non_accettabile
+        ...(ddLastRunNormalized?.triggers_non_accettabile
           ? {
               aoi_gate_triggered: true,
-              aoi_gate_reasons: ddLastRun.reasons,
+              aoi_gate_reasons: ddLastRunNormalized.reasons,
             }
           : {}),
       },
     }
     await supabase.from("assessment_sessions").update(updatePayload).eq("id", sessionId)
   } else if (
-    ddLastRun?.triggers_non_accettabile &&
+    ddLastRunNormalized?.triggers_non_accettabile &&
     session.final_outcome === "Rischio Trascurabile"
   ) {
     // AOI run after finalize: align stored outcome with gate (non accettabile)
@@ -196,7 +205,7 @@ export default async function EudrRisultatoPage({
           })),
           expiry_date: null,
           aoi_gate_triggered: true,
-          aoi_gate_reasons: ddLastRun.reasons,
+          aoi_gate_reasons: ddLastRunNormalized.reasons,
           aoi_gate_synced_at: new Date().toISOString(),
         },
       })
@@ -328,21 +337,54 @@ export default async function EudrRisultatoPage({
     { key: "contact_person", label: "Referente" },
   ]
 
-  const asyncSelectKey = (c: QuestionConfig) =>
-    `${c.source_table ?? ""}|${c.source_label_col ?? "name"}|${c.source_value_col ?? "id"}`
-  const asyncSelectOptionsCache = new Map<string, { label: string; value: string }[]>()
+  // Resolve async_select labels by fetching ONLY selected IDs (no full-table prefetch).
+  const idsByAsyncKey = new Map<
+    string,
+    { table: string; labelCol: string; valueCol: string; ids: Set<string> }
+  >()
+
   for (const section of sectionsDataFiltered) {
     for (const q of section.questions || []) {
       if (q.type !== "async_select" || !q.config?.source_table) continue
-      const key = asyncSelectKey(q.config)
-      if (asyncSelectOptionsCache.has(key)) continue
-      const opts = await fetchDynamicOptions(
-        q.config.source_table,
-        q.config.source_label_col ?? "name",
-        q.config.source_value_col ?? "id"
-      )
-      asyncSelectOptionsCache.set(key, opts)
+      const raw = (answersMap[q.id] ?? "").trim()
+      if (!raw) continue
+
+      const table = String(q.config.source_table)
+      const labelCol = q.config.source_label_col ?? "name"
+      const valueCol = q.config.source_value_col ?? "id"
+      const key = `${table}|${labelCol}|${valueCol}`
+      if (!idsByAsyncKey.has(key)) {
+        idsByAsyncKey.set(key, { table, labelCol, valueCol, ids: new Set<string>() })
+      }
+      const bucket = idsByAsyncKey.get(key)!
+      raw
+        .split(",")
+        .map((v) => v.trim())
+        .filter(Boolean)
+        .forEach((id) => bucket.ids.add(id))
     }
+  }
+
+  const chunk = <T,>(arr: T[], size: number) => {
+    const out: T[][] = []
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size))
+    return out
+  }
+
+  const asyncSelectLabelMaps = new Map<string, Map<string, string>>() // key -> (value -> label)
+  for (const [key, bucket] of idsByAsyncKey.entries()) {
+    const ids = [...bucket.ids]
+    const map = new Map<string, string>()
+    for (const idsChunk of chunk(ids, 500)) {
+      const { data } = await supabase
+        .from(bucket.table as any)
+        .select(`${bucket.labelCol}, ${bucket.valueCol}`)
+        .in(bucket.valueCol, idsChunk)
+      for (const row of (data as any[]) || []) {
+        map.set(String(row[bucket.valueCol] ?? ""), String(row[bucket.labelCol] ?? ""))
+      }
+    }
+    asyncSelectLabelMaps.set(key, map)
   }
 
   function resolveDisplayAnswer(
@@ -362,17 +404,21 @@ export default async function EudrRisultatoPage({
       return opt ? opt.label : raw || "—"
     }
     if (q.type === "async_select" && q.config?.source_table) {
-      const key = asyncSelectKey(q.config)
-      const opts = asyncSelectOptionsCache.get(key) ?? []
+      const table = String(q.config.source_table)
+      const labelCol = q.config.source_label_col ?? "name"
+      const valueCol = q.config.source_value_col ?? "id"
+      const key = `${table}|${labelCol}|${valueCol}`
+      const map = asyncSelectLabelMaps.get(key)
       if (raw.includes(",")) {
         const labels = raw
           .split(",")
-          .map((v) => opts.find((o) => o.value === v.trim())?.label ?? v.trim())
+          .map((v) => v.trim())
+          .filter(Boolean)
+          .map((id) => map?.get(id) ?? id)
         return labels.filter(Boolean).length ? labels.join(", ") : raw || "—"
       }
       const rawNorm = raw.trim()
-      const opt = opts.find((o) => o.value === rawNorm)
-      return opt ? opt.label : raw || "—"
+      return (map?.get(rawNorm) || rawNorm) || "—"
     }
     if (q.type === "repeater" && Array.isArray(answerJson))
       return answerJson.length ? `${answerJson.length} elemento/i` : "—"
@@ -603,70 +649,81 @@ export default async function EudrRisultatoPage({
       </div>
 
       {/* AOI / Hansen: esito esplicito positivo vs negativo (dd_last_run salvato al run) */}
-      {ddLastRun && (
+      {ddLastRunNormalized && (
         <div
           className={`rounded-2xl border p-5 mb-10 ${
-            ddLastRun.triggers_non_accettabile
+            ddLastRunNormalized.triggers_non_accettabile
               ? "border-red-200 bg-red-50/80"
               : "border-[#4a7c2e]/25 bg-[#4a7c2e]/5"
           }`}
         >
           <div className="flex items-start gap-3">
-            {ddLastRun.triggers_non_accettabile ? (
+            {ddLastRunNormalized.triggers_non_accettabile ? (
               <AlertTriangle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
             ) : (
               <CheckCircle className="w-6 h-6 text-[#4a7c2e] flex-shrink-0 mt-0.5" />
             )}
             <div className="min-w-0 flex-1">
               <p className="text-sm md:text-base font-black tracking-wide uppercase text-slate-900">
-                {ddLastRun.triggers_non_accettabile
+                {ddLastRunNormalized.triggers_non_accettabile
                   ? "Screening dell’area di interesse soggetta a perdita forestale dopo la data di taglio dichiarata – risultato: rischio non trascurabile"
                   : "Screening dell’area di interesse non soggetta a perdita forestale dopo la data di taglio dichiarata – risultato: rischio trascurabile"}
               </p>
               <h3 className="font-bold text-[#3d2b1a]">
                 Screening AOI (EUDR) —{" "}
-                {ddLastRun.triggers_non_accettabile
+                {ddLastRunNormalized.triggers_non_accettabile
                   ? "esito negativo"
                   : "nessun gate attivato"}
               </h3>
               <p className="text-sm text-slate-600 mt-1">
-                {ddLastRun.triggers_non_accettabile
-                  ? 'Verifica: qualunque perdita forestale rilevata dopo il 31/12/2020 all’interno della maschera forestale 2020 costituisce "evidenza" di possibile non conformità.'
+                {ddLastRunNormalized.triggers_non_accettabile
+                  ? 'Verifica: Ogni perdita FORESTALE rilevata dopo il 31/12/2020 all’interno della maschera forestale 2020 costituisce una "evidenza" di possibile non conformità.'
                   : "Nell’AOI non risulta evidenza significativa di loss su foresta al 2020 dopo il cutoff (JRC GFC2020 ∩ Hansen), né loss Hansen post-taglio oltre soglia. Il gate AOI non ha alzato il rischio oltre il questionario."}
               </p>
-              {ddLastRun.cutting_date_iso && /^\d{4}/.test(ddLastRun.cutting_date_iso) && (
+              {ddLastRunNormalized.cutting_date_iso &&
+                /^\d{4}/.test(ddLastRunNormalized.cutting_date_iso) && (
                 <p className="text-xs text-slate-500 mt-2 rounded-md bg-slate-100/80 border border-slate-200 px-3 py-2">
                   <strong>Legenda mappa Hansen (run AOI):</strong> rosso = loss dall&apos;anno di taglio in poi
-                  (≥ {ddLastRun.cutting_date_iso.slice(0, 4)}), incluso l&apos;anno inserito — così eventuale
+                  (≥ {ddLastRunNormalized.cutting_date_iso.slice(0, 4)}), incluso l&apos;anno inserito — così eventuale
                   loss nell&apos;anno del taglio è visibile e coerente con l&apos;esito. Blu = solo anni 2021…
                   precedenti all&apos;anno di taglio.
                 </p>
               )}
               <p className="text-xs text-slate-500 mt-2 font-mono">
-                Run: {ddLastRun.run_id.slice(0, 8)}… · pixel loss (Hansen tot):{" "}
-                {ddLastRun.loss_pixel_count ?? "—"} · {ddLastRun.dataset_id}
-                {ddLastRun.gate_uses_jrc_gfc2020 && ddLastRun.loss_on_forest_2020_post_eudr_ha != null && (
-                  <> · loss su foresta 2020 post-EUDR ≈ {ddLastRun.loss_on_forest_2020_post_eudr_ha.toFixed(2)} ha</>
+                Run: {ddLastRunNormalized.run_id.slice(0, 8)}… · pixel loss (Hansen tot):{" "}
+                {ddLastRunNormalized.loss_pixel_count ?? "—"} · {ddLastRunNormalized.dataset_id}
+                {ddLastRunNormalized.gate_uses_jrc_gfc2020 &&
+                  ddLastRunNormalized.loss_on_forest_2020_post_eudr_ha != null && (
+                    <>
+                      {" "}
+                      · loss su foresta 2020 post-EUDR ≈{" "}
+                      {ddLastRunNormalized.loss_on_forest_2020_post_eudr_ha.toFixed(2)} ha
+                    </>
                 )}
               </p>
-              {ddLastRun.logic_mode && (
+              {ddLastRunNormalized.logic_mode && (
                 <p className="text-xs text-slate-600 mt-2">
                   Modalità screening:{' '}
-                  <strong>{ddLastRun.logic_mode === 'raffinata' ? 'raffinata (JRC ∩ Hansen)' : 'base (Hansen / sotto soglia)'}</strong>
+                  <strong>
+                    {ddLastRunNormalized.logic_mode === 'raffinata'
+                      ? 'raffinata (JRC ∩ Hansen)'
+                      : 'base (Hansen / sotto soglia)'}
+                  </strong>
                 </p>
               )}
-              {ddLastRun.triggers_non_accettabile && ddLastRun.reasons?.length > 0 && (
+              {ddLastRunNormalized.triggers_non_accettabile &&
+                ddLastRunNormalized.reasons?.length > 0 && (
                 <ul className="mt-3 text-sm text-red-800 list-disc list-inside space-y-1">
-                  {ddLastRun.reasons.map((r, i) => (
+                  {ddLastRunNormalized.reasons.map((r, i) => (
                     <li key={i}>{r}</li>
                   ))}
                 </ul>
               )}
-              {!ddLastRun.triggers_non_accettabile &&
-                ddLastRun.advisory_notes &&
-                ddLastRun.advisory_notes.length > 0 && (
+              {!ddLastRunNormalized.triggers_non_accettabile &&
+                ddLastRunNormalized.advisory_notes &&
+                ddLastRunNormalized.advisory_notes.length > 0 && (
                   <ul className="mt-3 text-sm text-amber-900 list-disc list-inside space-y-1 bg-amber-50/80 rounded-md p-3 border border-amber-100">
-                    {ddLastRun.advisory_notes.map((r, i) => (
+                    {ddLastRunNormalized.advisory_notes.map((r, i) => (
                       <li key={i}>{r}</li>
                     ))}
                   </ul>

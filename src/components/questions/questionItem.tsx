@@ -8,7 +8,6 @@ import { DynamicInput, AnswerValue, RepeaterConfig } from "./dynamicInput"
 import { ResponseUploader } from "./FileUploader"
 
 const NOTE_QUESTION_ID = "c8d9e0f1-a2b3-4c4d-9e5f-6a7b8c9d0e92"
-export const SECTION_H_POINT5_NOTE_TEXT = "hello everyone"
 
 interface QuestionItemProps {
   question: QuestionWithConfig
@@ -56,7 +55,7 @@ export function QuestionItem({
   
   // Cast sicuro al tipo RepeaterConfig che include le proprietà base di QuestionConfig
   const typedConfig = question.config as RepeaterConfig
-  const noteText = question.id === NOTE_QUESTION_ID ? SECTION_H_POINT5_NOTE_TEXT : null
+  const noteText = null
 
   // ── REPEATER LAYOUT ──────────────────────────────────────
   if (question.type === 'repeater') {
