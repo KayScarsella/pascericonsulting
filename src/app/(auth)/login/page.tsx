@@ -5,6 +5,7 @@ import { useState } from 'react'
 // Rimuovi useRouter, non serve per il successo se gestito dal server
 // import { useRouter } from 'next/navigation' 
 import { toast } from 'sonner'
+import Link from 'next/link'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -46,7 +47,15 @@ export default function LoginPage() {
               <Input id="email" name="email" type="email" placeholder="m@example.com" required />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="password">Password</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">Password</Label>
+                <Link
+                  href="/auth/forgot-password"
+                  className="text-xs text-slate-500 underline underline-offset-2 hover:text-slate-700"
+                >
+                  Password dimenticata?
+                </Link>
+              </div>
               <Input id="password" name="password" type="password" required />
             </div>
             <Button className="w-full" type="submit" disabled={loading}>

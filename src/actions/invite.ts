@@ -1,5 +1,6 @@
 'use server'
 
+import { notifyUserOfToolAccess } from '@/lib/tool-access-notify'
 import { requireToolAdmin } from '@/lib/tool-auth'
 import { createServiceRoleClient } from '@/utils/supabase/admin'
 
@@ -14,6 +15,14 @@ function siteUrlForAuth(): string | null {
   return null
 }
 
+export type InviteUserToToolResult = {
+  success: boolean
+  error?: string
+  message?: string
+  /** Set when access was saved but the optional Resend notify Edge Function failed. */
+  warning?: string
+}
+
 /**
  * Sends a Supabase invite email and grants access to the tool.
  * Requires SUPABASE_SERVICE_ROLE_KEY on the server.
@@ -23,7 +32,7 @@ export async function inviteUserToToolAction(
   toolId: string,
   email: string,
   role: 'standard' | 'premium' = 'standard'
-): Promise<{ success: boolean; error?: string }> {
+): Promise<InviteUserToToolResult> {
   await requireToolAdmin(toolId)
 
   const site = siteUrlForAuth()
@@ -56,6 +65,8 @@ export async function inviteUserToToolAction(
   })
 
   let userId = data.user?.id ?? null
+  /** New Auth invite vs existing account (pending or fully onboarded). */
+  let inviteKind: 'new_invite' | 'existing_pending' | 'existing_onboarded' = 'new_invite'
 
   if (error) {
     const alreadyRegistered = error.message.toLowerCase().includes('already been registered')
@@ -93,26 +104,42 @@ export async function inviteUserToToolAction(
       (existingProfile as { onboarding_completed?: boolean } | null)?.onboarding_completed
     )
     if (onboardingCompleted) {
-      return {
-        success: false,
-        error:
-          "L'utente e' gia' registrato e ha completato l'onboarding. Non e' possibile reinviare l'invito.",
-      }
-    }
-
-    const { error: resendError } = await adminClient.auth.resetPasswordForEmail(trimmed, {
-      redirectTo: `${site}/auth/callback`,
-    })
-    if (resendError) {
-      return {
-        success: false,
-        error: `Utente pending trovato ma invio email fallito: ${resendError.message}`,
+      inviteKind = 'existing_onboarded'
+    } else {
+      inviteKind = 'existing_pending'
+      const { error: resendInviteError } = await adminClient.auth.admin.generateLink({
+        type: 'invite',
+        email: trimmed,
+        options: {
+          redirectTo: `${site}/auth/callback`,
+        },
+      })
+      if (resendInviteError) {
+        return {
+          success: false,
+          error: `Utente pending trovato ma reinvio invito fallito: ${resendInviteError.message}`,
+        }
       }
     }
   }
 
   if (!userId) {
     return { success: false, error: 'Invito senza utente: controlla i log Auth in Supabase.' }
+  }
+
+  const { data: existingAccess } = await adminClient
+    .from('tool_access')
+    .select('role')
+    .eq('user_id', userId)
+    .eq('tool_id', toolId)
+    .maybeSingle()
+
+  const existingRole = existingAccess?.role as 'standard' | 'premium' | 'admin' | undefined
+  if (existingRole === role) {
+    return {
+      success: true,
+      message: "L'utente ha gia' accesso a questo tool con lo stesso ruolo.",
+    }
   }
 
   const { error: accessError } = await adminClient.from('tool_access').upsert(
@@ -131,23 +158,54 @@ export async function inviteUserToToolAction(
     }
   }
 
-  // Keep a profile shell so admins can see pending onboarding users.
-  const { error: profileError } = await adminClient.from('profiles').upsert(
-    {
-      id: userId,
-      email: trimmed,
-      onboarding_completed: false,
-      invited_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'id' }
-  )
-  if (profileError) {
-    return {
-      success: false,
-      error: `Accesso assegnato ma profilo pending non aggiornato: ${profileError.message}`,
+  // Pending / new users: keep a profile shell so admins can see onboarding state.
+  // Onboarded existing users: never reset onboarding_completed or invited_at.
+  if (inviteKind !== 'existing_onboarded') {
+    const { error: profileError } = await adminClient.from('profiles').upsert(
+      {
+        id: userId,
+        email: trimmed,
+        onboarding_completed: false,
+        invited_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'id' }
+    )
+    if (profileError) {
+      return {
+        success: false,
+        error: `Accesso assegnato ma profilo pending non aggiornato: ${profileError.message}`,
+      }
     }
   }
 
-  return { success: true }
+  let message: string
+  if (inviteKind === 'new_invite') {
+    message = 'Invito inviato.'
+  } else if (inviteKind === 'existing_pending') {
+    message = 'Email di accesso inviata e tool assegnato.'
+  } else if (existingRole !== undefined && existingRole !== role) {
+    message = 'Ruolo aggiornato per questo tool.'
+  } else {
+    message = 'Accesso al tool aggiunto. L’utente lo vedrà in dashboard.'
+  }
+
+  let warning: string | undefined
+  if (inviteKind === 'existing_onboarded') {
+    const notifyKind =
+      existingRole !== undefined && existingRole !== role ? 'role_updated' : 'access_granted'
+    const notify = await notifyUserOfToolAccess(adminClient, {
+      appPublicUrl: site,
+      userId,
+      email: trimmed,
+      toolId,
+      kind: notifyKind,
+      role,
+    })
+    if (!notify.ok) {
+      warning = `Accesso salvato ma l’email di notifica non è stata inviata: ${notify.error}`
+    }
+  }
+
+  return { success: true, message, ...(warning ? { warning } : {}) }
 }

@@ -14,10 +14,30 @@ export default function AuthCallbackPage() {
       const url = new URL(window.location.href)
       const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''))
       const code = url.searchParams.get('code')
+      const recoveryType = url.searchParams.get('type') ?? hash.get('type')
+      const tokenHash = url.searchParams.get('token_hash')
+      const nextPath = recoveryType === 'recovery' ? '/auth/reset-password' : '/onboarding'
 
       // Handle PKCE links by delegating to the server route that exchanges the code.
       if (code) {
-        router.replace(`/callback${url.search}`)
+        const nextParam = encodeURIComponent(nextPath)
+        const separator = url.search ? '&' : '?'
+        router.replace(`/callback${url.search}${separator}next=${nextParam}`)
+        return
+      }
+
+      // Handle email links that carry token_hash + type in query params.
+      if (tokenHash && recoveryType === 'recovery') {
+        const { error } = await supabase.auth.verifyOtp({
+          type: 'recovery',
+          token_hash: tokenHash,
+        })
+        if (error) {
+          setMessage('Link non valido o scaduto. Richiedi una nuova email.')
+          router.replace('/auth/auth-code-error')
+          return
+        }
+        router.replace(nextPath)
         return
       }
 
@@ -42,7 +62,7 @@ export default function AuthCallbackPage() {
         return
       }
 
-      router.replace('/onboarding')
+      router.replace(nextPath)
     }
 
     void completeAuth()

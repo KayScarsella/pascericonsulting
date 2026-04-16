@@ -26,6 +26,17 @@ async function createSupabaseServerClient() {
   )
 }
 
+function siteUrlForAuth(): string | null {
+  const fromEnv = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, '')
+  if (fromEnv) return fromEnv
+  const vercel = process.env.VERCEL_URL?.trim()
+  if (vercel) {
+    const host = vercel.replace(/^https?:\/\//, '')
+    return `https://${host}`
+  }
+  return null
+}
+
 export async function loginAction(formData: FormData) {
   const email = formData.get("email") as string
   const password = formData.get("password") as string
@@ -54,6 +65,33 @@ export async function signupAction(_formData: FormData) {
   return {
     error:
       "La registrazione libera non è attiva. Ricevi un invito da un amministratore del tool e usa il link nell’email.",
+  }
+}
+
+export async function requestPasswordResetAction(formData: FormData) {
+  const email = String(formData.get("email") ?? "").trim().toLowerCase()
+  if (!email || !email.includes("@")) {
+    return { error: "Inserisci un'email valida." }
+  }
+
+  const site = siteUrlForAuth()
+  if (!site) {
+    return { error: "Configura NEXT_PUBLIC_SITE_URL per abilitare il recupero password." }
+  }
+
+  const supabase = await createSupabaseServerClient()
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${site}/auth/callback`,
+  })
+
+  // Anti-enumeration: do not reveal whether the email exists.
+  if (error) {
+    console.warn("resetPasswordForEmail warning:", error.message)
+  }
+
+  return {
+    success: true,
+    message: "Se l'email e' registrata, riceverai un link per impostare una nuova password.",
   }
 }
 
@@ -140,4 +178,42 @@ export async function completeOnboardingAction(formData: FormData) {
   }
 
   redirect("/landingPage")
+}
+
+export async function completePasswordResetAction(formData: FormData) {
+  const password = String(formData.get("password") ?? "")
+  const confirmPassword = String(formData.get("confirmPassword") ?? "")
+
+  if (password.length < 8) {
+    return { error: "La password deve essere di almeno 8 caratteri." }
+  }
+  if (password !== confirmPassword) {
+    return { error: "Le password non coincidono." }
+  }
+
+  const supabase = await createSupabaseServerClient()
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser()
+
+  if (userError || !user) {
+    return { error: "Sessione reset non valida o scaduta. Richiedi una nuova email." }
+  }
+
+  const { error: updateUserError } = await supabase.auth.updateUser({ password })
+  if (updateUserError) {
+    const isSamePassword = updateUserError.message
+      .toLowerCase()
+      .includes("different from the old password")
+    if (isSamePassword) {
+      return { error: "La nuova password deve essere diversa dalla precedente." }
+    }
+    return { error: updateUserError.message }
+  }
+
+  // Security: after password reset, clear the temporary recovery session so
+  // the user must authenticate again with the new password.
+  await supabase.auth.signOut()
+  redirect("/login?reset=success")
 }

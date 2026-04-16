@@ -384,9 +384,15 @@ export function MasterSectionClient({
       const res = await inviteUserToToolAction(toolId, email, inviteRole)
       setInviteLoading(false)
       if (res.success) {
-        toast.success('Invito inviato.', {
-          description: 'L’utente riceverà un’email da Supabase per completare l’accesso.',
-        })
+        const msg = res.message ?? 'Operazione completata.'
+        const showEmailDescription =
+          msg === 'Invito inviato.' || msg === 'Email di accesso inviata e tool assegnato.'
+        const description = res.warning
+          ? res.warning
+          : showEmailDescription
+            ? 'L’utente riceverà un’email da Supabase per completare l’accesso.'
+            : undefined
+        toast.success(msg, description ? { description } : undefined)
         setInviteOpen(false)
         setInviteEmail('')
         setInviteRole('standard')
