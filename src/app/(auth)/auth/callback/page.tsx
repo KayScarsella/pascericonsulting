@@ -16,7 +16,19 @@ export default function AuthCallbackPage() {
       const code = url.searchParams.get('code')
       const recoveryType = url.searchParams.get('type') ?? hash.get('type')
       const tokenHash = url.searchParams.get('token_hash')
+      const authError = url.searchParams.get('error') ?? hash.get('error')
+      const authErrorDescription =
+        url.searchParams.get('error_description') ?? hash.get('error_description')
       const nextPath = recoveryType === 'recovery' ? '/auth/reset-password' : '/onboarding'
+
+      if (authError) {
+        const text = authErrorDescription
+          ? decodeURIComponent(authErrorDescription.replace(/\+/g, ' '))
+          : 'Link non valido o scaduto. Richiedi una nuova email.'
+        setMessage(text)
+        router.replace('/auth/auth-code-error')
+        return
+      }
 
       // Handle PKCE links by delegating to the server route that exchanges the code.
       if (code) {
@@ -42,8 +54,9 @@ export default function AuthCallbackPage() {
       }
 
       // Handle implicit invite links carrying tokens in URL hash.
-      const accessToken = hash.get('access_token')
-      const refreshToken = hash.get('refresh_token')
+      // Some providers/templates can return tokens in query params instead.
+      const accessToken = hash.get('access_token') ?? url.searchParams.get('access_token')
+      const refreshToken = hash.get('refresh_token') ?? url.searchParams.get('refresh_token')
 
       if (!accessToken || !refreshToken) {
         setMessage('Link non valido o scaduto. Richiedi un nuovo invito.')
