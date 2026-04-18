@@ -1,16 +1,22 @@
 'use client'
 
+/**
+ * Password-reset email links must land here (see requestPasswordResetAction redirectTo).
+ * Keeps PKCE `code` exchange separate from invite/onboarding so `next` is always reset-password.
+ */
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/utils/supabase/client'
 
-export default function AuthCallbackPage() {
+const nextPath = '/auth/reset-password'
+
+export default function RecoveryCallbackPage() {
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
-  const [message, setMessage] = useState('Completamento accesso in corso...')
+  const [message, setMessage] = useState('Completamento recupero password in corso...')
 
   useEffect(() => {
-    async function completeAuth() {
+    async function completeRecovery() {
       async function failAndResetSession(fallbackMessage: string) {
         setMessage(fallbackMessage)
         await supabase.auth.signOut()
@@ -25,7 +31,6 @@ export default function AuthCallbackPage() {
       const authError = url.searchParams.get('error') ?? hash.get('error')
       const authErrorDescription =
         url.searchParams.get('error_description') ?? hash.get('error_description')
-      const nextPath = recoveryType === 'recovery' ? '/auth/reset-password' : '/onboarding'
 
       if (authError) {
         const text = authErrorDescription
@@ -35,7 +40,6 @@ export default function AuthCallbackPage() {
         return
       }
 
-      // Handle PKCE links by delegating to the server route that exchanges the code.
       if (code) {
         const nextParam = encodeURIComponent(nextPath)
         const separator = url.search ? '&' : '?'
@@ -43,7 +47,6 @@ export default function AuthCallbackPage() {
         return
       }
 
-      // Handle email links that carry token_hash + type in query params.
       if (tokenHash && recoveryType === 'recovery') {
         const { error } = await supabase.auth.verifyOtp({
           type: 'recovery',
@@ -57,13 +60,11 @@ export default function AuthCallbackPage() {
         return
       }
 
-      // Handle implicit invite links carrying tokens in URL hash.
-      // Some providers/templates can return tokens in query params instead.
       const accessToken = hash.get('access_token') ?? url.searchParams.get('access_token')
       const refreshToken = hash.get('refresh_token') ?? url.searchParams.get('refresh_token')
 
       if (!accessToken || !refreshToken) {
-        await failAndResetSession('Link non valido o scaduto. Richiedi un nuovo invito.')
+        await failAndResetSession('Link non valido o scaduto. Richiedi una nuova email.')
         return
       }
 
@@ -73,14 +74,14 @@ export default function AuthCallbackPage() {
       })
 
       if (error) {
-        await failAndResetSession('Sessione non valida. Richiedi un nuovo invito.')
+        await failAndResetSession('Sessione non valida. Richiedi una nuova email.')
         return
       }
 
       router.replace(nextPath)
     }
 
-    void completeAuth()
+    void completeRecovery()
   }, [router, supabase])
 
   return (

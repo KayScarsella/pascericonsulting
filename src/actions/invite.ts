@@ -2,18 +2,8 @@
 
 import { notifyUserOfToolAccess } from '@/lib/tool-access-notify'
 import { requireToolAdmin } from '@/lib/tool-auth'
+import { siteUrlForAuth } from '@/lib/site-url-for-auth'
 import { createServiceRoleClient } from '@/utils/supabase/admin'
-
-function siteUrlForAuth(): string | null {
-  const fromEnv = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, '')
-  if (fromEnv) return fromEnv
-  const vercel = process.env.VERCEL_URL?.trim()
-  if (vercel) {
-    const host = vercel.replace(/^https?:\/\//, '')
-    return `https://${host}`
-  }
-  return null
-}
 
 export type InviteUserToToolResult = {
   success: boolean

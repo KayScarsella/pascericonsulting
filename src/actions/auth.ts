@@ -4,6 +4,8 @@
 import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
+import { siteUrlForAuth } from "@/lib/site-url-for-auth"
+import { createServiceRoleClient } from "@/utils/supabase/admin"
 
 // ... (tua funzione createSupabaseServerClient esistente va bene) ...
 async function createSupabaseServerClient() {
@@ -26,15 +28,38 @@ async function createSupabaseServerClient() {
   )
 }
 
-function siteUrlForAuth(): string | null {
-  const fromEnv = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, '')
-  if (fromEnv) return fromEnv
-  const vercel = process.env.VERCEL_URL?.trim()
-  if (vercel) {
-    const host = vercel.replace(/^https?:\/\//, '')
-    return `https://${host}`
+function isSamePasswordUpdateError(message: string): boolean {
+  const m = message.toLowerCase()
+  return (
+    m.includes("different from the old password") ||
+    m.includes("different from your old password") ||
+    (m.includes("should be different") && m.includes("old password")) ||
+    m.includes("same as your current password") ||
+    m.includes("same as the current password")
+  )
+}
+
+async function setMustResetPasswordByEmail(email: string, mustReset: boolean) {
+  try {
+    const adminClient = createServiceRoleClient()
+    const { data: profile, error: profileError } = await adminClient
+      .from("profiles")
+      .select("id")
+      .eq("email", email)
+      .maybeSingle()
+
+    if (profileError || !profile?.id) return
+
+    await adminClient
+      .from("profiles")
+      .update({
+        must_reset_password: mustReset,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", profile.id)
+  } catch {
+    // Do not fail password-reset flow if service role is unavailable.
   }
-  return null
 }
 
 export async function loginAction(formData: FormData) {
@@ -45,7 +70,7 @@ export async function loginAction(formData: FormData) {
 
   const supabase = await createSupabaseServerClient()
 
-  const { error } = await supabase.auth.signInWithPassword({
+  const { data, error } = await supabase.auth.signInWithPassword({
     email,
     password,
   })
@@ -55,11 +80,28 @@ export async function loginAction(formData: FormData) {
     return { error: error.message }
   }
 
+  const userId = data.user?.id
+  if (userId) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("must_reset_password")
+      .eq("id", userId)
+      .maybeSingle()
+
+    if (profile?.must_reset_password) {
+      await supabase.auth.signOut()
+      return {
+        error:
+          "Per motivi di sicurezza devi prima completare il reset password dal link ricevuto via email.",
+      }
+    }
+  }
+
   // Se arrivi qui, il cookie è impostato. Ora reindirizziamo.
   redirect("/")
 }
 
-export async function signupAction(_formData: FormData) {
+export async function signupAction() {
   // Registrazione solo su invito: usa invite dal pannello admin + SUPABASE_SERVICE_ROLE_KEY,
   // e in Supabase Dashboard disattiva "Allow new users to sign up".
   return {
@@ -80,8 +122,10 @@ export async function requestPasswordResetAction(formData: FormData) {
   }
 
   const supabase = await createSupabaseServerClient()
+  await setMustResetPasswordByEmail(email, true)
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${site}/auth/callback`,
+    // Dedicated route so PKCE `code` flow always continues to reset-password (not onboarding).
+    redirectTo: `${site}/auth/recovery-callback`,
   })
 
   // Anti-enumeration: do not reveal whether the email exists.
@@ -198,19 +242,42 @@ export async function completePasswordResetAction(formData: FormData) {
   } = await supabase.auth.getUser()
 
   if (userError || !user) {
+    await supabase.auth.signOut()
     return { error: "Sessione reset non valida o scaduta. Richiedi una nuova email." }
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("must_reset_password")
+    .eq("id", user.id)
+    .maybeSingle()
+
+  if (!profile?.must_reset_password) {
+    await supabase.auth.signOut()
+    return {
+      error: "Questa sessione di reset non e' valida. Richiedi un nuovo link di recupero password.",
+    }
   }
 
   const { error: updateUserError } = await supabase.auth.updateUser({ password })
   if (updateUserError) {
-    const isSamePassword = updateUserError.message
-      .toLowerCase()
-      .includes("different from the old password")
-    if (isSamePassword) {
-      return { error: "La nuova password deve essere diversa dalla precedente." }
+    if (isSamePasswordUpdateError(updateUserError.message)) {
+      return {
+        error:
+          "La nuova password deve essere diversa dalla precedente. Scegli un'altra password e riprova.",
+      }
     }
-    return { error: updateUserError.message }
+    await supabase.auth.signOut()
+    return { error: "Impossibile completare il reset. Richiedi un nuovo link e riprova." }
   }
+
+  await supabase
+    .from("profiles")
+    .update({
+      must_reset_password: false,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", user.id)
 
   // Security: after password reset, clear the temporary recovery session so
   // the user must authenticate again with the new password.

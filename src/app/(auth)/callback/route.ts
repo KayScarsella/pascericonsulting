@@ -51,6 +51,7 @@ export async function GET(request: Request) {
     if (!error) {
       return NextResponse.redirect(`${origin}${next}`)
     }
+    await supabase.auth.signOut()
   }
 
   // return the user to an error page with instructions

@@ -290,6 +290,7 @@ export type Database = {
           id: string
           indirizzo: string | null
           invited_at: string | null
+          must_reset_password: boolean
           onboarding_completed: boolean
           onboarding_completed_at: string | null
           provincia: string | null
@@ -311,6 +312,7 @@ export type Database = {
           id: string
           indirizzo?: string | null
           invited_at?: string | null
+          must_reset_password?: boolean
           onboarding_completed?: boolean
           onboarding_completed_at?: string | null
           provincia?: string | null
@@ -332,6 +334,7 @@ export type Database = {
           id?: string
           indirizzo?: string | null
           invited_at?: string | null
+          must_reset_password?: boolean
           onboarding_completed?: boolean
           onboarding_completed_at?: string | null
           provincia?: string | null
