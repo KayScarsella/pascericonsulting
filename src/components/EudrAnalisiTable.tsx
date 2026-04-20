@@ -1,12 +1,13 @@
 'use client'
 
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
   DataManagementTable,
   type DataManagementColumn,
 } from "@/components/admin/DataManagementTable"
 import { Button } from "@/components/ui/button"
+import Link from "next/link"
 import { FileArchive, Edit } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { finalOutcomeIsNegative } from "@/lib/final-outcome"
@@ -39,8 +40,6 @@ export interface EudrAnalisiTableProps {
   totalPages: number
   isAdmin: boolean
 }
-
-type SortField = "base_evaluation_code" | "date" | "nome_operazione" | "final_outcome"
 
 export function EudrAnalisiTable({ data, page, totalPages, isAdmin }: EudrAnalisiTableProps) {
   const router = useRouter()
@@ -236,26 +235,16 @@ export function EudrAnalisiTable({ data, page, totalPages, isAdmin }: EudrAnalis
       renderRowActions={(row) => (
         <div className="flex items-center justify-end gap-2">
           {row.status === "completed" ? (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="text-emerald-600 hover:bg-emerald-50"
-              onClick={() => router.push(`/EUDR/risultato?session_id=${row.id}`)}
-              title="Vedi Risultato Analisi"
-            >
-              <FileArchive className="h-4 w-4" />
+            <Button asChild variant="ghost" size="icon" className="text-emerald-600 hover:bg-emerald-50">
+              <Link prefetch={false} href={`/EUDR/risultato?session_id=${row.id}`} title="Vedi Risultato Analisi">
+                <FileArchive className="h-4 w-4" />
+              </Link>
             </Button>
           ) : (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="text-amber-600 hover:bg-amber-50"
-              onClick={() =>
-                router.push(`/EUDR/valutazione-finale?session_id=${row.id}`)
-              }
-              title="Continua Analisi"
-            >
-              <Edit className="h-4 w-4" />
+            <Button asChild variant="ghost" size="icon" className="text-amber-600 hover:bg-amber-50">
+              <Link prefetch={false} href={`/EUDR/valutazione-finale?session_id=${row.id}`} title="Continua Analisi">
+                <Edit className="h-4 w-4" />
+              </Link>
             </Button>
           )}
         </div>

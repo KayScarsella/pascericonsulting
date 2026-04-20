@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { Shield, Loader2, Save, ChevronDown, ChevronUp, ArrowRight, Clock, AlertTriangle, Upload, FileText } from "lucide-react"
+import { Loader2, Save, ChevronDown, ChevronUp, ArrowRight, Clock, AlertTriangle, Upload, FileText } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import {

@@ -2,6 +2,19 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function updateSession(request: NextRequest) {
+  // Avoid session/cookie churn for framework prefetch probes.
+  const isPrefetch =
+    request.headers.get("next-router-prefetch") === "1" ||
+    request.headers.get("purpose") === "prefetch" ||
+    request.headers.get("sec-purpose") === "prefetch";
+  if (isPrefetch) {
+    return NextResponse.next({
+      request: {
+        headers: request.headers,
+      },
+    });
+  }
+
   let response = NextResponse.next({
     request: {
       headers: request.headers,
@@ -17,13 +30,22 @@ export async function updateSession(request: NextRequest) {
           return request.cookies.getAll();
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
+          const changedCookies = cookiesToSet.filter(({ name, value }) => {
+            const current = request.cookies.get(name)?.value;
+            return current !== value;
+          });
+
+          if (changedCookies.length === 0) return;
+
+          changedCookies.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           );
+
           response = NextResponse.next({
             request,
           });
-          cookiesToSet.forEach(({ name, value, options }) =>
+
+          changedCookies.forEach(({ name, value, options }) =>
             response.cookies.set(name, value, options)
           );
         },

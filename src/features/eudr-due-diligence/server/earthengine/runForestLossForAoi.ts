@@ -11,6 +11,20 @@
 import { ensureEarthEngineInitialized } from './initialize'
 import type { LossYearHistogram } from '../../types/due-diligence-run'
 
+type EarthEngineHistogramClient = {
+  Geometry: (value: unknown) => { area: (opts: { maxError: number }) => { getInfo: (cb: (result: unknown, error?: Error) => void) => void } }
+  Image: (asset: string) => {
+    select: (band: string) => {
+      gt: (value: number) => unknown
+      updateMask: (mask: unknown) => {
+        reduceRegion: (opts: Record<string, unknown>) => { getInfo: (cb: (result: unknown, error?: Error) => void) => void }
+      }
+      projection: () => unknown
+    }
+  }
+  Reducer: { frequencyHistogram: () => unknown }
+}
+
 /** Public catalog asset — must match EE Data Catalog (case-sensitive path). */
 const HANSEN_ASSET = 'UMD/hansen/global_forest_change_2024_v1_12'
 const SCALE_M = 30
@@ -42,7 +56,7 @@ function getInfoPromise(computed: { getInfo: (cb: (result: unknown, error?: Erro
 export async function runForestLossHistogramForAoi(aoiGeometry: unknown): Promise<ForestLossRunResult> {
   await ensureEarthEngineInitialized()
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const ee = require('@google/earthengine') as any
+  const ee = require('@google/earthengine') as EarthEngineHistogramClient
 
   const geometry = ee.Geometry(aoiGeometry)
   const gf = ee.Image(HANSEN_ASSET)

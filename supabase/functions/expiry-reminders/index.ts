@@ -1,10 +1,12 @@
-// @ts-nocheck
 /// <reference types="https://deno.land/x/typescript_types@v1.0.0/index.d.ts" />
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2.94.0'
 
 type Json = Record<string, unknown>
+type ParentSessionRow = { id: string; evaluation_code: number | null }
+type ProfileRow = { id: string; email: string; full_name: string | null }
+type ReminderInsertRow = { id: string }
 
 const TEMPLATE_VERSION = '2026-03-31-v2'
 
@@ -50,6 +52,30 @@ function parseDaysAhead(v: unknown, fallback: number): number {
     if (Number.isFinite(n)) return Math.trunc(n)
   }
   return fallback
+}
+
+function getStringField(obj: unknown, key: string): string {
+  if (!obj || typeof obj !== 'object' || !(key in obj)) return ''
+  const value = (obj as Record<string, unknown>)[key]
+  return typeof value === 'string' ? value : ''
+}
+
+function getNullableStringField(obj: unknown, key: string): string | null {
+  if (!obj || typeof obj !== 'object' || !(key in obj)) return null
+  const value = (obj as Record<string, unknown>)[key]
+  return typeof value === 'string' ? value : null
+}
+
+function getNullableNumberField(obj: unknown, key: string): number | null {
+  if (!obj || typeof obj !== 'object' || !(key in obj)) return null
+  const value = (obj as Record<string, unknown>)[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function getErrorStatus(err: unknown): number | undefined {
+  if (!err || typeof err !== 'object' || !('status' in err)) return undefined
+  const status = (err as Record<string, unknown>).status
+  return typeof status === 'number' ? status : undefined
 }
 
 async function sendResendEmail(args: {
@@ -157,10 +183,10 @@ serve(async (req) => {
         .select('id,evaluation_code')
         .in('id', parentIds)
       if (parentsError) throw new Error(`assessment_sessions parents: ${parentsError.message}`)
-      for (const p of parents ?? []) {
-        const id = String((p as any).id ?? '')
-        const code = Number((p as any).evaluation_code ?? NaN)
-        if (id && Number.isFinite(code)) parentCodeById.set(id, code)
+      for (const p of (parents ?? []) as ParentSessionRow[]) {
+        const id = getStringField(p, 'id')
+        const code = getNullableNumberField(p, 'evaluation_code')
+        if (id && code != null) parentCodeById.set(id, code)
       }
     }
 
@@ -173,12 +199,12 @@ serve(async (req) => {
     if (profilesError) throw new Error(`profiles: ${profilesError.message}`)
 
     const profileByUserId = new Map<string, { email: string; full_name: string | null }>()
-    for (const p of profiles ?? []) {
-      const email = String((p as any).email ?? '').trim()
+    for (const p of (profiles ?? []) as ProfileRow[]) {
+      const email = getStringField(p, 'email').trim()
       if (!email) continue
-      profileByUserId.set(String((p as any).id), {
+      profileByUserId.set(getStringField(p, 'id'), {
         email,
-        full_name: ((p as any).full_name as string | null) ?? null,
+        full_name: getNullableStringField(p, 'full_name'),
       })
     }
 
@@ -210,7 +236,7 @@ serve(async (req) => {
 
       if (insertError) {
         // Conflict => already processed
-        const status = (insertError as any).status as number | undefined
+        const status = getErrorStatus(insertError)
         if (status === 409) {
           skipped++
           continue
@@ -219,6 +245,11 @@ serve(async (req) => {
         continue
       }
 
+      const reminderId = getStringField(reminderRow as ReminderInsertRow | null, 'id')
+      if (!reminderId) {
+        errors.push({ sessionId: c.id, error: 'insert email_reminders: missing reminder id' })
+        continue
+      }
       inserted++
 
       // 2) Send email
@@ -252,7 +283,7 @@ serve(async (req) => {
         const { error: updateError } = await supabase
           .from('email_reminders')
           .update({ sent_at: new Date().toISOString(), provider_id: providerId, error: null })
-          .eq('id', (reminderRow as any).id)
+          .eq('id', reminderId)
         if (updateError) {
           errors.push({ sessionId: c.id, error: `update email_reminders: ${updateError.message}` })
         } else {
@@ -260,7 +291,7 @@ serve(async (req) => {
         }
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Unknown send error'
-        await supabase.from('email_reminders').update({ error: message }).eq('id', (reminderRow as any).id)
+        await supabase.from('email_reminders').update({ error: message }).eq('id', reminderId)
         errors.push({ sessionId: c.id, error: message })
       }
     }

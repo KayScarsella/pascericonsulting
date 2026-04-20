@@ -4,6 +4,7 @@ import { SupabaseClient } from "@supabase/supabase-js"
 import { Database, TablesInsert, Json } from "@/types/supabase"
 import { getToolAccess } from "@/lib/tool-auth"
 import { createClient } from "@/utils/supabase/server"
+import { TIMBER_TOOL_ID } from "@/lib/constants"
 
 // ----------------------------------------------------------------------
 // HELPER FUNCTIONS
@@ -284,6 +285,10 @@ export async function deleteQuestionRow(
 
 type AllowedTable = 'country' | 'eu_products' | 'documents' | 'species' | 'suppliers';
 
+function shouldFilterTimberProducts(table: AllowedTable, toolId?: string): boolean {
+  return table === 'eu_products' && toolId === TIMBER_TOOL_ID
+}
+
 type DynamicOption = {
   label: string
   value: string
@@ -312,7 +317,8 @@ export async function fetchDynamicOptions(
   table: string,
   labelCol: string,
   valueCol: string,
-  extraCols?: string[]
+  extraCols?: string[],
+  toolId?: string
 ) {
   const supabase = await getSupabase()
   const ALLOWED_TABLES: AllowedTable[] = ['country', 'eu_products', 'species', 'documents', 'suppliers']
@@ -328,10 +334,16 @@ export async function fetchDynamicOptions(
     selectQuery += `, ${validExtras.join(', ')}`;
   }
 
-  const { data, error } = await supabase
+  let query = supabase
     .from(table as AllowedTable)
     .select(selectQuery)
     .limit(100)
+
+  if (shouldFilterTimberProducts(table as AllowedTable, toolId)) {
+    query = query.eq('is_timber', true)
+  }
+
+  const { data, error } = await query
 
   if (error) return []
 
@@ -361,6 +373,7 @@ export async function fetchDynamicOptionsPaged(params: {
   search?: string
   cursor?: number
   pageSize?: number
+  toolId?: string
 }): Promise<{ items: DynamicOption[]; nextCursor: number | null }> {
   const {
     table,
@@ -370,6 +383,7 @@ export async function fetchDynamicOptionsPaged(params: {
     search,
     cursor = 0,
     pageSize = 50,
+    toolId,
   } = params
 
   const supabase = await getSupabase()
@@ -396,6 +410,11 @@ export async function fetchDynamicOptionsPaged(params: {
       .select(selectQuery)
       .order(labelCol, { ascending: true })
       .range(safeCursor, safeCursor + safePageSize - 1)
+
+    if (shouldFilterTimberProducts(table as AllowedTable, toolId)) {
+      q = q.eq('is_timber', true)
+    }
+
     if (withSearch && safeSearch) {
       if ((table as AllowedTable) === 'species') {
         // Species: search both common and scientific name (regardless of labelCol).
@@ -452,8 +471,9 @@ export async function fetchDynamicOptionsByIds(params: {
   valueCol: string
   ids: string[]
   extraCols?: string[]
+  toolId?: string
 }): Promise<DynamicOption[]> {
-  const { table, labelCol, valueCol, ids, extraCols } = params
+  const { table, labelCol, valueCol, ids, extraCols, toolId } = params
 
   const supabase = await getSupabase()
   const ALLOWED_TABLES: AllowedTable[] = ['country', 'eu_products', 'species', 'documents', 'suppliers']
@@ -477,10 +497,16 @@ export async function fetchDynamicOptionsByIds(params: {
 
   const items: DynamicOption[] = []
   for (const idsChunk of chunk(normalizedIds, 500)) {
-    const { data, error } = await supabase
+    let query = supabase
       .from(table as AllowedTable)
       .select(selectQuery)
       .in(valueCol, idsChunk)
+
+    if (shouldFilterTimberProducts(table as AllowedTable, toolId)) {
+      query = query.eq('is_timber', true)
+    }
+
+    const { data, error } = await query
     if (error || !data) continue
 
     const typedData = data as unknown as Record<string, unknown>[]

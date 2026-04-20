@@ -17,6 +17,7 @@ import {
   ANALISI_FINALE_GOOD_OUTCOMES,
   ANALISI_FINALE_NEGATIVE_OUTCOMES,
 } from "@/lib/final-outcome"
+import { resolveTimberWorkflowState } from "@/lib/timber-workflow-state"
 
 // ID della domanda "Nome Commerciale" nelle verifiche Timber
 const NOME_COMMERCIALE_QUESTION_ID = '8e2d4d57-161c-4f37-8089-04ab947389e1'
@@ -191,33 +192,7 @@ export default async function SearchPage({
   let verificationRows: VerificationRow[] = []
 
   if (baseSessions && baseSessions.length > 0) {
-    const riskSectionId = 'dbbf9201-5823-4552-944d-eaa119e7235c'
-    const evalSectionIds = [
-      '945ec651-88f7-47df-bcfe-60215731094a',
-      '397d55b4-18a0-4cc4-b92b-1858532d1627',
-    ]
-
     const sessionIds = baseSessions.map((s) => s.id)
-
-    const { data: questions } = await supabase
-      .from('questions')
-      .select('id, section_id')
-      .in('section_id', [riskSectionId, ...evalSectionIds])
-
-    const riskQuestionIds = (questions || [])
-      .filter((q) => q.section_id === riskSectionId)
-      .map((q) => q.id)
-
-    const evalQuestionIds = (questions || [])
-      .filter((q) => evalSectionIds.includes(q.section_id))
-      .map((q) => q.id)
-
-    const { data: responses } = await supabase
-      .from('user_responses')
-      .select('session_id, question_id')
-      .eq('tool_id', TIMBER_TOOL_ID)
-      .in('session_id', sessionIds)
-      .in('question_id', [...riskQuestionIds, ...evalQuestionIds])
 
     const { data: nomeRows } = await supabase
       .from('user_responses')
@@ -236,42 +211,36 @@ export default async function SearchPage({
       if (val) nomeBySession.set(r.session_id, val)
     }
 
-    verificationRows = baseSessions.map((session) => {
-      const responsesForSession = (responses || []).filter((r) => r.session_id === session.id)
-
-      let riskCompleted =
-        riskQuestionIds.length > 0 &&
-        riskQuestionIds.every((qid) => responsesForSession.some((r) => r.question_id === qid))
-      let evaluationCompleted =
-        evalQuestionIds.length > 0 &&
-        evalQuestionIds.every((qid) => responsesForSession.some((r) => r.question_id === qid))
-
-      const metadata = session.metadata as SessionMetadata | null
-      const isBlocked = metadata?.is_blocked === true
-
-      if (session.status === 'completed') {
-        riskCompleted = true
-        if (!isBlocked) {
-          evaluationCompleted = true
-        }
-      }
+    verificationRows = await Promise.all(baseSessions.map(async (session) => {
+      const metadata = (session.metadata as SessionMetadata | null) ?? null
+      const workflowState = await resolveTimberWorkflowState(
+        supabase,
+        {
+          id: session.id,
+          status: session.status,
+          final_outcome: session.final_outcome,
+          metadata: session.metadata,
+        },
+        session.status === "completed" && session.final_outcome !== "Esente / Non Soggetto"
+      )
 
       return {
         id: session.id,
         created_at: session.created_at || new Date().toISOString(),
         evaluation_code: session.evaluation_code || 0,
-        riskCompleted,
-        evaluationCompleted,
+        riskCompleted: workflowState.step1Completed,
+        evaluationCompleted: workflowState.step2Saved,
         status: session.status || 'in_progress',
         final_outcome: session.final_outcome,
-        isBlocked,
+        isBlocked: workflowState.isExempt,
+        resume_url: workflowState.resumeUrl,
         owner_name:
           (session.profiles as { full_name?: string } | null)?.full_name ??
           null,
         nomeCommerciale:
           nomeBySession.get(session.id) ?? (metadata?.nome_commerciale as string) ?? null,
       }
-    })
+    }))
   }
 
   return (

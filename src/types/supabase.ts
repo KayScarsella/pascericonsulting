@@ -86,6 +86,7 @@ export type Database = {
           country_risk: Database["public"]["Enums"]["country_risk"] | null
           extra_eu: boolean | null
           fao: number | null
+          flegt_partner: boolean
           FSI: number | null
           id: string
           ILO: number | null
@@ -101,6 +102,7 @@ export type Database = {
           country_risk?: Database["public"]["Enums"]["country_risk"] | null
           extra_eu?: boolean | null
           fao?: number | null
+          flegt_partner?: boolean
           FSI?: number | null
           id?: string
           ILO?: number | null
@@ -116,6 +118,7 @@ export type Database = {
           country_risk?: Database["public"]["Enums"]["country_risk"] | null
           extra_eu?: boolean | null
           fao?: number | null
+          flegt_partner?: boolean
           FSI?: number | null
           id?: string
           ILO?: number | null
@@ -183,18 +186,21 @@ export type Database = {
           description: string | null
           eu_code: string | null
           id: string
+          is_timber: boolean | null
           order: number | null
         }
         Insert: {
           description?: string | null
           eu_code?: string | null
           id?: string
+          is_timber?: boolean | null
           order?: number | null
         }
         Update: {
           description?: string | null
           eu_code?: string | null
           id?: string
+          is_timber?: boolean | null
           order?: number | null
         }
         Relationships: []

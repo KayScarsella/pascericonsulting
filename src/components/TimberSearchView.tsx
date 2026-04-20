@@ -1,6 +1,5 @@
 'use client'
 
-import { useState, useMemo } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import {
@@ -24,9 +23,8 @@ export interface VerificationRow {
   final_outcome?: string | null
   isBlocked?: boolean
   owner_name?: string | null
+  resume_url?: string | null
 }
-
-type VerificheSortField = "evaluation_code" | "created_at" | "nomeCommerciale" | "stato"
 
 function getVerificheStatusLabel(row: VerificationRow): { text: string; variant: "amber" | "green"; key: string } {
   if (row.status === 'completed') {
@@ -91,6 +89,10 @@ export function TimberSearchView({
   }
 
   const handleVerificheContinue = (row: VerificationRow) => {
+    if (row.resume_url) {
+      router.push(row.resume_url)
+      return
+    }
     if (row.isBlocked || !row.riskCompleted) {
       router.push(`/timberRegulation/risk-analysis?session_id=${row.id}`)
       return

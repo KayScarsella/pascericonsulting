@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 
 import { SectionList } from "@/components/questions/SectionList"
 import { processPrimaFaseEUDR } from "@/actions/workflows"
+import { resolveEudrWorkflowState } from "@/lib/eudr-workflow-state"
 
 export default async function RiskAnalysisPage({
   searchParams,
@@ -95,12 +96,28 @@ export default async function RiskAnalysisPage({
 
   const { data: sessionInfo, error: sessionError } = await supabase
     .from('assessment_sessions')
-    .select('user_id')
+    .select('id, user_id, session_type, status, final_outcome, metadata')
     .eq('id', sessionId)
+    .eq('tool_id', EUDR_TOOL_ID)
     .single()
 
   if (sessionError || !sessionInfo) return <div className="p-8 text-center text-red-600 font-bold">Sessione non trovata.</div>
   if (sessionInfo.user_id !== user.id && role !== 'admin') return <div className="p-8 text-center text-red-600 font-bold">Accesso negato.</div>
+
+  if (sessionInfo.session_type === "analisi_finale") {
+    redirect(`/EUDR/valutazione-finale?session_id=${sessionId}`)
+  }
+
+  await resolveEudrWorkflowState(
+    supabase,
+    {
+      id: sessionInfo.id,
+      status: sessionInfo.status,
+      final_outcome: sessionInfo.final_outcome,
+      metadata: sessionInfo.metadata,
+    },
+    sessionInfo.status === "completed" && sessionInfo.final_outcome !== "Esente / Non Soggetto"
+  )
 
   const { data: sections } = await supabase
     .from('sections')

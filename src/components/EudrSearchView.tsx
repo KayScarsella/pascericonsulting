@@ -1,6 +1,5 @@
 'use client'
 
-import { useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import {
@@ -23,9 +22,8 @@ export type EudrVerificationRow = {
     block_variant?: "success" | "warning" | "error"
   } | null
   owner_name?: string | null
+  resume_url?: string | null
 }
-
-type VerificheSortField = "created_at" | "nomeCommerciale" | "stato"
 
 function getStatusLabel(row: EudrVerificationRow): {
   text: string
@@ -95,7 +93,7 @@ export function EudrSearchView({
   }
 
   const handleOpen = (row: EudrVerificationRow) => {
-    router.push(`/EUDR/evaluation?session_id=${row.id}`)
+    router.push(row.resume_url || `/EUDR/evaluation?session_id=${row.id}`)
   }
 
   const columns: DataManagementColumn<EudrVerificationRow>[] = [
@@ -239,6 +237,7 @@ export function EudrSearchView({
           renderRowActions={(row) => (
             <div className="flex justify-end">
               <Button
+                type="button"
                 variant="ghost"
                 size="sm"
                 className="text-[#967635] hover:bg-[#f3eee3]"

@@ -228,7 +228,7 @@ function buildPdf(
 
   // 1. Titolo + barra superiore (fornitore a sx, logo a dx)
   y = 18
-  const regulationLabel = resolvedVariant === 'EUDR' ? 'EUDR' : 'Timber'
+  const regulationLabel = resolvedVariant === 'EUDR' ? 'EUDR' : 'Timber Regulation'
   doc.setFontSize(21)
   doc.setFont('helvetica', 'bold')
   doc.setTextColor(TEMPLATE_TEAL[0], TEMPLATE_TEAL[1], TEMPLATE_TEAL[2])
@@ -858,6 +858,17 @@ function buildPdf(
 export function ExportAnalysisPdfButton(props: ExportAnalysisPdfProps) {
   const [loading, setLoading] = useState(false)
 
+  const buildPdfFilename = (analysisName: string, sessionId: string): string => {
+    const normalizedName = String(analysisName || '').trim()
+    if (!normalizedName) {
+      return `analisi-finale-${sessionId.slice(0, 8)}.pdf`
+    }
+
+    // Keep the visible title intact while removing only Windows-invalid filename chars.
+    const safeName = normalizedName.replace(/[<>:"/\\|?*]/g, ' ').replace(/\s+/g, ' ').trim()
+    return `${safeName || normalizedName}.pdf`
+  }
+
   const handleClick = async () => {
     setLoading(true)
     try {
@@ -888,7 +899,7 @@ export function ExportAnalysisPdfButton(props: ExportAnalysisPdfProps) {
         }
       }
       const doc = buildPdf(propsForPdf, logoResult)
-      const filename = `analisi-finale-${props.sessionId.slice(0, 8)}.pdf`
+      const filename = buildPdfFilename(props.nomeOperazione, props.sessionId)
       doc.save(filename)
     } finally {
       setLoading(false)

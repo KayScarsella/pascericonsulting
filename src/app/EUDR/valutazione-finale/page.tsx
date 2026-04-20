@@ -8,8 +8,9 @@ import { ShieldAlert, TreePine, FileText, ArrowLeft } from "lucide-react"
 import Link from "next/link"
 
 import { SectionList } from "@/components/questions/SectionList"
-import { mergeParentChildResponses } from "@/lib/logic-engine"
 import { processEudrValutazione, finalizeEudrAnalisi } from "@/actions/workflows"
+import { resolveEudrWorkflowState } from "@/lib/eudr-workflow-state"
+import { materializeEudrFinalPrefillForSession } from "@/actions/workflows/eudr-prefill"
 
 export default async function EudrValutazioneFinalePage({
   searchParams,
@@ -61,7 +62,7 @@ export default async function EudrValutazioneFinalePage({
 
   const { data: sessionInfo, error: sessionError } = await supabase
     .from("assessment_sessions")
-    .select("user_id, session_type, parent_session_id, metadata")
+    .select("id, user_id, status, final_outcome, session_type, parent_session_id, metadata")
     .eq("id", sessionId)
     .eq("tool_id", EUDR_TOOL_ID)
     .single()
@@ -75,6 +76,20 @@ export default async function EudrValutazioneFinalePage({
 
   const isAnalisiFinale = sessionInfo.session_type === "analisi_finale"
 
+  if (!isAnalisiFinale) {
+    const workflowState = await resolveEudrWorkflowState(
+      supabase,
+      {
+        id: sessionInfo.id,
+        status: sessionInfo.status,
+        final_outcome: sessionInfo.final_outcome,
+        metadata: sessionInfo.metadata,
+      },
+      sessionInfo.status === "completed" && sessionInfo.final_outcome !== "Esente / Non Soggetto"
+    )
+    redirect(workflowState.resumeUrl)
+  }
+
   const groupNames = isAnalisiFinale
     ? ["Analisi Rischio", "Valutazione", "Valutazione Finale"]
     : ["Analisi Rischio", "Valutazione"]
@@ -87,25 +102,16 @@ export default async function EudrValutazioneFinalePage({
     .order("order_index", { ascending: true })
     .order("order_index", { foreignTable: "questions", ascending: true })
 
-  let allResponses: Database["public"]["Tables"]["user_responses"]["Row"][] = []
+  if (isAnalisiFinale) {
+    await materializeEudrFinalPrefillForSession(supabase, user.id, sessionId, "final-page-load")
+  }
 
   const { data: childResponses } = await supabase
     .from("user_responses")
     .select("*")
     .eq("session_id", sessionId)
 
-  allResponses = childResponses || []
-
-  if (isAnalisiFinale && sessionInfo.parent_session_id) {
-    const { data: parentResponses } = await supabase
-      .from("user_responses")
-      .select("*")
-      .eq("session_id", sessionInfo.parent_session_id)
-
-    if (parentResponses?.length) {
-      allResponses = mergeParentChildResponses(parentResponses, allResponses)
-    }
-  }
+  const allResponses: Database["public"]["Tables"]["user_responses"]["Row"][] = childResponses || []
 
   const configuredSections = sections?.map((section) => {
     if (isAnalisiFinale) {
@@ -135,6 +141,7 @@ export default async function EudrValutazioneFinalePage({
       <div className="relative mt-6 mb-10">
         <Link
           href="/EUDR/search"
+          prefetch={false}
           className="inline-flex items-center gap-1.5 text-sm text-[#967635] hover:text-[#7a5f2a] font-medium mb-4 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" /> Torna all&apos;archivio

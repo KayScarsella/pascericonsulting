@@ -7,8 +7,6 @@ import { QuestionWithConfig, QuestionType } from "@/types/questions"
 import { DynamicInput, AnswerValue, RepeaterConfig } from "./dynamicInput"
 import { ResponseUploader } from "./FileUploader"
 
-const NOTE_QUESTION_ID = "c8d9e0f1-a2b3-4c4d-9e5f-6a7b8c9d0e92"
-
 interface QuestionItemProps {
   question: QuestionWithConfig
   value: AnswerValue

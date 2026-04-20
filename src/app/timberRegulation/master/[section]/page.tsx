@@ -13,6 +13,24 @@ import { parsePageParam, parseSearchParam, parseSortDirParam } from '@/lib/table
 
 const VALID_SECTIONS: readonly MasterSection[] = ['users', 'species', 'countries', 'notifications']
 const PAGE_SIZE = 25
+const SPECIES_SORT_FIELDS = ['scientific_name', 'common_name', 'cites'] as const
+const COUNTRY_SORT_FIELDS = [
+  'country_name',
+  'extra_eu',
+  'conflicts',
+  'sanction',
+  'corruption_code',
+  'country_risk',
+  'fao',
+  'FSI',
+  'RLI',
+  'ILO',
+] as const
+const NOTIFICATION_SORT_FIELDS = ['created_at', 'title', 'expires_at', 'is_active'] as const
+
+function isOneOf<T extends readonly string[]>(value: string | undefined, options: T): value is T[number] {
+  return Boolean(value && options.includes(value as T[number]))
+}
 
 export default async function MasterSectionPage({
   params,
@@ -44,19 +62,19 @@ export default async function MasterSectionPage({
   } else if (section === 'species') {
     speciesRes = await listSpeciesPaginated(TIMBER_TOOL_ID, page, PAGE_SIZE, {
       q,
-      sort: sort as any,
+      sort: isOneOf(sort, SPECIES_SORT_FIELDS) ? sort : undefined,
       dir,
     })
   } else if (section === 'countries') {
     countriesRes = await listCountriesPaginated(TIMBER_TOOL_ID, page, PAGE_SIZE, {
       q,
-      sort: sort as any,
+      sort: isOneOf(sort, COUNTRY_SORT_FIELDS) ? sort : undefined,
       dir,
     })
   } else if (section === 'notifications') {
     notificationsRes = await listNotificationsPaginated(TIMBER_TOOL_ID, page, PAGE_SIZE, {
       q,
-      sort: sort as any,
+      sort: isOneOf(sort, NOTIFICATION_SORT_FIELDS) ? sort : undefined,
       dir,
     })
   }

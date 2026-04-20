@@ -128,7 +128,6 @@ export default async function LandingPage() {
                   key={access.tool_id} 
                   tool={access.tools} 
                   role={access.role} 
-                  toolId={access.tool_id} 
                 />
               )
             })}
@@ -141,7 +140,7 @@ export default async function LandingPage() {
   )
 }
 
-function ToolCard({ tool, role, toolId }: { tool: ToolData, role: string, toolId: string }) {
+function ToolCard({ tool, role }: { tool: ToolData, role: string }) {
     const isAdmin = role === 'admin'
     const isActive = tool.is_active === true
     

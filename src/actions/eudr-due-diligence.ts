@@ -458,12 +458,10 @@ export async function runDueDiligenceAoiAnalysis(
       .eq('id', sessionId)
       .single()
     const prevMeta = (sessionRow?.metadata as Record<string, unknown>) || {}
-    const {
-      dd_analysis_in_progress: _p,
-      dd_analysis_started_at: _s,
-      dd_analysis_run_id: _r,
-      ...prevWithoutLock
-    } = prevMeta
+    const prevWithoutLock = { ...prevMeta }
+    delete prevWithoutLock.dd_analysis_in_progress
+    delete prevWithoutLock.dd_analysis_started_at
+    delete prevWithoutLock.dd_analysis_run_id
 
     await supabase
       .from('assessment_sessions')

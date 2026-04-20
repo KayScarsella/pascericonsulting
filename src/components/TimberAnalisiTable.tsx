@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import {
@@ -46,8 +46,6 @@ export interface TimberAnalisiTableProps {
   totalPages: number
   isAdmin: boolean
 }
-
-type SortField = 'base_evaluation_code' | 'date' | 'nome_operazione' | 'final_outcome'
 
 export function TimberAnalisiTable({ data, page, totalPages, isAdmin }: TimberAnalisiTableProps) {
   const router = useRouter()

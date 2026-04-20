@@ -5,19 +5,37 @@ import { requireToolAdmin } from '@/lib/tool-auth'
 type TriggerResult =
   | {
       success: true
-      data: {
-        reminderType: string
-        daysAhead: number
-        targetDate: string
-        toolId: string | null
-        candidates: number
-        inserted: number
-        sent: number
-        skipped: number
-        errors: Array<{ sessionId: string; error: string }>
-      }
+      data: TriggerSuccessData
     }
   | { success: false; error: string }
+
+type TriggerSuccessData = {
+  reminderType: string
+  daysAhead: number
+  targetDate: string
+  toolId: string | null
+  candidates: number
+  inserted: number
+  sent: number
+  skipped: number
+  errors: Array<{ sessionId: string; error: string }>
+}
+
+function isTriggerPayload(value: unknown): value is TriggerSuccessData {
+  if (!value || typeof value !== 'object') return false
+  const obj = value as Record<string, unknown>
+  return (
+    typeof obj.reminderType === 'string' &&
+    typeof obj.daysAhead === 'number' &&
+    typeof obj.targetDate === 'string' &&
+    (typeof obj.toolId === 'string' || obj.toolId === null) &&
+    typeof obj.candidates === 'number' &&
+    typeof obj.inserted === 'number' &&
+    typeof obj.sent === 'number' &&
+    typeof obj.skipped === 'number' &&
+    Array.isArray(obj.errors)
+  )
+}
 
 export async function triggerExpiryRemindersNowAction(
   toolId: string
@@ -45,12 +63,18 @@ export async function triggerExpiryRemindersNowAction(
       cache: 'no-store',
     })
 
-    const payload = (await resp.json().catch(() => null)) as any
+    const payload: unknown = await resp.json().catch(() => null)
     if (!resp.ok) {
-      const msg = payload?.error ? String(payload.error) : `HTTP ${resp.status}`
+      const msg =
+        payload && typeof payload === 'object' && 'error' in payload
+          ? String((payload as { error?: unknown }).error ?? `HTTP ${resp.status}`)
+          : `HTTP ${resp.status}`
       return { success: false, error: `Invio fallito: ${msg}` }
     }
 
+    if (!isTriggerPayload(payload)) {
+      return { success: false, error: 'Risposta non valida dalla funzione reminder.' }
+    }
     return { success: true, data: payload }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : 'Errore' }

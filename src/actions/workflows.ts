@@ -23,6 +23,10 @@ import {
 import {
   processTimberValutazione as runProcessTimberValutazione,
 } from "@/actions/workflows/timber-valutazione"
+import {
+  materializeEudrFinalPrefillForParent,
+  materializeEudrFinalPrefillForSession,
+} from "@/actions/workflows/eudr-prefill"
 
 /** Re-export via async wrapper (Next "use server" allows only async function exports). */
 export async function processEudrValutazione(
@@ -53,6 +57,90 @@ type PrimaFaseException = {
   blockVariant: "success" | "warning" | "error"
 }
 
+async function computeStep1Signature(
+  supabase: SupabaseClient<Database>,
+  toolId: string,
+  sessionId: string
+): Promise<string> {
+  const { data: riskSections } = await supabase
+    .from("sections")
+    .select("id")
+    .eq("tool_id", toolId)
+    .eq("group_name", "Analisi Rischio")
+
+  const sectionIds = (riskSections || []).map((s) => s.id)
+  if (sectionIds.length === 0) return "[]"
+
+  const { data: riskQuestions } = await supabase
+    .from("questions")
+    .select("id")
+    .in("section_id", sectionIds)
+
+  const riskQuestionIds = (riskQuestions || []).map((q) => q.id)
+  if (riskQuestionIds.length === 0) return "[]"
+
+  const { data: responses } = await supabase
+    .from("user_responses")
+    .select("question_id, answer_text, answer_json, file_path")
+    .eq("session_id", sessionId)
+    .in("question_id", riskQuestionIds)
+
+  const normalized = (responses || [])
+    .map((row) => ({
+      question_id: row.question_id,
+      answer_text: row.answer_text ?? null,
+      answer_json: row.answer_json ?? null,
+      file_path: row.file_path ?? null,
+    }))
+    .sort((a, b) => a.question_id.localeCompare(b.question_id))
+
+  return JSON.stringify(normalized)
+}
+
+async function resetDownstreamAfterStep1Change(
+  supabase: SupabaseClient<Database>,
+  toolId: string,
+  sessionId: string
+): Promise<void> {
+  const { data: childRows } = await supabase
+    .from("assessment_sessions")
+    .select("id")
+    .eq("parent_session_id", sessionId)
+    .eq("session_type", "analisi_finale")
+    .eq("tool_id", toolId)
+
+  const childIds = (childRows || []).map((c) => c.id)
+  if (childIds.length > 0) {
+    await supabase
+      .from("assessment_sessions")
+      .delete()
+      .in("id", childIds)
+  }
+
+  const { data: nonRiskSections } = await supabase
+    .from("sections")
+    .select("id")
+    .eq("tool_id", toolId)
+    .neq("group_name", "Analisi Rischio")
+
+  const nonRiskSectionIds = (nonRiskSections || []).map((s) => s.id)
+  if (nonRiskSectionIds.length > 0) {
+    const { data: nonRiskQuestions } = await supabase
+      .from("questions")
+      .select("id")
+      .in("section_id", nonRiskSectionIds)
+
+    const nonRiskQuestionIds = (nonRiskQuestions || []).map((q) => q.id)
+    if (nonRiskQuestionIds.length > 0) {
+      await supabase
+        .from("user_responses")
+        .delete()
+        .eq("session_id", sessionId)
+        .in("question_id", nonRiskQuestionIds)
+    }
+  }
+}
+
 /** Shared prima-fase logic: success → complete + search; warning → metadata only; else → evaluation. */
 async function runPrimaFase(
   supabase: SupabaseClient<Database>,
@@ -64,27 +152,70 @@ async function runPrimaFase(
 ): Promise<{ redirectUrl: string }> {
   await validateSessionAccess(supabase, toolId, sessionId)
 
+  const { data: baseSession } = await supabase
+    .from("assessment_sessions")
+    .select("metadata, status")
+    .eq("id", sessionId)
+    .single()
+
+  const oldMeta = (baseSession?.metadata as SessionMetadata | null) ?? {}
+  const step1Signature = await computeStep1Signature(supabase, toolId, sessionId)
+  const step1Changed = Boolean(oldMeta.step1_signature && oldMeta.step1_signature !== step1Signature)
+  const hadDownstreamState = Boolean(oldMeta.step2_saved_at)
+
+  const { count: childCount } = await supabase
+    .from("assessment_sessions")
+    .select("id", { count: "exact", head: true })
+    .eq("parent_session_id", sessionId)
+    .eq("session_type", "analisi_finale")
+    .eq("tool_id", toolId)
+
+  if (step1Changed && (hadDownstreamState || (childCount ?? 0) > 0)) {
+    await resetDownstreamAfterStep1Change(supabase, toolId, sessionId)
+  }
+
+  const step1MetaBase: SessionMetadata = {
+    ...oldMeta,
+    step1_completed_at: new Date().toISOString(),
+    step1_signature: step1Signature,
+    step2_saved_at: undefined,
+    resume_step: "evaluation",
+  }
+
   if (exceptionData?.isBlocked && exceptionData.blockVariant === "success") {
     const metadata: SessionMetadata = {
+      ...step1MetaBase,
       is_blocked: true,
       block_reason: exceptionData.blockReason,
       block_variant: "success",
+      resume_step: "risk-analysis",
     }
     await completeSessionAsExempt(supabase, sessionId, metadata)
     return { redirectUrl: searchPath }
   }
 
-  if (exceptionData?.isBlocked && exceptionData.blockVariant === "warning") {
-    const metadata: SessionMetadata = {
-      is_blocked: false,
+  const metadata: SessionMetadata = {
+    ...step1MetaBase,
+    is_blocked: false,
+    ...(exceptionData?.isBlocked && exceptionData.blockVariant === "warning"
+      ? {
       block_reason: exceptionData.blockReason,
       block_variant: "warning",
-    }
-    await supabase
-      .from("assessment_sessions")
-      .update({ metadata: metadata as unknown as Json })
-      .eq("id", sessionId)
+      }
+      : {
+        block_reason: undefined,
+        block_variant: undefined,
+      }),
   }
+
+  await supabase
+    .from("assessment_sessions")
+    .update({
+      status: "in_progress",
+      final_outcome: null,
+      metadata: metadata as unknown as Json,
+    })
+    .eq("id", sessionId)
 
   return { redirectUrl: `${evaluationBasePath}?session_id=${sessionId}` }
 }
@@ -128,6 +259,31 @@ export async function processPrimaFaseEUDR(
   }
 }
 
+/**
+ * Backfill helper for in-progress EUDR final-analysis sessions under a root session.
+ * Safe to run repeatedly (idempotent).
+ */
+export async function backfillEudrFinalPrefillForRoot(
+  rootSessionId: string
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient()
+  try {
+    const { sessionOwnerId } = await validateSessionAccess(supabase, EUDR_TOOL_ID, rootSessionId)
+    await materializeEudrFinalPrefillForParent(
+      supabase,
+      sessionOwnerId,
+      rootSessionId,
+      "manual-backfill"
+    )
+    return { ok: true }
+  } catch (err: unknown) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Errore durante il backfill prefill EUDR",
+    }
+  }
+}
+
 // ── 2. CONCLUSIONE ANALISI FINALE (CALCOLO RISCHIO CENTRALIZZATO) ─────────────
 export async function finalizeTimberAnalisi(sessionId: string): Promise<{ redirectUrl?: string, error?: string }> {
   const supabase = await createClient()
@@ -161,7 +317,7 @@ export async function finalizeTimberAnalisi(sessionId: string): Promise<{ redire
     }).eq('id', sessionId);
 
     return { redirectUrl: `/timberRegulation/risultato?session_id=${sessionId}` };
-  } catch (e) {
+  } catch {
     return { error: "Errore durante il calcolo del rischio" };
   }
 }
@@ -171,7 +327,7 @@ export async function finalizeEudrAnalisi(sessionId: string): Promise<{ redirect
   const supabase = await createClient()
 
   try {
-    await validateSessionAccess(supabase, EUDR_TOOL_ID, sessionId)
+    const { sessionOwnerId } = await validateSessionAccess(supabase, EUDR_TOOL_ID, sessionId)
 
     const { data: sessionRow } = await supabase
       .from("assessment_sessions")
@@ -179,16 +335,13 @@ export async function finalizeEudrAnalisi(sessionId: string): Promise<{ redirect
       .eq("id", sessionId)
       .single()
 
-    const answersMap: Record<string, string | null> = {}
-    if (sessionRow?.parent_session_id) {
-      const { data: parentResponses } = await supabase
-        .from("user_responses")
-        .select("question_id, answer_text")
-        .eq("session_id", sessionRow.parent_session_id)
-      parentResponses?.forEach((r) => {
-        answersMap[r.question_id] = r.answer_text
-      })
+    if (!sessionRow) {
+      return { error: "Sessione EUDR non trovata" }
     }
+
+    await materializeEudrFinalPrefillForSession(supabase, sessionOwnerId, sessionId, "finalize")
+
+    const answersMap: Record<string, string | null> = {}
     const { data: childResponses } = await supabase
       .from("user_responses")
       .select("question_id, answer_text")
@@ -235,7 +388,7 @@ export async function finalizeEudrAnalisi(sessionId: string): Promise<{ redirect
       .eq("id", sessionId)
 
     return { redirectUrl: `/EUDR/risultato?session_id=${sessionId}` }
-  } catch (e) {
+  } catch {
     return { error: "Errore durante la conclusione dell'analisi finale EUDR" }
   }
 }

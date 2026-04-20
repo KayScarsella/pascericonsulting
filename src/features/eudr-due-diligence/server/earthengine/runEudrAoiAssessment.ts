@@ -17,6 +17,32 @@ import { ensureEarthEngineInitialized } from './initialize'
 import { HANSEN_ASSET, PIXEL_AREA_M2 } from './runForestLossForAoi'
 import type { LossYearHistogram } from '../../types/due-diligence-run'
 
+type EarthEngineComputed = {
+  getInfo: (cb: (result: unknown, error?: Error) => void) => void
+}
+
+type EarthEngineImage = {
+  select: (band: string) => EarthEngineImage
+  gt: (value: number) => EarthEngineImage
+  gte: (value: number) => EarthEngineImage
+  eq: (value: number) => EarthEngineImage
+  and: (value: unknown) => EarthEngineImage
+  multiply: (value: unknown) => EarthEngineImage
+  updateMask: (mask: unknown) => EarthEngineImage
+  reduceRegion: (opts: Record<string, unknown>) => EarthEngineComputed
+  projection: () => unknown
+  reproject: (opts: Record<string, unknown>) => EarthEngineImage
+}
+
+type EarthEngineClient = {
+  Geometry: (value: unknown) => { area: (opts: { maxError: number }) => EarthEngineComputed }
+  Image: ((value: unknown) => EarthEngineImage) & { pixelArea: () => EarthEngineImage }
+  Reducer: {
+    frequencyHistogram: () => unknown
+    sum: () => unknown
+  }
+}
+
 const HANSEN_SCALE_M = 30
 /** JRC GFC2020 V3 — foresta al 31/12/2020, definizione EUDR/FAO-FRA. */
 export const JRC_GFC2020_ASSET = 'JRC/GFC2020/V3'
@@ -109,7 +135,7 @@ export interface EudrAoiAssessmentResult {
 export async function runEudrAoiAssessment(aoiGeometry: unknown): Promise<EudrAoiAssessmentResult> {
   await ensureEarthEngineInitialized()
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const ee = require('@google/earthengine') as any
+  const ee = require('@google/earthengine') as EarthEngineClient
 
   const geometry = ee.Geometry(aoiGeometry)
 

@@ -67,7 +67,7 @@ export function ResponseUploader({
       } else {
           toast.error("Errore: " + result.error, { id: toastId })
       }
-    } catch (err) {
+    } catch {
       toast.error("Errore di rete durante l'upload", { id: toastId })
     } finally {
       setIsUploading(false)
@@ -90,7 +90,7 @@ export function ResponseUploader({
       } else {
         toast.error("Errore eliminazione: " + result.error, { id: toastId })
       }
-    } catch (err) {
+    } catch {
       toast.error("Errore imprevisto", { id: toastId })
     } finally {
       setIsDeleting(false)

@@ -3,10 +3,6 @@
  * Accepts raw geometry, Feature, or FeatureCollection (first feature).
  */
 
-import type { AoiGeoJson } from '../../types/due-diligence-run'
-
-type GeoJsonGeometryType = 'Polygon' | 'MultiPolygon' | 'Point' | 'MultiPoint'
-
 type GeoJsonGeometry =
   | { type: 'Polygon'; coordinates: number[][][] }
   | { type: 'MultiPolygon'; coordinates: number[][][][] }

@@ -10,16 +10,17 @@ import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import { saveResponsesBulk, deleteResponsesBulk } from "@/actions/questions"
 import { EUDR_TOOL_ID } from "@/lib/constants"
+import {
+    EUDR_Q_CITES,
+    EUDR_Q_FLEGT,
+    EUDR_SECTION_G,
+    isYesLikeAnswer,
+} from "@/lib/eudr-question-ids"
 import { EmbeddedDueDiligenceBlock } from "@/features/eudr-due-diligence/EmbeddedDueDiligenceBlock"
 
 /** Sezione E — Paese di raccolta: dopo "Rischio paese" mostra blocco AOI inline */
 const SECTION_E_PAES_EMBED_AFTER = "8e3c8459-5a9b-4ecf-8a4e-9f9da2b53cc1"
 const QUESTION_RISCHIO_PAESE_ID = "e8f9a0b1-c2d3-4e4f-8a9b-0c1d2e3f4a65"
-
-// ── EUDR: FLEGT/CITES ⇒ prefill/NA in Section G (Valutazione Finale) ────
-const EUDR_Q_FLEGT = "881c4918-ca7f-44ad-9c52-530de70b8add"
-const EUDR_Q_CITES = "6e0896e6-0be7-4286-bd7a-3fba6e34b83f"
-const EUDR_SECTION_G = "c4d9e2b7-8a61-4a3f-b72a-45157b0dfc3f"
 
 const RELIABILITY_OPTIONS_SIGNATURE = [
     { label: "Affidabilità alta", value: "1" },
@@ -28,13 +29,6 @@ const RELIABILITY_OPTIONS_SIGNATURE = [
     { label: "Affidabilità medio bassa", value: "4" },
     { label: "Affidabilità bassa", value: "44" },
 ] as const
-
-function isYesLike(v: unknown): boolean {
-    if (v === true) return true
-    if (v == null) return false
-    const s = String(v).trim().toLowerCase()
-    return s === "si" || s === "sì" || s === "yes" || s === "y"
-}
 
 function hasReliabilitySelectConfig(q: Tables<'questions'>): boolean {
     if (q.type !== "select") return false
@@ -192,7 +186,7 @@ export function SectionList({
 
         const triggerGeoOnly =
             toolId === EUDR_TOOL_ID &&
-            (isYesLike(localAnswers[EUDR_Q_FLEGT]) || isYesLike(localAnswers[EUDR_Q_CITES]))
+            (isYesLikeAnswer(localAnswers[EUDR_Q_FLEGT]) || isYesLikeAnswer(localAnswers[EUDR_Q_CITES]))
 
         for (const q of processedForm.visibleQs) {
             if (!editModes[q.section_id]) continue;
@@ -291,7 +285,8 @@ export function SectionList({
             toast.success("Progressi salvati", { id: toastId });
             router.refresh();
         } catch (e) {
-            toast.error("Errore nel salvataggio", { id: toastId });
+            const message = e instanceof Error && e.message.trim() !== '' ? e.message : "Errore nel salvataggio";
+            toast.error(message, { id: toastId });
         } finally {
             setIsSaving(false);
         }
@@ -304,7 +299,7 @@ export function SectionList({
             const file = localFiles[q.id];
             const triggerGeoOnly =
                 toolId === EUDR_TOOL_ID &&
-                (isYesLike(localAnswers[EUDR_Q_FLEGT]) || isYesLike(localAnswers[EUDR_Q_CITES]))
+                (isYesLikeAnswer(localAnswers[EUDR_Q_FLEGT]) || isYesLikeAnswer(localAnswers[EUDR_Q_CITES]))
             const isEudrSectionG = toolId === EUDR_TOOL_ID && q.section_id === EUDR_SECTION_G
             const isReliabilitySelect = isEudrSectionG && triggerGeoOnly && hasReliabilitySelectConfig(q)
             const isNaInSectionG = isEudrSectionG && triggerGeoOnly && !isReliabilitySelect
@@ -385,7 +380,7 @@ export function SectionList({
 
                                         const triggerGeoOnly =
                                             toolId === EUDR_TOOL_ID &&
-                                            (isYesLike(localAnswers[EUDR_Q_FLEGT]) || isYesLike(localAnswers[EUDR_Q_CITES]))
+                                            (isYesLikeAnswer(localAnswers[EUDR_Q_FLEGT]) || isYesLikeAnswer(localAnswers[EUDR_Q_CITES]))
                                         const isEudrSectionG =
                                             toolId === EUDR_TOOL_ID &&
                                             section.id === EUDR_SECTION_G
@@ -473,6 +468,7 @@ export function SectionList({
             {/* PULSANTE SALVA E CONTINUA */}
             <div className="pt-6 flex justify-start">
                 <Button
+                    type="button"
                     onClick={handleSaveAll}
                     disabled={isSaving}
                     className="bg-gradient-to-r from-[#967635] to-[#7a5f2a] hover:from-[#7a5f2a] hover:to-[#5c4720] text-white min-w-[220px] h-12 text-base font-semibold rounded-xl shadow-md hover:shadow-lg transition-all duration-300"

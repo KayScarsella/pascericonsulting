@@ -17,6 +17,7 @@ import {
   ANALISI_FINALE_GOOD_OUTCOMES,
   ANALISI_FINALE_NEGATIVE_OUTCOMES,
 } from "@/lib/final-outcome"
+import { resolveEudrWorkflowState } from "@/lib/eudr-workflow-state"
 
 export default async function EudrSearchPage({
   searchParams,
@@ -198,17 +199,31 @@ export default async function EudrSearchPage({
     console.error("Errore durante il fetch delle verifiche EUDR:", verifError)
   }
 
-  const verificationRows: EudrVerificationRow[] = (verifData || []).map(
-    (row) => ({
+  const verificationRows: EudrVerificationRow[] = await Promise.all((verifData || []).map(
+    async (row) => {
+      const workflowState = await resolveEudrWorkflowState(
+        supabase,
+        {
+          id: row.id,
+          status: row.status,
+          final_outcome: row.final_outcome,
+          metadata: row.metadata,
+        },
+        row.status === "completed" && row.final_outcome !== "Esente / Non Soggetto"
+      )
+
+      return {
       id: row.id,
       created_at: row.created_at || new Date().toISOString(),
       status: row.status || "in_progress",
       final_outcome: row.final_outcome,
       metadata: (row.metadata as EudrVerificationRow["metadata"]) || null,
+      resume_url: workflowState.resumeUrl,
       owner_name:
         (row.profiles as { full_name?: string } | null)?.full_name ?? null,
-    })
-  )
+      }
+    }
+  ))
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 py-8 px-4">

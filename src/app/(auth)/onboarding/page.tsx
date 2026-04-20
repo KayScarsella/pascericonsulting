@@ -83,7 +83,7 @@ export default function OnboardingPage() {
                     <Input id="cap" name="cap" />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="citta">Citta'</Label>
+                    <Label htmlFor="citta">Citta&apos;</Label>
                     <Input id="citta" name="citta" />
                   </div>
                   <div className="space-y-2">
@@ -104,7 +104,7 @@ export default function OnboardingPage() {
                   <Input id="settoreMerceologico" name="settoreMerceologico" />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="attivita">Attivita'</Label>
+                  <Label htmlFor="attivita">Attivita&apos;</Label>
                   <Input id="attivita" name="attivita" />
                 </div>
               </div>

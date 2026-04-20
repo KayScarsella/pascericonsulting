@@ -35,7 +35,7 @@ export default function ForgotPasswordPage() {
         <CardHeader>
           <CardTitle>Password dimenticata</CardTitle>
           <CardDescription>
-            Inserisci la tua email: se l'account esiste, riceverai un link per reimpostare la password.
+            Inserisci la tua email: se l&apos;account esiste, riceverai un link per reimpostare la password.
           </CardDescription>
         </CardHeader>
         <CardContent>

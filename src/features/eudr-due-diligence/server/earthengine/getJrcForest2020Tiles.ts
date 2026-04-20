@@ -6,6 +6,15 @@
 import { ensureEarthEngineInitialized } from './initialize'
 import { getJrcForest2020LayerSpec } from './aoiMapLayerSpecs'
 
+type EarthEngineMapClient = {
+  Image: (image: unknown) => {
+    getMapId: (
+      visParams: Record<string, unknown>,
+      cb: (mapId: { urlFormat?: string } | null, error?: Error) => void
+    ) => void
+  }
+}
+
 export interface Forest2020TilesResult {
   tilesUrlTemplate: string
   attribution: string
@@ -17,7 +26,7 @@ function getMapIdPromise(
 ): Promise<{ urlFormat: string }> {
   return new Promise((resolve, reject) => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const ee = require('@google/earthengine') as any
+    const ee = require('@google/earthengine') as EarthEngineMapClient
     ee.Image(image).getMapId(visParams, (mapId: { urlFormat?: string } | null, error?: Error) => {
       if (error || !mapId?.urlFormat) reject(error || new Error('getMapId failed'))
       else resolve(mapId as { urlFormat: string })

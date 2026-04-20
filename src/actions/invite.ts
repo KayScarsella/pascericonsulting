@@ -13,6 +13,12 @@ export type InviteUserToToolResult = {
   warning?: string
 }
 
+type InviteTemplateData = {
+  invitation_context: 'tool'
+  invited_tool_id: string
+  invited_tool_name: string
+}
+
 /**
  * Sends a Supabase invite email and grants access to the tool.
  * Requires SUPABASE_SERVICE_ROLE_KEY on the server.
@@ -50,8 +56,22 @@ export async function inviteUserToToolAction(
     return { success: false, error: 'Email non valida' }
   }
 
+  const { data: toolRow } = await adminClient
+    .from('tools')
+    .select('name')
+    .eq('id', toolId)
+    .maybeSingle()
+  const invitedToolName =
+    (toolRow as { name?: string } | null)?.name?.trim() || 'Piattaforma Pasceri Consulting'
+  const templateData: InviteTemplateData = {
+    invitation_context: 'tool',
+    invited_tool_id: toolId,
+    invited_tool_name: invitedToolName,
+  }
+
   const { data, error } = await adminClient.auth.admin.inviteUserByEmail(trimmed, {
     redirectTo: `${site}/auth/callback`,
+    data: templateData,
   })
 
   let userId = data.user?.id ?? null
@@ -102,6 +122,7 @@ export async function inviteUserToToolAction(
         email: trimmed,
         options: {
           redirectTo: `${site}/auth/callback`,
+          data: templateData,
         },
       })
       if (resendInviteError) {

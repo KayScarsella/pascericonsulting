@@ -25,6 +25,20 @@ import { MitigationHistorySection } from "@/components/MitigationHistorySection"
 import { ExportAnalysisPdfButton, PDF_DISCLAIMERS } from "@/components/ExportAnalysisPdfButton"
 import type { QuestionConfig } from "@/types/questions"
 
+type DynamicTableClient = {
+  from: (table: string) => {
+    select: (columns: string) => {
+      in: (column: string, values: string[]) => Promise<{ data: Array<Record<string, unknown>> | null }>
+      eq: (column: string, value: string) => {
+        order: (
+          columnName: string,
+          options: { ascending: boolean }
+        ) => Promise<{ data: Array<Record<string, unknown>> | null }>
+      }
+    }
+  }
+}
+
 export default async function EudrRisultatoPage({
   searchParams,
 }: {
@@ -222,15 +236,13 @@ export default async function EudrRisultatoPage({
     file_path?: string | null
   }[] = []
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: historyData } = await (supabase as any)
+    const dynamicClient = supabase as unknown as DynamicTableClient
+    const { data: historyData } = await dynamicClient
       .from("mitigation_history")
       .select("id, question_id, previous_answer, new_answer, mitigated_at, comment, file_path")
       .eq("session_id", sessionId)
-      .order("mitigated_at", { ascending: false }) as {
-      data: typeof mitigationHistory | null
-    }
-    mitigationHistory = historyData || []
+      .order("mitigated_at", { ascending: false })
+    mitigationHistory = (historyData as typeof mitigationHistory | null) || []
   } catch {
     // ignore
   }
@@ -375,12 +387,13 @@ export default async function EudrRisultatoPage({
   for (const [key, bucket] of idsByAsyncKey.entries()) {
     const ids = [...bucket.ids]
     const map = new Map<string, string>()
+    const dynamicClient = supabase as unknown as DynamicTableClient
     for (const idsChunk of chunk(ids, 500)) {
-      const { data } = await supabase
-        .from(bucket.table as any)
+      const { data } = await dynamicClient
+        .from(bucket.table)
         .select(`${bucket.labelCol}, ${bucket.valueCol}`)
         .in(bucket.valueCol, idsChunk)
-      for (const row of (data as any[]) || []) {
+      for (const row of data || []) {
         map.set(String(row[bucket.valueCol] ?? ""), String(row[bucket.labelCol] ?? ""))
       }
     }

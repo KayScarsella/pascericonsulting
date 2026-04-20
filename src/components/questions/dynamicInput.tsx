@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -181,11 +181,28 @@ if (type === 'supplier_manager') {
   }
 
   if (type === 'async_select') {
-    return <AsyncSelect config={config} value={value} onChange={onChange} onExtraChange={onExtraChange} readOnly={readOnly} />
+    return (
+      <AsyncSelect
+        config={config}
+        value={value}
+        onChange={onChange}
+        onExtraChange={onExtraChange}
+        readOnly={readOnly}
+        toolId={toolId}
+      />
+    )
   }
 
   if (type === 'repeater') {
-    return <RepeaterInput config={config} value={value} onChange={onChange} readOnly={readOnly} />
+    return (
+      <RepeaterInput
+        config={config}
+        value={value}
+        onChange={onChange}
+        readOnly={readOnly}
+        toolId={toolId}
+      />
+    )
   }
 
   return <div className="text-red-500 text-xs">Tipo non supportato: {type}</div>
@@ -199,9 +216,10 @@ interface RepeaterInputProps {
     value: AnswerValue
     onChange: (v: Record<string, unknown>[]) => void
     readOnly?: boolean
+    toolId?: string
 }
 
-function RepeaterInput({ config, value, onChange, readOnly }: RepeaterInputProps) {
+function RepeaterInput({ config, value, onChange, readOnly, toolId }: RepeaterInputProps) {
     const items: Record<string, unknown>[] = Array.isArray(value) ? value : []
     const maxItems = config.max_items || 10
     const itemLabel = config.item_label || "Elemento"
@@ -277,6 +295,7 @@ function RepeaterInput({ config, value, onChange, readOnly }: RepeaterInputProps
                                             value={(item[field.name] as AnswerValue) || null}
                                             onChange={(val) => handleFieldChange(index, field.name, val)}
                                             readOnly={readOnly}
+                                            toolId={toolId}
                                         />
                                     </div>
 
@@ -317,9 +336,10 @@ interface AsyncSelectProps {
     onChange: (val: string) => void 
     onExtraChange?: (extraData: Record<string, unknown> | null) => void 
     readOnly?: boolean
+    toolId?: string
 }
 
-function AsyncSelect({ config, value, onChange, onExtraChange, readOnly }: AsyncSelectProps) {
+function AsyncSelect({ config, value, onChange, onExtraChange, readOnly, toolId }: AsyncSelectProps) {
     const [open, setOpen] = useState(false)
     const [options, setOptions] = useState<{label: string, value: string, extra?: Record<string, unknown>}[]>([])
     const [loading, setLoading] = useState(false)
@@ -329,15 +349,18 @@ function AsyncSelect({ config, value, onChange, onExtraChange, readOnly }: Async
     const [hasMore, setHasMore] = useState(true)
     
     const hydratedRef = useRef(false) 
-    const listRef = useRef<HTMLDivElement | null>(null)
     const queryDebounceRef = useRef<number | null>(null)
     const isMulti = config.is_multi === true
     const maxSelections = config.max_selections 
 
     const safeValueString = value === null || value === undefined || Array.isArray(value) ? '' : String(value)
-    const selectedValues = isMulti ? (safeValueString ? safeValueString.split(',') : []) : (safeValueString ? [safeValueString] : [])
+    const selectedValues = useMemo(
+      () => (isMulti ? (safeValueString ? safeValueString.split(',') : []) : (safeValueString ? [safeValueString] : [])),
+      [isMulti, safeValueString]
+    )
+    const selectedValuesKey = useMemo(() => selectedValues.join(','), [selectedValues])
 
-    const dedupeAppend = (prev: typeof options, next: typeof options) => {
+    const dedupeAppend = useCallback((prev: typeof options, next: typeof options) => {
       if (next.length === 0) return prev
       const seen = new Set(prev.map((o) => o.value))
       const merged = [...prev]
@@ -348,11 +371,11 @@ function AsyncSelect({ config, value, onChange, onExtraChange, readOnly }: Async
         }
       }
       return merged
-    }
+    }, [])
 
-    const loadPage = async (args: { reset: boolean; cursorOverride?: number | null }) => {
+    const loadPage = useCallback(async (args: { reset: boolean; cursorOverride?: number | null }) => {
       if (!config.source_table) return
-      const nextCursor = args.cursorOverride ?? cursor
+      const nextCursor = args.cursorOverride ?? 0
       if (nextCursor == null) return
 
       const isReset = args.reset
@@ -370,6 +393,7 @@ function AsyncSelect({ config, value, onChange, onExtraChange, readOnly }: Async
           search: query.trim() || undefined,
           cursor: nextCursor,
           pageSize: 60,
+          toolId,
         })
         setOptions((prev) => (isReset ? res.items : dedupeAppend(prev, res.items)))
         setCursor(res.nextCursor)
@@ -380,7 +404,14 @@ function AsyncSelect({ config, value, onChange, onExtraChange, readOnly }: Async
         setLoading(false)
         setLoadingMore(false)
       }
-    }
+    }, [
+      config.source_table,
+      config.source_label_col,
+      config.source_value_col,
+      config.source_extra_cols,
+      query,
+      dedupeAppend,
+    ])
 
     useEffect(() => {
         const hasSavedValue = safeValueString !== ''
@@ -392,7 +423,7 @@ function AsyncSelect({ config, value, onChange, onExtraChange, readOnly }: Async
         setHasMore(true)
         hydratedRef.current = false
         void loadPage({ reset: true, cursorOverride: 0 })
-    }, [open, safeValueString, config.source_table, config.source_label_col, config.source_value_col, config.source_extra_cols]) 
+    }, [open, safeValueString, config.source_table, config.source_label_col, config.source_value_col, config.source_extra_cols, loadPage]) 
 
     useEffect(() => {
         if (options.length > 0 && selectedValues.length > 0 && !hydratedRef.current && !isMulti) {
@@ -421,6 +452,7 @@ function AsyncSelect({ config, value, onChange, onExtraChange, readOnly }: Async
             valueCol: config.source_value_col || 'id',
             extraCols: config.source_extra_cols,
             ids: missing,
+            toolId,
           })
           if (!mounted || resolved.length === 0) return
           // Prepend resolved items so the current selection can immediately display.
@@ -439,8 +471,11 @@ function AsyncSelect({ config, value, onChange, onExtraChange, readOnly }: Async
       config.source_extra_cols,
       // selectedValues depends on safeValueString; include both for stability.
       safeValueString,
-      selectedValues.join(','),
+      selectedValues,
+      selectedValuesKey,
       options,
+      toolId,
+      dedupeAppend,
     ])
 
     useEffect(() => {
@@ -456,7 +491,7 @@ function AsyncSelect({ config, value, onChange, onExtraChange, readOnly }: Async
       return () => {
         if (queryDebounceRef.current) window.clearTimeout(queryDebounceRef.current)
       }
-    }, [query, open])
+    }, [query, open, loadPage])
 
     const selectedLabels = selectedValues.map(v => options.find(o => o.value === v)?.label || v)
     const displayLabel = selectedLabels.length > 0 ? selectedLabels.join(', ') : (config.placeholder || "Cerca...")
@@ -485,14 +520,13 @@ function AsyncSelect({ config, value, onChange, onExtraChange, readOnly }: Async
               onValueChange={(v) => setQuery(v)}
             />
             <CommandList
-              ref={listRef as any}
               onScroll={(e) => {
                 const el = e.currentTarget
                 const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 40
                 if (!nearBottom) return
                 if (loading || loadingMore) return
                 if (!hasMore) return
-                void loadPage({ reset: false })
+                void loadPage({ reset: false, cursorOverride: cursor })
               }}
             >
                 {loading && <div className="py-6 text-center text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin inline mr-2"/>Caricamento...</div>}

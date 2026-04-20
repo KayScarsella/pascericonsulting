@@ -8,6 +8,7 @@ import { ShieldAlert } from "lucide-react"
 
 import { SectionList } from "@/components/questions/SectionList"
 import { processEudrValutazione } from "@/actions/workflows"
+import { resolveEudrWorkflowState } from "@/lib/eudr-workflow-state"
 
 export default async function EvaluationPage({
   searchParams,
@@ -57,7 +58,7 @@ export default async function EvaluationPage({
 
   const { data: sessionInfo, error: sessionError } = await supabase
     .from('assessment_sessions')
-    .select('user_id')
+    .select('id, user_id, session_type, status, final_outcome, metadata')
     .eq('id', sessionId)
     .eq('tool_id', EUDR_TOOL_ID)
     .single()
@@ -68,6 +69,25 @@ export default async function EvaluationPage({
 
   if (sessionInfo.user_id !== user.id && role !== 'admin') {
     return <div className="p-8 text-center text-red-600 font-bold">Non sei autorizzato a visualizzare o modificare questa verifica.</div>
+  }
+
+  if (sessionInfo.session_type === "analisi_finale") {
+    redirect(`/EUDR/valutazione-finale?session_id=${sessionId}`)
+  }
+
+  const workflowState = await resolveEudrWorkflowState(
+    supabase,
+    {
+      id: sessionInfo.id,
+      status: sessionInfo.status,
+      final_outcome: sessionInfo.final_outcome,
+      metadata: sessionInfo.metadata,
+    },
+    sessionInfo.status === "completed" && sessionInfo.final_outcome !== "Esente / Non Soggetto"
+  )
+
+  if (workflowState.resumeStep === "risk-analysis" || workflowState.isExempt) {
+    redirect(`/EUDR/risk-analysis?session_id=${sessionId}`)
   }
 
   const { data: sections } = await supabase

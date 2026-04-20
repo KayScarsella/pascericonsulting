@@ -1,6 +1,7 @@
 'use client'
 
 import Link from "next/link"
+import Image from "next/image"
 import { usePathname } from "next/navigation"
 import { useState } from "react"
 // 1. Importa tutte le icone che pensi di usare nel progetto qui
@@ -77,7 +78,7 @@ export function ToolNavbar({ toolName, basePath, items, userRole }: ToolNavbarPr
           {/* Logo & Nome Tool */}
           <div className="flex items-center gap-2">
             <div className="topbar-logo flex items-center justify-center rounded-md overflow-hidden">
-              <img src="/logo.png" alt="logo" className="h-8 w-auto" />
+              <Image src="/logo.png" alt="logo" width={96} height={32} className="h-8 w-auto" />
             </div>
             <span className="hidden font-bold text-slate-900 sm:inline-block">
               {toolName}
@@ -98,6 +99,7 @@ export function ToolNavbar({ toolName, basePath, items, userRole }: ToolNavbarPr
                 <Link
                   key={item.href}
                   href={`${basePath}${item.href}`}
+                  prefetch={false}
                   className={cn(
                     "group relative inline-flex items-center px-3 py-2 text-sm font-medium transition-all duration-200 rounded-md",
                     active ? "bg-amber-50/50" : "text-slate-500 hover:bg-slate-50"
@@ -149,6 +151,7 @@ export function ToolNavbar({ toolName, basePath, items, userRole }: ToolNavbarPr
               <Link
                 key={item.href}
                 href={`${basePath}${item.href}`}
+                prefetch={false}
                 onClick={() => setIsOpen(false)}
                 className={cn(
                   "flex items-center rounded-md px-3 py-2 text-base font-medium transition-colors",

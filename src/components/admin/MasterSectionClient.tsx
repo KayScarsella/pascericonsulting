@@ -70,6 +70,45 @@ const ROLE_LABELS: Record<string, string> = {
   standard: 'Standard',
 }
 
+function isUserRole(value: string): value is 'standard' | 'premium' | 'admin' {
+  return value === 'standard' || value === 'premium' || value === 'admin'
+}
+
+function isInviteRole(value: string): value is 'standard' | 'premium' {
+  return value === 'standard' || value === 'premium'
+}
+
+function isBulkSpeciesMode(value: string): value is 'set' | 'clear' {
+  return value === 'set' || value === 'clear'
+}
+
+function isNotifBulkField(value: string): value is 'is_active' | 'expires_at' {
+  return value === 'is_active' || value === 'expires_at'
+}
+
+function isBoolString(value: string): value is 'true' | 'false' {
+  return value === 'true' || value === 'false'
+}
+
+function isNotifExpiryMode(value: string): value is 'clear' {
+  return value === 'clear'
+}
+
+function isCountryBulkField(
+  value: string
+): value is 'conflicts' | 'sanction' | 'extra_eu' | 'corruption_code' {
+  return (
+    value === 'conflicts' ||
+    value === 'sanction' ||
+    value === 'extra_eu' ||
+    value === 'corruption_code'
+  )
+}
+
+function isCorruptionCode(value: string): value is 'AA' | 'MA' | 'MB' | 'MM' | 'TT' {
+  return value === 'AA' || value === 'MA' || value === 'MB' || value === 'MM' || value === 'TT'
+}
+
 function formatCountryNumber(v: number | null | undefined): string {
   if (v == null || Number.isNaN(Number(v))) return '—'
   return String(v)
@@ -180,12 +219,26 @@ export function MasterSectionClient({
   const [inviteLoading, setInviteLoading] = useState(false)
   const [cleanupLoading, setCleanupLoading] = useState(false)
   const [selectionResetKey, setSelectionResetKey] = useState(0)
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([])
+  const [bulkUserRole, setBulkUserRole] = useState<'standard' | 'premium' | 'admin'>('standard')
+  const [bulkUsersLoading, setBulkUsersLoading] = useState(false)
+  const [selectedSpeciesIds, setSelectedSpeciesIds] = useState<string[]>([])
+  const [bulkSpeciesCites, setBulkSpeciesCites] = useState<string>('0')
+  const [bulkSpeciesMode, setBulkSpeciesMode] = useState<'set' | 'clear'>('set')
+  const [bulkSpeciesLoading, setBulkSpeciesLoading] = useState(false)
+  const [selectedNotifIds, setSelectedNotifIds] = useState<string[]>([])
+  const [bulkNotifField, setBulkNotifField] = useState<'is_active' | 'expires_at'>('is_active')
+  const [bulkNotifBool, setBulkNotifBool] = useState<'true' | 'false'>('true')
+  const [bulkNotifExpiryMode, setBulkNotifExpiryMode] = useState<'clear'>('clear')
+  const [bulkNotifLoading, setBulkNotifLoading] = useState(false)
+  const [selectedCountryIds, setSelectedCountryIds] = useState<string[]>([])
+  const [bulkField, setBulkField] = useState<'conflicts' | 'sanction' | 'extra_eu' | 'corruption_code'>('conflicts')
+  const [bulkBoolValue, setBulkBoolValue] = useState<'true' | 'false'>('false')
+  const [bulkCorruptionCode, setBulkCorruptionCode] = useState<'AA' | 'MA' | 'MB' | 'MM' | 'TT'>('MM')
+  const [bulkLoading, setBulkLoading] = useState(false)
 
   if (section === 'users') {
     const data = usersData ?? []
-    const [selectedUserIds, setSelectedUserIds] = useState<string[]>([])
-    const [bulkUserRole, setBulkUserRole] = useState<'standard' | 'premium' | 'admin'>('standard')
-    const [bulkUsersLoading, setBulkUsersLoading] = useState(false)
     const handleRoleChange = async (
       userId: string,
       newRole: 'standard' | 'premium' | 'admin'
@@ -217,9 +270,6 @@ export function MasterSectionClient({
       }
     }
     const openEditProfile = (row: ToolUserRow) => {
-      // #region agent log
-      fetch('http://127.0.0.1:7443/ingest/e3f27f07-b7f1-4eb5-9645-5d724b3a3d9b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1c1df8'},body:JSON.stringify({sessionId:'1c1df8',runId:'pre-fix',hypothesisId:'H3',location:'src/components/admin/MasterSectionClient.tsx:openEditProfile',message:'Row profiles shape before edit dialog',data:{userId:row.user_id,profilesType:typeof row.profiles,profilesIsArray:Array.isArray(row.profiles),profilesIsNull:row.profiles===null,profilesHasOnboardingCompleted:typeof (row.profiles as { onboarding_completed?: unknown } | null)?.onboarding_completed !== 'undefined'},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       const profile = row.profiles as ProfileRow | null
       if (!profile) return
       setProfileId(profile.id)
@@ -448,7 +498,12 @@ export function MasterSectionClient({
               </div>
               <div className="grid gap-2">
                 <Label>Ruolo iniziale</Label>
-                <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as 'standard' | 'premium')}>
+                <Select
+                  value={inviteRole}
+                  onValueChange={(v) => {
+                    if (isInviteRole(v)) setInviteRole(v)
+                  }}
+                >
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -530,7 +585,12 @@ export function MasterSectionClient({
         {selectedUserIds.length > 0 && (
           <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
             <span className="text-sm text-slate-700">{selectedUserIds.length} selezionati</span>
-            <Select value={bulkUserRole} onValueChange={(v) => setBulkUserRole(v as any)}>
+            <Select
+              value={bulkUserRole}
+              onValueChange={(v) => {
+                if (isUserRole(v)) setBulkUserRole(v)
+              }}
+            >
               <SelectTrigger className="h-8 w-[160px] bg-white">
                 <SelectValue />
               </SelectTrigger>
@@ -700,10 +760,6 @@ export function MasterSectionClient({
 
   if (section === 'species') {
     const data = speciesData ?? []
-    const [selectedSpeciesIds, setSelectedSpeciesIds] = useState<string[]>([])
-    const [bulkSpeciesCites, setBulkSpeciesCites] = useState<string>('0')
-    const [bulkSpeciesMode, setBulkSpeciesMode] = useState<'set' | 'clear'>('set')
-    const [bulkSpeciesLoading, setBulkSpeciesLoading] = useState(false)
     const resetForm = () => {
       setEditingId(null)
       setScientificName('')
@@ -792,7 +848,12 @@ export function MasterSectionClient({
           {selectedSpeciesIds.length > 0 && (
             <div className="mr-auto flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
               <span className="text-sm text-slate-700">{selectedSpeciesIds.length} selezionati</span>
-              <Select value={bulkSpeciesMode} onValueChange={(v) => setBulkSpeciesMode(v as any)}>
+              <Select
+                value={bulkSpeciesMode}
+                onValueChange={(v) => {
+                  if (isBulkSpeciesMode(v)) setBulkSpeciesMode(v)
+                }}
+              >
                 <SelectTrigger className="h-8 w-[160px] bg-white">
                   <SelectValue />
                 </SelectTrigger>
@@ -946,11 +1007,6 @@ export function MasterSectionClient({
 
   if (section === 'notifications') {
     const data = notificationsData ?? []
-    const [selectedNotifIds, setSelectedNotifIds] = useState<string[]>([])
-    const [bulkNotifField, setBulkNotifField] = useState<'is_active' | 'expires_at'>('is_active')
-    const [bulkNotifBool, setBulkNotifBool] = useState<'true' | 'false'>('true')
-    const [bulkNotifExpiryMode, setBulkNotifExpiryMode] = useState<'clear'>('clear')
-    const [bulkNotifLoading, setBulkNotifLoading] = useState(false)
 
     const resetNotifForm = () => {
       setEditingId(null)
@@ -1067,7 +1123,12 @@ export function MasterSectionClient({
           {selectedNotifIds.length > 0 && (
             <div className="mr-auto flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
               <span className="text-sm text-slate-700">{selectedNotifIds.length} selezionati</span>
-              <Select value={bulkNotifField} onValueChange={(v) => setBulkNotifField(v as any)}>
+              <Select
+                value={bulkNotifField}
+                onValueChange={(v) => {
+                  if (isNotifBulkField(v)) setBulkNotifField(v)
+                }}
+              >
                 <SelectTrigger className="h-8 w-[180px] bg-white">
                   <SelectValue />
                 </SelectTrigger>
@@ -1077,7 +1138,12 @@ export function MasterSectionClient({
                 </SelectContent>
               </Select>
               {bulkNotifField === 'is_active' ? (
-                <Select value={bulkNotifBool} onValueChange={(v) => setBulkNotifBool(v as any)}>
+                <Select
+                  value={bulkNotifBool}
+                  onValueChange={(v) => {
+                    if (isBoolString(v)) setBulkNotifBool(v)
+                  }}
+                >
                   <SelectTrigger className="h-8 w-[110px] bg-white">
                     <SelectValue />
                   </SelectTrigger>
@@ -1087,7 +1153,12 @@ export function MasterSectionClient({
                   </SelectContent>
                 </Select>
               ) : (
-                <Select value={bulkNotifExpiryMode} onValueChange={(v) => setBulkNotifExpiryMode(v as any)}>
+                <Select
+                  value={bulkNotifExpiryMode}
+                  onValueChange={(v) => {
+                    if (isNotifExpiryMode(v)) setBulkNotifExpiryMode(v)
+                  }}
+                >
                   <SelectTrigger className="h-8 w-[140px] bg-white">
                     <SelectValue />
                   </SelectTrigger>
@@ -1234,11 +1305,6 @@ export function MasterSectionClient({
 
   // section === 'countries'
   const data = countriesData ?? []
-  const [selectedCountryIds, setSelectedCountryIds] = useState<string[]>([])
-  const [bulkField, setBulkField] = useState<'conflicts' | 'sanction' | 'extra_eu' | 'corruption_code'>('conflicts')
-  const [bulkBoolValue, setBulkBoolValue] = useState<'true' | 'false'>('false')
-  const [bulkCorruptionCode, setBulkCorruptionCode] = useState<string>('MM')
-  const [bulkLoading, setBulkLoading] = useState(false)
   const resetForm = () => {
     setEditingId(null)
     setCountryName('')
@@ -1464,7 +1530,12 @@ export function MasterSectionClient({
             <span className="text-sm text-slate-700">
               {selectedCountryIds.length} selezionati
             </span>
-            <Select value={bulkField} onValueChange={(v) => setBulkField(v as any)}>
+            <Select
+              value={bulkField}
+              onValueChange={(v) => {
+                if (isCountryBulkField(v)) setBulkField(v)
+              }}
+            >
               <SelectTrigger className="h-8 w-[180px] bg-white">
                 <SelectValue />
               </SelectTrigger>
@@ -1477,7 +1548,12 @@ export function MasterSectionClient({
             </Select>
 
             {bulkField === 'corruption_code' ? (
-              <Select value={bulkCorruptionCode} onValueChange={setBulkCorruptionCode}>
+              <Select
+                value={bulkCorruptionCode}
+                onValueChange={(v) => {
+                  if (isCorruptionCode(v)) setBulkCorruptionCode(v)
+                }}
+              >
                 <SelectTrigger className="h-8 w-[120px] bg-white">
                   <SelectValue />
                 </SelectTrigger>
@@ -1490,7 +1566,12 @@ export function MasterSectionClient({
                 </SelectContent>
               </Select>
             ) : (
-              <Select value={bulkBoolValue} onValueChange={(v) => setBulkBoolValue(v as any)}>
+              <Select
+                value={bulkBoolValue}
+                onValueChange={(v) => {
+                  if (isBoolString(v)) setBulkBoolValue(v)
+                }}
+              >
                 <SelectTrigger className="h-8 w-[110px] bg-white">
                   <SelectValue />
                 </SelectTrigger>
@@ -1511,7 +1592,11 @@ export function MasterSectionClient({
                 const patch =
                   bulkField === 'corruption_code'
                     ? { corruption_code: bulkCorruptionCode }
-                    : { [bulkField]: bulkBoolValue === 'true' } as any
+                    : bulkField === 'conflicts'
+                      ? { conflicts: bulkBoolValue === 'true' }
+                      : bulkField === 'sanction'
+                        ? { sanction: bulkBoolValue === 'true' }
+                        : { extra_eu: bulkBoolValue === 'true' }
                 const res = await updateCountriesBulk(toolId, selectedCountryIds, patch)
                 setBulkLoading(false)
                 if (res.success) {

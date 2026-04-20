@@ -48,7 +48,7 @@ export default function ResetPasswordPage() {
           </form>
         </CardContent>
         <CardFooter className="text-xs text-slate-500">
-          Questo link e' monouso: se scade, richiedi una nuova email di recupero.
+          Questo link e&apos; monouso: se scade, richiedi una nuova email di recupero.
         </CardFooter>
       </Card>
     </div>

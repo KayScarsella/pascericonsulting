@@ -47,7 +47,7 @@ export async function processTimberValutazione(
     }
 
     // 🛠️ CASO 2: Warning - Appuntiamo l'avviso ma andiamo avanti
-    let warningData = {};
+    let warningData: Pick<SessionMetadata, "block_reason" | "block_variant"> = {}
     if (exceptionData?.isBlocked && exceptionData.blockVariant === 'warning') {
         warningData = {
             block_reason: exceptionData.blockReason,
@@ -86,7 +86,8 @@ export async function processTimberValutazione(
       .from('assessment_sessions')
       .select('id, metadata')
       .eq('parent_session_id', sessionId)
-      .eq('session_type', 'analisi_finale');
+      .eq('session_type', 'analisi_finale')
+      .eq('tool_id', TIMBER_TOOL_ID);
 
     const existingPairs = (existingSessions || []).map(s => {
       const meta = s.metadata as unknown as SessionMetadata | null;
@@ -97,20 +98,28 @@ export async function processTimberValutazione(
     const removedPairs = existingPairs.filter(p => !currentPairs.includes(p));
     const addedPairs = currentPairs.filter(p => !existingPairs.includes(p));
 
-    let pairsToCreate: string[] = [];
-
-    if (removedPairs.length > 0) {
-      await supabase.from('assessment_sessions').delete()
-        .eq('parent_session_id', sessionId)
-        .eq('session_type', 'analisi_finale');
-      pairsToCreate = currentPairs;
-    } else if (addedPairs.length > 0) {
-      pairsToCreate = addedPairs;
-    }
+    const pairsToCreate: string[] = addedPairs
 
     if (currentPairs.length === 0 && pairsToCreate.length === 0) {
         // Se non ci sono specie inserite e non era esente, lo rimandiamo fuori
         return { redirectUrl: '/timberRegulation/search' };
+    }
+
+    if (removedPairs.length > 0) {
+      const removedSessionIds = (existingSessions || [])
+        .filter((s) => {
+          const meta = s.metadata as SessionMetadata | null
+          if (!meta?.country || !meta?.specie) return false
+          return removedPairs.includes(`${meta.specie}_${meta.country}`)
+        })
+        .map((s) => s.id)
+
+      if (removedSessionIds.length > 0) {
+        await supabase
+          .from('assessment_sessions')
+          .delete()
+          .in('id', removedSessionIds)
+      }
     }
 
     // 🛠️ 3. CREAZIONE DELLE SESSIONI MANCANTI (CON NOME ORIGINALE E PRE-FILL)
@@ -167,6 +176,7 @@ export async function processTimberValutazione(
         .select('id, metadata')
         .eq('parent_session_id', sessionId)
         .eq('session_type', 'analisi_finale')
+        .eq('tool_id', TIMBER_TOOL_ID)
         .in('metadata->>specie', specieIdsToFetch);
 
       if (createdSessions && createdSessions.length > 0) {
@@ -206,11 +216,22 @@ export async function processTimberValutazione(
     }
 
     // Aggiorniamo la Verifica madre segnandola come completata
-    const finalMetadata: SessionMetadata = { 
-        nome_commerciale: nomeCommerciale, 
-        nome_operazione: nomeCommerciale, 
-        is_blocked: false, // I figli sono stati creati!
-        ...warningData     // Salviamo l'eventuale warning
+    const { data: rootSession } = await supabase
+      .from('assessment_sessions')
+      .select('metadata')
+      .eq('id', sessionId)
+      .single()
+
+    const previousMeta = (rootSession?.metadata as SessionMetadata | null) ?? {}
+
+    const finalMetadata: SessionMetadata = {
+        ...previousMeta,
+        nome_commerciale: nomeCommerciale,
+        nome_operazione: nomeCommerciale,
+        is_blocked: false,
+        step2_saved_at: new Date().toISOString(),
+        resume_step: currentPairs.length > 0 ? 'valutazione-finale' : 'evaluation',
+        ...warningData
     };
 
     await supabase.from('assessment_sessions').update({
@@ -222,7 +243,11 @@ export async function processTimberValutazione(
     // Redirect al form figlio se ce n'è solo 1
     if (currentPairs.length === 1) {
       const { data: singleSession } = await supabase.from('assessment_sessions')
-        .select('id').eq('parent_session_id', sessionId).eq('session_type', 'analisi_finale').single();
+        .select('id')
+        .eq('parent_session_id', sessionId)
+        .eq('session_type', 'analisi_finale')
+        .eq('tool_id', TIMBER_TOOL_ID)
+        .single();
       if (singleSession) {
         return { redirectUrl: `/timberRegulation/valutazione-finale?session_id=${singleSession.id}` };
       }
