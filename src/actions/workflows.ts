@@ -23,6 +23,7 @@ import {
 import {
   processTimberValutazione as runProcessTimberValutazione,
 } from "@/actions/workflows/timber-valutazione"
+import { isYesLikeAnswer } from "@/lib/eudr-question-ids"
 import {
   materializeEudrFinalPrefillForParent,
   materializeEudrFinalPrefillForSession,
@@ -220,17 +221,55 @@ async function runPrimaFase(
   return { redirectUrl: `${evaluationBasePath}?session_id=${sessionId}` }
 }
 
+async function hasTimberFlegtOrCitesYes(
+  supabase: SupabaseClient<Database>,
+  sessionId: string
+): Promise<boolean> {
+  const { data: timberSections } = await supabase
+    .from("sections")
+    .select("id")
+    .eq("tool_id", TIMBER_TOOL_ID)
+
+  const timberSectionIds = (timberSections || []).map((section) => section.id)
+  if (timberSectionIds.length === 0) return false
+
+  const { data: flegtCitesQuestions } = await supabase
+    .from("questions")
+    .select("id")
+    .in("section_id", timberSectionIds)
+    .or("text.ilike.%flegt%,text.ilike.%cites%")
+
+  const flegtCitesQuestionIds = (flegtCitesQuestions || []).map((question) => question.id)
+  if (flegtCitesQuestionIds.length === 0) return false
+
+  const { data: responses } = await supabase
+    .from("user_responses")
+    .select("answer_text")
+    .eq("session_id", sessionId)
+    .in("question_id", flegtCitesQuestionIds)
+
+  return (responses || []).some((response) => isYesLikeAnswer(response.answer_text))
+}
+
 export async function processPrimaFaseTimber(
   sessionId: string,
   exceptionData?: PrimaFaseException
 ): Promise<{ redirectUrl?: string; error?: string }> {
   try {
     const supabase = await createClient()
+    const hasFlegtOrCites = await hasTimberFlegtOrCitesYes(supabase, sessionId)
+    const forcedException: PrimaFaseException | undefined = hasFlegtOrCites
+      ? {
+          isBlocked: true,
+          blockReason: "Verifica non soggetta: presenza di licenza FLEGT/CITES nel flusso Timber.",
+          blockVariant: "success",
+        }
+      : undefined
     const result = await runPrimaFase(
       supabase,
       TIMBER_TOOL_ID,
       sessionId,
-      exceptionData,
+      forcedException ?? exceptionData,
       "/timberRegulation/search",
       "/timberRegulation/evaluation"
     )

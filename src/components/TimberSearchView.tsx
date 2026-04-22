@@ -89,18 +89,11 @@ export function TimberSearchView({
   }
 
   const handleVerificheContinue = (row: VerificationRow) => {
-    if (row.resume_url) {
-      router.push(row.resume_url)
-      return
-    }
     if (row.isBlocked || !row.riskCompleted) {
       router.push(`/timberRegulation/risk-analysis?session_id=${row.id}`)
       return
     }
-    if (!row.evaluationCompleted) {
-      router.push(`/timberRegulation/evaluation?session_id=${row.id}`)
-      return
-    }
+    // Nella tab "Verifiche" si rientra sempre nel flusso verifica base (step evaluation).
     router.push(`/timberRegulation/evaluation?session_id=${row.id}`)
   }
 

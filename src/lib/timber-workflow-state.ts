@@ -42,6 +42,14 @@ function hasStep2Marker(metadata: SessionMetadata | null | undefined): boolean {
   return typeof metadata?.step2_saved_at === "string" && metadata.step2_saved_at.length > 0
 }
 
+function getExplicitResumeStep(metadata: SessionMetadata | null | undefined): ResumeStep | null {
+  const step = metadata?.resume_step
+  if (step === "risk-analysis" || step === "evaluation" || step === "valutazione-finale") {
+    return step
+  }
+  return null
+}
+
 function buildResumeUrl(
   rootSessionId: string,
   step: ResumeStep,
@@ -89,6 +97,7 @@ export async function resolveTimberWorkflowState(
 export function deriveTimberWorkflowStateFromSnapshot(
   snapshot: WorkflowSnapshot
 ): TimberWorkflowState {
+  const explicitResumeStep = getExplicitResumeStep(snapshot.metadata)
   const isExempt =
     snapshot.finalOutcome === "Esente / Non Soggetto" || isSuccessBlocked(snapshot.metadata)
 
@@ -104,13 +113,14 @@ export function deriveTimberWorkflowStateFromSnapshot(
       snapshot.childCount > 0 ||
       (snapshot.status === "completed" && !step1Completed))
 
-  const resumeStep: ResumeStep = !step1Completed
-    ? "risk-analysis"
-    : isExempt
+  const resumeStep: ResumeStep = explicitResumeStep ??
+    (!step1Completed
       ? "risk-analysis"
-      : !step2Saved
-        ? "evaluation"
-        : "valutazione-finale"
+      : isExempt
+        ? "risk-analysis"
+        : !step2Saved
+          ? "evaluation"
+          : "valutazione-finale")
 
   return {
     rootSessionId: snapshot.rootSessionId,

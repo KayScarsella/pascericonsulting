@@ -6,8 +6,39 @@ import { SessionMetadata } from '@/types/session'
 import { validateSessionAccess } from '@/actions/questions'
 import { TablesInsert, Json } from '@/types/supabase'
 import { completeSessionAsExempt, extractNomeCommerciale, upsertUserResponses } from '@/actions/workflows/shared'
+import { isYesLikeAnswer } from '@/lib/eudr-question-ids'
 
 type ValutazioneException = { isBlocked: boolean; blockReason: string; blockVariant: 'success' | 'warning' | 'error' }
+
+async function hasTimberFlegtOrCitesYes(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  sessionId: string
+): Promise<boolean> {
+  const { data: timberSections } = await supabase
+    .from('sections')
+    .select('id')
+    .eq('tool_id', TIMBER_TOOL_ID)
+
+  const timberSectionIds = (timberSections || []).map((section) => section.id)
+  if (timberSectionIds.length === 0) return false
+
+  const { data: flegtCitesQuestions } = await supabase
+    .from('questions')
+    .select('id')
+    .in('section_id', timberSectionIds)
+    .or('text.ilike.%flegt%,text.ilike.%cites%')
+
+  const flegtCitesQuestionIds = (flegtCitesQuestions || []).map((question) => question.id)
+  if (flegtCitesQuestionIds.length === 0) return false
+
+  const { data: responses } = await supabase
+    .from('user_responses')
+    .select('answer_text')
+    .eq('session_id', sessionId)
+    .in('question_id', flegtCitesQuestionIds)
+
+  return (responses || []).some((response) => isYesLikeAnswer(response.answer_text))
+}
 
 export async function processTimberValutazione(
   sessionId: string,
@@ -20,6 +51,14 @@ export async function processTimberValutazione(
 
   try {
     await validateSessionAccess(supabase, TIMBER_TOOL_ID, sessionId)
+    const hasFlegtOrCites = await hasTimberFlegtOrCitesYes(supabase, sessionId)
+    const effectiveExceptionData: ValutazioneException | undefined = hasFlegtOrCites
+      ? {
+          isBlocked: true,
+          blockReason: 'Verifica non soggetta: presenza di licenza FLEGT/CITES nel flusso Timber.',
+          blockVariant: 'success',
+        }
+      : exceptionData
     const TARGET_QUESTION_ID = '23ea972c-e1bd-459b-a8e0-3d0376539e96'; // Array Specie-Paesi
     const NOME_COMMERCIALE_ID = '8e2d4d57-161c-4f37-8089-04ab947389e1'; // Domanda Nome Commerciale
 
@@ -34,12 +73,19 @@ export async function processTimberValutazione(
     const nomeCommerciale = extractNomeCommerciale(responses, NOME_COMMERCIALE_ID)
 
     // 🛠️ CASO 1: Esente (Success) - Chiudiamo e fermiamo l'analisi
-    if (exceptionData?.isBlocked && exceptionData.blockVariant === 'success') {
+    if (effectiveExceptionData?.isBlocked && effectiveExceptionData.blockVariant === 'success') {
+      await supabase
+        .from('assessment_sessions')
+        .delete()
+        .eq('parent_session_id', sessionId)
+        .eq('session_type', 'analisi_finale')
+        .eq('tool_id', TIMBER_TOOL_ID)
+
       const metadata: SessionMetadata = {
         nome_commerciale: nomeCommerciale,
         nome_operazione: nomeCommerciale,
         is_blocked: true,
-        block_reason: exceptionData.blockReason,
+        block_reason: effectiveExceptionData.blockReason,
         block_variant: 'success'
       };
       await completeSessionAsExempt(supabase, sessionId, metadata)
@@ -48,9 +94,9 @@ export async function processTimberValutazione(
 
     // 🛠️ CASO 2: Warning - Appuntiamo l'avviso ma andiamo avanti
     let warningData: Pick<SessionMetadata, "block_reason" | "block_variant"> = {}
-    if (exceptionData?.isBlocked && exceptionData.blockVariant === 'warning') {
+    if (effectiveExceptionData?.isBlocked && effectiveExceptionData.blockVariant === 'warning') {
         warningData = {
-            block_reason: exceptionData.blockReason,
+            block_reason: effectiveExceptionData.blockReason,
             block_variant: 'warning'
         };
     }
@@ -230,7 +276,8 @@ export async function processTimberValutazione(
         nome_operazione: nomeCommerciale,
         is_blocked: false,
         step2_saved_at: new Date().toISOString(),
-        resume_step: currentPairs.length > 0 ? 'valutazione-finale' : 'evaluation',
+        // Manteniamo il resume sulla pagina Evaluation della verifica base.
+        resume_step: 'evaluation',
         ...warningData
     };
 

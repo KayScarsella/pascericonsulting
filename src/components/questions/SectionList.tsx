@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import { saveResponsesBulk, deleteResponsesBulk } from "@/actions/questions"
-import { EUDR_TOOL_ID } from "@/lib/constants"
+import { EUDR_TOOL_ID, TIMBER_TOOL_ID } from "@/lib/constants"
 import {
     EUDR_Q_CITES,
     EUDR_Q_FLEGT,
@@ -126,13 +126,32 @@ export function SectionList({
         setLocalExtraData(prev => ({ ...prev, [questionId]: extra || {} }));
     };
 
+    const sectionsForRender = useMemo(() => {
+        if (!sections) return null;
+        if (toolId !== TIMBER_TOOL_ID) return sections;
+
+        const hasTimberFlegtOrCitesYes = sections.some((section) =>
+            (section.questions || []).some((question) => {
+                const text = String(question.text ?? '').toLowerCase();
+                const isFlegtOrCitesQuestion = text.includes('flegt') || text.includes('cites');
+                if (!isFlegtOrCitesQuestion) return false;
+                return isYesLikeAnswer(localAnswers[question.id]);
+            })
+        );
+
+        if (!hasTimberFlegtOrCitesYes) return sections;
+
+        // Regola solo visuale lato client: nasconde la sezione C dopo B.
+        return sections.filter((section) => !/^\s*(sezione\s*)?c\b/i.test(String(section.title ?? '')));
+    }, [sections, toolId, localAnswers]);
+
     // 🛠️ Motore logico sicuro
     const processedForm = useMemo(() => {
         const visibleQs: Tables<'questions'>[] = [];
         const hiddenQs: Tables<'questions'>[] = [];
         const exceptions: Record<string, SectionLogicRule | null> = {};
 
-        sections?.forEach((section) => {
+        sectionsForRender?.forEach((section) => {
             const allQuestions = section.questions || [];
             if (allQuestions.length === 0) return;
 
@@ -176,7 +195,7 @@ export function SectionList({
         });
 
         return { visibleQs, hiddenQs, exceptions };
-    }, [sections, localAnswers, localFiles, localExtraData]);
+    }, [sectionsForRender, localAnswers, localFiles, localExtraData]);
 
     const handleSaveAll = async () => {
         let hasUnanswered = false;
@@ -312,7 +331,7 @@ export function SectionList({
 
     return (
         <div className="space-y-10 pb-20">
-            {sections?.map((section) => {
+            {sectionsForRender?.map((section) => {
                 const sectionVisibleQs = processedForm.visibleQs.filter(q => q.section_id === section.id);
                 if (sectionVisibleQs.length === 0 && !processedForm.exceptions[section.id]) return null;
 
