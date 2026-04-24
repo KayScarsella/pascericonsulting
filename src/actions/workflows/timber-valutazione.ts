@@ -81,12 +81,23 @@ export async function processTimberValutazione(
         .eq('session_type', 'analisi_finale')
         .eq('tool_id', TIMBER_TOOL_ID)
 
+      const { data: rootSession } = await supabase
+        .from('assessment_sessions')
+        .select('metadata')
+        .eq('id', sessionId)
+        .single()
+
+      const previousMeta = (rootSession?.metadata as SessionMetadata | null) ?? {}
+
       const metadata: SessionMetadata = {
+        ...previousMeta,
         nome_commerciale: nomeCommerciale,
         nome_operazione: nomeCommerciale,
         is_blocked: true,
         block_reason: effectiveExceptionData.blockReason,
-        block_variant: 'success'
+        block_variant: 'success',
+        // Esenzione rilevata nello step Evaluation: alla riapertura rientriamo qui.
+        resume_step: 'evaluation',
       };
       await completeSessionAsExempt(supabase, sessionId, metadata)
       return { redirectUrl: '/timberRegulation/search' };

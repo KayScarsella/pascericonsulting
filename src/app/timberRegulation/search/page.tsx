@@ -18,6 +18,7 @@ import {
   ANALISI_FINALE_NEGATIVE_OUTCOMES,
 } from "@/lib/final-outcome"
 import { resolveTimberWorkflowState } from "@/lib/timber-workflow-state"
+import { normalizeTimberSearchTab } from "@/lib/timber-search-routing"
 
 // ID della domanda "Nome Commerciale" nelle verifiche Timber
 const NOME_COMMERCIALE_QUESTION_ID = '8e2d4d57-161c-4f37-8089-04ab947389e1'
@@ -28,7 +29,7 @@ export default async function SearchPage({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
   const params = await searchParams
-  const tab = (params.tab as string) || 'analisi'
+  const tab = normalizeTimberSearchTab(params.tab as string | undefined)
   const page = parsePageParam(params.page, 1)
   const vpage = parsePageParam(params.vpage, 1)
   const q = parseSearchParam(params.q)

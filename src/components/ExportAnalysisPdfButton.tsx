@@ -226,8 +226,17 @@ function buildPdf(
     y += 6
   }
 
-  // 1. Titolo + barra superiore (fornitore a sx, logo a dx)
-  y = 18
+  // 1. Logo in alto a destra + titolo + barra superiore
+  const topLogoY = 8
+  if (logoResult) {
+    const xLogo = pageW - margin - HEADER_LOGO_W
+    try {
+      doc.addImage(logoResult.dataUrl, logoResult.format, xLogo, topLogoY, HEADER_LOGO_W, HEADER_LOGO_H)
+    } catch {
+      /* ignore */
+    }
+  }
+  y = 28
   const regulationLabel = resolvedVariant === 'EUDR' ? 'EUDR' : 'Timber Regulation'
   doc.setFontSize(21)
   doc.setFont('helvetica', 'bold')
@@ -242,15 +251,6 @@ function buildPdf(
   doc.rect(margin, barTop, pageW - 2 * margin, barH, 'F')
   doc.setDrawColor(210, 230, 230)
   doc.rect(margin, barTop, pageW - 2 * margin, barH)
-
-  if (logoResult) {
-    const xLogo = pageW - margin - HEADER_LOGO_W - 2
-    try {
-      doc.addImage(logoResult.dataUrl, logoResult.format, xLogo, barTop + 4, HEADER_LOGO_W, HEADER_LOGO_H)
-    } catch {
-      /* ignore */
-    }
-  }
 
   const supplierX = margin + 3
   y = barTop + 6

@@ -10,6 +10,7 @@ import { deleteRecords } from "@/actions/actions"
 import { Edit } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { TimberAnalisiTable, type AssessmentSessionRow } from "@/components/TimberAnalisiTable"
+import { normalizeTimberSearchTab, resolveTimberVerificheActionUrl } from "@/lib/timber-search-routing"
 
 // --- Verification row type (used by search page for data shape) ---
 export interface VerificationRow {
@@ -29,15 +30,20 @@ export interface VerificationRow {
 function getVerificheStatusLabel(row: VerificationRow): { text: string; variant: "amber" | "green"; key: string } {
   if (row.status === 'completed') {
     if (row.isBlocked) {
-      return { text: row.final_outcome || "Esente / Non Soggetto", variant: "green", key: "esente" }
+      const exemptPhase = row.riskCompleted ? "Valutazione" : "Verifica preliminare"
+      return {
+        text: `${row.final_outcome || "Esente / Non Soggetto"} - ${exemptPhase}`,
+        variant: "green",
+        key: "esente",
+      }
     }
     return { text: "Conclusa", variant: "green", key: "conclusa" }
   }
   if (!row.riskCompleted) {
-    return { text: "In corso (verifica preliminare)", variant: "amber", key: "in_corso" }
+    return { text: "In corso - Verifica preliminare", variant: "amber", key: "in_corso" }
   }
   if (!row.evaluationCompleted) {
-    return { text: "In corso (valutazione)", variant: "amber", key: "in_corso" }
+    return { text: "In corso - Valutazione", variant: "amber", key: "in_corso" }
   }
   return { text: "Conclusa", variant: "green", key: "conclusa" }
 }
@@ -66,7 +72,8 @@ export function TimberSearchView({
 }: TimberSearchViewProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const isAnalisi = tab !== 'verifiche'
+  const normalizedTab = normalizeTimberSearchTab(tab)
+  const isAnalisi = normalizedTab !== 'verifiche'
 
   // Verifiche tab: local state for filter + sort
   const filterStato = searchParams.get('stato') ?? 'all'
@@ -89,12 +96,14 @@ export function TimberSearchView({
   }
 
   const handleVerificheContinue = (row: VerificationRow) => {
-    if (row.isBlocked || !row.riskCompleted) {
-      router.push(`/timberRegulation/risk-analysis?session_id=${row.id}`)
-      return
-    }
-    // Nella tab "Verifiche" si rientra sempre nel flusso verifica base (step evaluation).
-    router.push(`/timberRegulation/evaluation?session_id=${row.id}`)
+    router.push(
+      resolveTimberVerificheActionUrl({
+        sessionId: row.id,
+        riskCompleted: row.riskCompleted,
+        isBlocked: row.isBlocked,
+        resumeUrl: row.resume_url,
+      })
+    )
   }
 
   const handleVerifichePageChange = (newPage: number) => {
