@@ -215,8 +215,15 @@ function ToolCard({ tool, role }: { tool: ToolData, role: string }) {
                     Errore Link
                 </Button>
              )
+          ) : isAdmin && isConfigured ? (
+            // In sviluppo: solo admin apre anteprima
+            <Button asChild className="w-full gap-2 border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100" variant="outline">
+              <Link href={targetUrl}>
+                Anteprima admin <ExternalLink className="h-4 w-4 opacity-70" />
+              </Link>
+            </Button>
           ) : (
-            // CASO 3: Non attivo -> Prossimamente
+            // Non attivo: utenti standard/premium
             <Button disabled className="w-full gap-2 bg-slate-200 text-slate-500 hover:bg-slate-200" variant="secondary">
               <Lock className="h-4 w-4" /> Prossimamente
             </Button>

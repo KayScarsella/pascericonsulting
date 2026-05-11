@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/supabase'
 
 const TEMPLATE_VERSION = '2026-04-10-v1'
+const LOG_PREFIX = '[tool-access-email]'
 
 const ROLE_LABEL_IT: Record<string, string> = {
   standard: 'Standard',
@@ -124,6 +125,79 @@ export async function sendToolAccessNotifyViaResend(
   })
 }
 
+/**
+ * Delivers the Supabase `generateLink` invite `action_link` via Resend.
+ * GoTrue does not send this link itself when using custom / programmatic flows.
+ */
+export async function sendPendingInviteActionLinkViaResend(input: {
+  apiKey: string
+  from: string
+  to: string
+  actionLink: string
+  toolName: string
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const tool = input.toolName.trim() || 'Pasceri Consulting'
+  const subject = `Invito alla piattaforma ${tool}`
+  const html = `
+      <div style="font-family:Arial,sans-serif;color:#111827;">
+        <!-- template_version:${TEMPLATE_VERSION} -->
+
+        <h2 style="margin:0 0 16px;font-family:Arial,sans-serif;color:#111827;">
+          Invito alla piattaforma ${escapeHtml(tool)}
+        </h2>
+
+        <p style="margin:0 0 12px;font-family:Arial,sans-serif;color:#374151;line-height:1.6;">
+          Gentile utente,
+        </p>
+
+        <p style="margin:0 0 12px;font-family:Arial,sans-serif;color:#374151;line-height:1.6;">
+          con questo messaggio desideriamo invitarLa ad accedere al nuovo tool di supporto alla conformità normativa.
+          In particolare, è stato invitato al tool <strong>${escapeHtml(tool)}</strong>.
+        </p>
+
+        <p style="margin:0 0 18px;font-family:Arial,sans-serif;color:#374151;line-height:1.6;">
+          Per iniziare a utilizzare la piattaforma e accedere alle funzionalità di tracciabilità e dovuta diligenza, La invitiamo a completare la registrazione facendo clic sul pulsante qui sotto.
+        </p>
+
+        <p style="margin:0 0 22px;">
+          <a href="${escapeHtml(input.actionLink)}" style="display:inline-block;padding:12px 18px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;font-family:Arial,sans-serif;font-weight:600;">
+            Registrati e attiva il tuo account
+          </a>
+        </p>
+
+        <p style="margin:0 0 10px;font-family:Arial,sans-serif;color:#374151;line-height:1.6;">
+          Una volta completata la registrazione, potrà:
+        </p>
+
+        <ul style="margin:0 0 18px 20px;padding:0;font-family:Arial,sans-serif;color:#374151;line-height:1.7;">
+          <li>inserire i dati della Sua azienda;</li>
+          <li>caricare e verificare le informazioni della filiera;</li>
+          <li>aggiornare la password iniziale con una più sicura.</li>
+        </ul>
+
+        <p style="margin:0 0 8px;font-family:Arial,sans-serif;color:#374151;line-height:1.6;">
+          Restiamo a Sua disposizione per qualsiasi supporto.
+        </p>
+
+        <p style="margin:0;font-family:Arial,sans-serif;color:#374151;line-height:1.6;">
+          Benvenuto nel percorso verso una filiera sostenibile.
+        </p>
+
+        <p style="margin:16px 0 0;font-size:12px;color:#64748b;line-height:1.6;">
+          Se il pulsante non funziona, copi questo indirizzo nel browser:<br />
+          ${escapeHtml(input.actionLink)}
+        </p>
+      </div>
+    `
+  return sendResendHttp({
+    apiKey: input.apiKey,
+    from: input.from,
+    to: input.to,
+    subject,
+    html,
+  })
+}
+
 export async function sendToolAccessNotifyViaEdgeFunction(input: {
   supabaseUrl: string
   serviceRoleKey: string
@@ -191,7 +265,7 @@ export async function notifyUserOfToolAccess(
   const resendKey = process.env.RESEND_API_KEY?.trim()
   const fromEmail = process.env.FROM_EMAIL?.trim()
   if (resendKey && fromEmail) {
-    return sendToolAccessNotifyViaResend(supabase, {
+    const out = await sendToolAccessNotifyViaResend(supabase, {
       apiKey: resendKey,
       from: fromEmail,
       userId: input.userId,
@@ -201,12 +275,21 @@ export async function notifyUserOfToolAccess(
       role: input.role,
       appPublicUrl: input.appPublicUrl,
     })
+    if (!out.ok) {
+      console.warn(LOG_PREFIX, 'Resend direct failed', {
+        to: input.email,
+        kind: input.kind,
+        toolId: input.toolId,
+        error: out.error,
+      })
+    }
+    return out
   }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (supabaseUrl && serviceRoleKey) {
-    return sendToolAccessNotifyViaEdgeFunction({
+    const out = await sendToolAccessNotifyViaEdgeFunction({
       supabaseUrl,
       serviceRoleKey,
       appPublicUrl: input.appPublicUrl,
@@ -216,11 +299,22 @@ export async function notifyUserOfToolAccess(
       kind: input.kind,
       role: input.role,
     })
+    if (!out.ok) {
+      console.warn(LOG_PREFIX, 'Edge function tool-access-notify failed', {
+        to: input.email,
+        kind: input.kind,
+        toolId: input.toolId,
+        error: out.error,
+      })
+    }
+    return out
   }
 
+  const missing =
+    'Manca la configurazione email: imposta RESEND_API_KEY e FROM_EMAIL sul server Next.js, oppure effettua il deploy della funzione tool-access-notify su Supabase con gli stessi secret.'
+  console.warn(LOG_PREFIX, 'Missing email configuration', { to: input.email, kind: input.kind })
   return {
     ok: false,
-    error:
-      'Manca la configurazione email: imposta RESEND_API_KEY e FROM_EMAIL sul server Next.js, oppure effettua il deploy della funzione tool-access-notify su Supabase con gli stessi secret.',
+    error: missing,
   }
 }

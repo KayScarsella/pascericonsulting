@@ -35,22 +35,34 @@ export const getToolAccess = cache(async (toolId: string) => {
     redirect("/onboarding")
   }
 
-  // 2. Verifica Ruolo nel DB
+  // 2. Verifica ruolo e stato tool (inactive => solo admin sulle route)
   const { data: access, error } = await supabase
     .from("tool_access")
-    .select("role")
+    .select(`
+      role,
+      tools!inner (
+        is_active
+      )
+    `)
     .eq("user_id", user.id)
     .eq("tool_id", toolId)
     .single()
 
   if (error || !access) {
-    // Nessun accesso trovato -> Via alla dashboard
+    redirect("/landingPage")
+  }
+
+  const tool = access.tools as { is_active: boolean | null } | null
+  const isToolActive = tool?.is_active === true
+  const role = access.role as ToolRole
+
+  if (!isToolActive && role !== "admin") {
     redirect("/landingPage")
   }
 
   return {
-    role: access.role as ToolRole, // 'admin' | 'premium' | 'standard'
-    userId: user.id
+    role,
+    userId: user.id,
   }
 })
 

@@ -65,7 +65,10 @@ export async function updateSession(request: NextRequest) {
       "/auth/callback",
       "/auth/recovery-callback",
       "/auth/auth-code-error",
+      "/auth/invito-non-valido",
+      "/auth/recupero-non-valido",
       "/auth/forgot-password",
+      "/onboarding",
       "/login",
     ];
     const isAllowedPath = allowedWhenResetPending.some(

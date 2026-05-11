@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { Loader2 } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
+import { AuthBrandedShell } from '@/components/auth/AuthBrandedShell'
+import { Card, CardContent } from '@/components/ui/card'
 
 export default function AuthCallbackPage() {
   const router = useRouter()
@@ -11,10 +14,12 @@ export default function AuthCallbackPage() {
 
   useEffect(() => {
     async function completeAuth() {
-      async function failAndResetSession(fallbackMessage: string) {
+      async function failAndResetSession(fallbackMessage: string, errReason: 'invite' | 'recovery' = 'invite') {
         setMessage(fallbackMessage)
         await supabase.auth.signOut()
-        router.replace('/auth/auth-code-error')
+        const target =
+          errReason === 'recovery' ? '/auth/recupero-non-valido' : '/auth/invito-non-valido'
+        router.replace(target)
       }
 
       const url = new URL(window.location.href)
@@ -31,7 +36,7 @@ export default function AuthCallbackPage() {
         const text = authErrorDescription
           ? decodeURIComponent(authErrorDescription.replace(/\+/g, ' '))
           : 'Link non valido o scaduto. Richiedi una nuova email.'
-        await failAndResetSession(text)
+        await failAndResetSession(text, recoveryType === 'recovery' ? 'recovery' : 'invite')
         return
       }
 
@@ -50,7 +55,7 @@ export default function AuthCallbackPage() {
           token_hash: tokenHash,
         })
         if (error) {
-          await failAndResetSession('Link non valido o scaduto. Richiedi una nuova email.')
+          await failAndResetSession('Link non valido o scaduto. Richiedi una nuova email.', 'recovery')
           return
         }
         router.replace(nextPath)
@@ -84,10 +89,13 @@ export default function AuthCallbackPage() {
   }, [router, supabase])
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
-      <div className="rounded-md border bg-white px-6 py-4 text-sm text-slate-700 shadow-sm">
-        {message}
-      </div>
-    </div>
+    <AuthBrandedShell>
+      <Card className="w-full max-w-md border-slate-200/80 shadow-lg">
+        <CardContent className="flex items-center justify-center gap-3 py-12 text-sm text-slate-600">
+          <Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden />
+          {message}
+        </CardContent>
+      </Card>
+    </AuthBrandedShell>
   )
 }

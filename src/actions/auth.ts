@@ -5,6 +5,9 @@ import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 import { siteUrlForAuth } from "@/lib/site-url-for-auth"
+import { resolveAuthUserIdByEmail } from "@/lib/resolve-auth-user-by-email"
+import type { Database } from "@/types/supabase"
+import type { SupabaseClient } from "@supabase/supabase-js"
 import { createServiceRoleClient } from "@/utils/supabase/admin"
 
 // ... (tua funzione createSupabaseServerClient esistente va bene) ...
@@ -37,6 +40,25 @@ function isSamePasswordUpdateError(message: string): boolean {
     m.includes("same as your current password") ||
     m.includes("same as the current password")
   )
+}
+
+const PASSWORD_RESET_SUCCESS_HINT =
+  "Se l'operazione e' consentita per questo account, riceverai un'email con un link per impostare una nuova password."
+
+async function isEmailEligibleForPasswordReset(
+  adminClient: SupabaseClient<Database>,
+  normalizedEmail: string
+): Promise<boolean> {
+  const resolved = await resolveAuthUserIdByEmail(adminClient, normalizedEmail)
+  if ("error" in resolved) return false
+
+  const { data: profile } = await adminClient
+    .from("profiles")
+    .select("onboarding_completed")
+    .eq("id", resolved.userId)
+    .maybeSingle()
+
+  return Boolean((profile as { onboarding_completed?: boolean } | null)?.onboarding_completed)
 }
 
 async function setMustResetPasswordByEmail(email: string, mustReset: boolean) {
@@ -121,8 +143,24 @@ export async function requestPasswordResetAction(formData: FormData) {
     return { error: "Configura NEXT_PUBLIC_SITE_URL per abilitare il recupero password." }
   }
 
-  const supabase = await createSupabaseServerClient()
+  let adminClient: SupabaseClient<Database>
+  try {
+    adminClient = createServiceRoleClient()
+  } catch {
+    return {
+      error:
+        "Recupero password non attivo sul server: aggiungi SUPABASE_SERVICE_ROLE_KEY alle variabili d'ambiente.",
+    }
+  }
+
+  const eligible = await isEmailEligibleForPasswordReset(adminClient, email)
+  if (!eligible) {
+    return { success: true, message: PASSWORD_RESET_SUCCESS_HINT }
+  }
+
   await setMustResetPasswordByEmail(email, true)
+
+  const supabase = await createSupabaseServerClient()
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
     // Dedicated route so PKCE `code` flow always continues to reset-password (not onboarding).
     redirectTo: `${site}/auth/recovery-callback`,
@@ -135,7 +173,7 @@ export async function requestPasswordResetAction(formData: FormData) {
 
   return {
     success: true,
-    message: "Se l'email e' registrata, riceverai un link per impostare una nuova password.",
+    message: PASSWORD_RESET_SUCCESS_HINT,
   }
 }
 
@@ -199,6 +237,7 @@ export async function completeOnboardingAction(formData: FormData) {
       id: user.id,
       full_name: fullName,
       email: user.email ?? null,
+      must_reset_password: false,
       onboarding_completed: true,
       onboarding_completed_at: new Date().toISOString(),
       username: username || null,
@@ -222,6 +261,78 @@ export async function completeOnboardingAction(formData: FormData) {
   }
 
   redirect("/landingPage")
+}
+
+export type PasswordResetSessionStatus =
+  | "ok"
+  | "not_eligible_pending"
+  | "no_session"
+  | "not_reset_flow"
+
+/**
+ * Verifica se la sessione corrente puo' usare il form /auth/reset-password (recovery post-onboarding).
+ */
+export async function getPasswordResetSessionContext(): Promise<{
+  status: PasswordResetSessionStatus
+}> {
+  const supabase = await createSupabaseServerClient()
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser()
+
+  if (userError || !user) {
+    return { status: "no_session" }
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("must_reset_password, onboarding_completed")
+    .eq("id", user.id)
+    .maybeSingle()
+
+  if (!profile?.must_reset_password) {
+    return { status: "not_reset_flow" }
+  }
+
+  if (!(profile as { onboarding_completed?: boolean }).onboarding_completed) {
+    return { status: "not_eligible_pending" }
+  }
+
+  return { status: "ok" }
+}
+
+/** Chiude sessione recovery incoerente (pending onboarding) e azzera must_reset_password se possibile. */
+export async function abortPendingUserRecoverySessionAction() {
+  const supabase = await createSupabaseServerClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) {
+    await supabase.auth.signOut()
+    return
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("must_reset_password, onboarding_completed")
+    .eq("id", user.id)
+    .maybeSingle()
+
+  if (
+    profile?.must_reset_password &&
+    !(profile as { onboarding_completed?: boolean }).onboarding_completed
+  ) {
+    await supabase
+      .from("profiles")
+      .update({
+        must_reset_password: false,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", user.id)
+  }
+
+  await supabase.auth.signOut()
 }
 
 export async function completePasswordResetAction(formData: FormData) {
@@ -248,7 +359,7 @@ export async function completePasswordResetAction(formData: FormData) {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("must_reset_password")
+    .select("must_reset_password, onboarding_completed")
     .eq("id", user.id)
     .maybeSingle()
 
@@ -256,6 +367,24 @@ export async function completePasswordResetAction(formData: FormData) {
     await supabase.auth.signOut()
     return {
       error: "Questa sessione di reset non e' valida. Richiedi un nuovo link di recupero password.",
+    }
+  }
+
+  const onboardingDone = Boolean(
+    (profile as { onboarding_completed?: boolean }).onboarding_completed
+  )
+  if (!onboardingDone) {
+    await supabase
+      .from("profiles")
+      .update({
+        must_reset_password: false,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", user.id)
+    await supabase.auth.signOut()
+    return {
+      error:
+        "Il recupero password non e' disponibile finche' non completi la registrazione con il link di invito. Chiedi un nuovo invito all'amministratore del tool.",
     }
   }
 

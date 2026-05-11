@@ -14,6 +14,10 @@ Questo file serve a rendere le prossime domande “complete” e sempre contestu
 - **UI library (shadcn)**: `src/components/ui/**`
 - **Area Documenti**: `src/actions/documents.ts` + tabella `documents` + bucket `documents`
 
+## Sicurezza Auth / Supabase (operatore)
+- Dashboard progetto: abilitare **Leaked password protection** (Auth → password security).
+- Durata link email invito/recupero: **Email OTP expiration** (Auth → Email); allineare al copy in `src/lib/constants.ts` (`AUTH_EMAIL_OTP_EXPIRATION_HINT`).
+
 ## Indice tecnico completo
 Vedi `PROJECT_INDEX.md`.
 

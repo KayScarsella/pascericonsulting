@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -37,7 +37,12 @@ import {
   updateCountriesBulk,
 } from '@/actions/master-data'
 import { updateProfileAdmin } from '@/actions/profiles-admin'
-import { inviteUserToToolAction } from '@/actions/invite'
+import {
+  inviteUserToToolAction,
+  resendPendingOnboardingInviteAction,
+  resendPendingOnboardingInvitesBulkAction,
+  type InviteUserToToolResult,
+} from '@/actions/invite'
 import {
   createNotification,
   updateNotification,
@@ -54,7 +59,9 @@ import {
 import type { ToolUserRow } from '@/actions/users'
 import type { Database } from '@/types/supabase'
 import { toast } from 'sonner'
-import { Edit, Plus, Trash2, Loader2 } from 'lucide-react'
+import { Edit, Plus, Trash2, Loader2, AlertCircle, Mail } from 'lucide-react'
+import { AUTH_EMAIL_OTP_EXPIRATION_HINT, PENDING_INVITE_BULK_RESEND_MAX } from '@/lib/constants'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 
 type SpeciesRow = Database['public']['Tables']['species']['Row']
 type CountryRow = Database['public']['Tables']['country']['Row']
@@ -222,6 +229,7 @@ export function MasterSectionClient({
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([])
   const [bulkUserRole, setBulkUserRole] = useState<'standard' | 'premium' | 'admin'>('standard')
   const [bulkUsersLoading, setBulkUsersLoading] = useState(false)
+  const [bulkResendLoading, setBulkResendLoading] = useState(false)
   const [selectedSpeciesIds, setSelectedSpeciesIds] = useState<string[]>([])
   const [bulkSpeciesCites, setBulkSpeciesCites] = useState<string>('0')
   const [bulkSpeciesMode, setBulkSpeciesMode] = useState<'set' | 'clear'>('set')
@@ -236,9 +244,66 @@ export function MasterSectionClient({
   const [bulkBoolValue, setBulkBoolValue] = useState<'true' | 'false'>('false')
   const [bulkCorruptionCode, setBulkCorruptionCode] = useState<'AA' | 'MA' | 'MB' | 'MM' | 'TT'>('MM')
   const [bulkLoading, setBulkLoading] = useState(false)
+  const [emailDeliveryBanner, setEmailDeliveryBanner] = useState<string | null>(null)
+
+  useEffect(() => {
+    const key = `pasceri_invite_warn:${toolId}`
+    queueMicrotask(() => {
+      if (section !== 'users') {
+        setEmailDeliveryBanner(null)
+        return
+      }
+      try {
+        const w = sessionStorage.getItem(key)
+        if (w) setEmailDeliveryBanner(w)
+      } catch {
+        // sessionStorage unavailable (e.g. private mode) — banner only from in-session toast
+      }
+    })
+  }, [section, toolId])
 
   if (section === 'users') {
+    const inviteWarnStorageKey = `pasceri_invite_warn:${toolId}`
+
+    const notifyInviteEmailOutcome = (res: InviteUserToToolResult): boolean => {
+      if (!res.success) {
+        toast.error(res.error ?? 'Operazione non riuscita')
+        return false
+      }
+      if (res.warning) {
+        try {
+          sessionStorage.setItem(inviteWarnStorageKey, res.warning)
+        } catch {
+          // noop
+        }
+        setEmailDeliveryBanner(res.warning)
+      }
+      const delivery = res.inviteEmailDelivery
+      if (delivery === 'pending_email_failed' || delivery === 'pending_email_missing_env') {
+        toast.warning(res.message ?? 'Invio email incompleto', res.warning ? { description: res.warning } : undefined)
+        return true
+      }
+      const m = res.message ?? ''
+      let description: string | undefined
+      if (delivery === 'pending_emailed') {
+        description =
+          'L’utente dovrebbe ricevere una nuova email con il link di invito (controllare anche spam).'
+      } else if (delivery === 'supabase_invite_sent') {
+        description =
+          'Supabase invia l’email di invito per i nuovi account; per utenti già registrati senza onboarding il link può arrivare via Resend se configurato.'
+      } else if (!res.warning && (m === 'Invito inviato.' || m.startsWith('Tool assegnato'))) {
+        description =
+          'Per i nuovi inviti Supabase invia l’email; per utenti già registrati senza onboarding il link può arrivare da Resend (vedi avviso in pagina se presente).'
+      }
+      toast.success(m || 'Operazione completata.', description ? { description } : undefined)
+      return true
+    }
+
     const data = usersData ?? []
+    const isUserOnboardingPending = (row: ToolUserRow) => {
+      const p = row.profiles as (ProfileRow & { onboarding_completed?: boolean }) | null
+      return !Boolean(p?.onboarding_completed)
+    }
     const handleRoleChange = async (
       userId: string,
       newRole: 'standard' | 'premium' | 'admin'
@@ -424,6 +489,15 @@ export function MasterSectionClient({
         },
       },
     ]
+    const dismissEmailDeliveryBanner = () => {
+      try {
+        sessionStorage.removeItem(inviteWarnStorageKey)
+      } catch {
+        // noop
+      }
+      setEmailDeliveryBanner(null)
+    }
+
     const handleInvite = async () => {
       const email = inviteEmail.trim()
       if (!email) {
@@ -433,27 +507,37 @@ export function MasterSectionClient({
       setInviteLoading(true)
       const res = await inviteUserToToolAction(toolId, email, inviteRole)
       setInviteLoading(false)
-      if (res.success) {
-        const msg = res.message ?? 'Operazione completata.'
-        const showEmailDescription =
-          msg === 'Invito inviato.' || msg === 'Email di accesso inviata e tool assegnato.'
-        const description = res.warning
-          ? res.warning
-          : showEmailDescription
-            ? 'L’utente riceverà un’email da Supabase per completare l’accesso.'
-            : undefined
-        toast.success(msg, description ? { description } : undefined)
+      if (notifyInviteEmailOutcome(res)) {
         setInviteOpen(false)
         setInviteEmail('')
         setInviteRole('standard')
         router.refresh()
-      } else {
-        toast.error(res.error ?? 'Invito non riuscito')
       }
     }
 
     return (
       <>
+        {emailDeliveryBanner ? (
+          <Alert
+            className="mb-4 border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-50"
+            variant="default"
+          >
+            <AlertCircle className="text-amber-700 dark:text-amber-400" />
+            <AlertTitle>Avviso sull’invio email</AlertTitle>
+            <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <span className="text-left text-sm leading-relaxed">{emailDeliveryBanner}</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0 border-amber-300 bg-white hover:bg-amber-100 dark:border-amber-700 dark:bg-transparent"
+                onClick={dismissEmailDeliveryBanner}
+              >
+                Ho capito
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : null}
         <div className="mb-4 flex justify-end gap-2">
           <Button
             type="button"
@@ -484,6 +568,11 @@ export function MasterSectionClient({
             <DialogHeader>
               <DialogTitle>Invita utente</DialogTitle>
             </DialogHeader>
+            <p className="text-xs leading-relaxed text-slate-600">
+              Se l&apos;utente dice che il link è scaduto: verifica l&apos;email, poi usa di nuovo
+              &quot;Invia invito&quot; (o il reinvio dalla tabella per chi è ancora in onboarding). Chi non
+              ha completato la registrazione non può usare il recupero password dal login.
+            </p>
             <div className="grid gap-4 py-2">
               <div className="grid gap-2">
                 <Label htmlFor="invite-email">Email</Label>
@@ -518,6 +607,7 @@ export function MasterSectionClient({
                 server e <code className="rounded bg-slate-100 px-1">NEXT_PUBLIC_SITE_URL</code> con
                 l’URL dell’app (non *.supabase.co).
               </p>
+              <p className="text-xs text-slate-500 leading-relaxed">{AUTH_EMAIL_OTP_EXPIRATION_HINT}</p>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setInviteOpen(false)}>
@@ -555,6 +645,29 @@ export function MasterSectionClient({
           onSelectionChange={setSelectedUserIds}
           renderRowActions={(row) => (
             <div className="flex justify-end gap-1">
+              {isUserOnboardingPending(row) ? (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-slate-600 hover:bg-slate-100"
+                  onClick={async () => {
+                    setUpdating(`resend-${row.user_id}`)
+                    const res = await resendPendingOnboardingInviteAction(toolId, row.user_id)
+                    setUpdating(null)
+                    if (notifyInviteEmailOutcome(res)) {
+                      router.refresh()
+                    }
+                  }}
+                  disabled={updating === `resend-${row.user_id}`}
+                  title="Reinvia link onboarding"
+                >
+                  {updating === `resend-${row.user_id}` ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Mail className="h-4 w-4" />
+                  )}
+                </Button>
+              ) : null}
               <Button
                 variant="ghost"
                 size="icon"
@@ -620,6 +733,44 @@ export function MasterSectionClient({
             </Button>
             <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => setSelectionResetKey((k) => k + 1)}>
               Deseleziona
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="h-8"
+              disabled={
+                bulkResendLoading ||
+                selectedUserIds.every((id) => {
+                  const row = data.find((r) => r.user_id === id)
+                  return !row || !isUserOnboardingPending(row)
+                })
+              }
+              title={`Reinvia link onboarding (max ${PENDING_INVITE_BULK_RESEND_MAX} per volta)`}
+              onClick={async () => {
+                const pendingIds = selectedUserIds.filter((id) => {
+                  const row = data.find((r) => r.user_id === id)
+                  return row && isUserOnboardingPending(row)
+                })
+                if (pendingIds.length === 0) return
+                setBulkResendLoading(true)
+                const res = await resendPendingOnboardingInvitesBulkAction(toolId, pendingIds)
+                setBulkResendLoading(false)
+                if (res.succeeded > 0) {
+                  toast.success(`Reinvio: ${res.succeeded}/${res.processed} completati.`)
+                }
+                if (res.failed > 0) {
+                  toast.error(res.error ?? 'Alcuni reinvii non sono riusciti.', {
+                    description: res.errors.slice(0, 8).join('\n'),
+                  })
+                }
+                if (res.succeeded > 0) {
+                  setSelectionResetKey((k) => k + 1)
+                  router.refresh()
+                }
+              }}
+            >
+              {bulkResendLoading ? 'Reinvio…' : 'Reinvia link (pending)'}
             </Button>
           </div>
         )}

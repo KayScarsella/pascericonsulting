@@ -54,6 +54,10 @@ export async function GET(request: Request) {
     await supabase.auth.signOut()
   }
 
-  // return the user to an error page with instructions
-  return NextResponse.redirect(`${origin}/auth/auth-code-error`)
+  const failPath =
+    next.includes('reset-password') || next.includes('recovery')
+      ? '/auth/recupero-non-valido'
+      : '/auth/invito-non-valido'
+
+  return NextResponse.redirect(`${origin}${failPath}`)
 }

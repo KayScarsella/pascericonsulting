@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { loginAction } from '@/actions/auth'
+import { AuthBrandedShell } from '@/components/auth/AuthBrandedShell'
 
 export default function LoginPage() {
   // const router = useRouter() // Non serve più
@@ -33,9 +34,8 @@ export default function LoginPage() {
   }
 
   return (
-    // ... il resto del tuo JSX rimane identico ...
-    <div className="flex h-screen w-full items-center justify-center bg-slate-50">
-      <Card className="w-full max-w-sm">
+    <AuthBrandedShell>
+      <Card className="w-full max-w-sm border-slate-200/80 shadow-lg">
         <CardHeader>
           <CardTitle className="text-2xl">Accedi</CardTitle>
           <CardDescription>Inserisci le tue credenziali per entrare.</CardDescription>
@@ -69,6 +69,6 @@ export default function LoginPage() {
             </p>
         </CardFooter>
       </Card>
-    </div>
+    </AuthBrandedShell>
   )
 }
