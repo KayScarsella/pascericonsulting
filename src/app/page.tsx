@@ -1,7 +1,8 @@
 import { createClient } from "@/utils/supabase/server";
 import { Button } from "@/components/ui/button";
+import { ArchiveBackButton } from "@/components/auth/ArchiveBackButton";
 import Link from "next/link";
-import { redirect } from "next/navigation"; // 1. Importiamo redirect
+import { redirect } from "next/navigation";
 
 export default async function Home() {
   // Creiamo il client
@@ -18,7 +19,10 @@ export default async function Home() {
   // 3. SE SIAMO QUI, L'UTENTE NON È LOGGATO
   // Mostriamo solo la schermata di benvenuto con Login/Registrati
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-24 gap-8">
+    <div className="relative flex min-h-screen flex-col items-center justify-center p-24 gap-8">
+      <div className="absolute right-4 top-4 z-10 sm:right-6 sm:top-6">
+        <ArchiveBackButton />
+      </div>
       <div className="text-center space-y-2">
         <h1 className="text-4xl font-bold">Pasceri Consulting</h1>
         <p className="text-muted-foreground">Portale Gestionale</p>

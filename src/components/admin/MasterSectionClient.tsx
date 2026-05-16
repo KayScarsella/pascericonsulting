@@ -59,7 +59,9 @@ import {
 import type { ToolUserRow } from '@/actions/users'
 import type { Database } from '@/types/supabase'
 import { toast } from 'sonner'
-import { Edit, Plus, Trash2, Loader2, AlertCircle, Mail } from 'lucide-react'
+import { Edit, Eye, Plus, Trash2, Loader2, AlertCircle, Mail } from 'lucide-react'
+import { NotificationDetailDialog } from '@/components/notifications/NotificationDetailDialog'
+import type { NotificationDisplayItem } from '@/components/notifications/notification-types'
 import { AUTH_EMAIL_OTP_EXPIRATION_HINT, PENDING_INVITE_BULK_RESEND_MAX } from '@/lib/constants'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 
@@ -203,6 +205,8 @@ export function MasterSectionClient({
   const [notifMessage, setNotifMessage] = useState('')
   const [notifExpiresAt, setNotifExpiresAt] = useState('')
   const [notifActive, setNotifActive] = useState(true)
+  const [viewingNotif, setViewingNotif] = useState<NotificationDisplayItem | null>(null)
+  const [viewNotifOpen, setViewNotifOpen] = useState(false)
 
   // profiles form state (admin, used from users section)
   const [profileId, setProfileId] = useState<string | null>(null)
@@ -1170,6 +1174,16 @@ export function MasterSectionClient({
       resetNotifForm()
       setDialogOpen(true)
     }
+    const openViewNotif = (row: NotificationRow) => {
+      setViewingNotif({
+        id: row.id,
+        title: row.title,
+        message: row.message,
+        created_at: row.created_at,
+        expires_at: row.expires_at,
+      })
+      setViewNotifOpen(true)
+    }
     const openEditNotif = (row: NotificationRow) => {
       setEditingId(row.id)
       setNotifTitle(row.title ?? '')
@@ -1231,9 +1245,14 @@ export function MasterSectionClient({
         id: 'message',
         header: 'Messaggio',
         render: (row) => (
-          <span className="text-slate-600 line-clamp-2 max-w-[280px]">
+          <button
+            type="button"
+            onClick={() => openViewNotif(row)}
+            className="max-w-[280px] text-left text-slate-600 line-clamp-2 hover:text-amber-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 rounded-sm"
+            title="Apri messaggio completo"
+          >
             {row.message ?? '—'}
-          </span>
+          </button>
         ),
       },
       {
@@ -1382,6 +1401,15 @@ export function MasterSectionClient({
                 variant="ghost"
                 size="icon"
                 className="text-slate-600 hover:bg-slate-100"
+                onClick={() => openViewNotif(row)}
+                title="Visualizza"
+              >
+                <Eye className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-slate-600 hover:bg-slate-100"
                 onClick={() => openEditNotif(row)}
                 title="Modifica"
               >
@@ -1450,6 +1478,14 @@ export function MasterSectionClient({
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        <NotificationDetailDialog
+          notification={viewingNotif}
+          open={viewNotifOpen}
+          onOpenChange={(open) => {
+            setViewNotifOpen(open)
+            if (!open) setViewingNotif(null)
+          }}
+        />
       </div>
     )
   }

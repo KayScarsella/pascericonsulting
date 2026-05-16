@@ -1,4 +1,8 @@
 // src/lib/constants.ts
+
+/** Archivio analisi WordPress (selezione prodotto EUDR / Timber Regulation). */
+export const WP_ANALYSIS_ARCHIVE_URL = "https://www.pascericonsulting.it/wp-content/";
+
 export const TIMBER_TOOL_ID = "e963a607-477c-4afe-bf43-7c9f512771e9";
 export const EUDR_TOOL_ID = "69d3d115-acc1-49f3-8d39-a003df7145be";
 export const CLOUD_FSC_TOOL_ID = "50cd9969-0300-4d41-b807-1a88088d07e1";
