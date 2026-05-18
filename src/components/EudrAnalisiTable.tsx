@@ -12,6 +12,8 @@ import { FileArchive, Edit } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { finalOutcomeIsNegative } from "@/lib/final-outcome"
 import { deleteRecords } from "@/actions/actions"
+import { EUDR_TOOL_ID } from "@/lib/constants"
+import { EditableSessionName } from "@/components/sessions/EditableSessionName"
 
 export type EudrSessionMetadata = {
   nome_operazione?: string
@@ -110,9 +112,12 @@ export function EudrAnalisiTable({ data, page, totalPages, isAdmin }: EudrAnalis
       render: (row) => {
         const meta = row.metadata || {}
         return (
-          <span className="font-medium text-slate-900">
-            {meta.nome_operazione || meta.operation_name || "Operazione senza nome"}
-          </span>
+          <EditableSessionName
+            toolId={EUDR_TOOL_ID}
+            sessionId={row.id}
+            field="nome_operazione"
+            value={meta.nome_operazione || meta.operation_name}
+          />
         )
       },
     },

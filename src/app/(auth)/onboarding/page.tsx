@@ -130,6 +130,11 @@ export default function OnboardingPage() {
               </div>
             </details>
 
+            <p className="border-t border-slate-100 pt-4 text-xs leading-relaxed text-slate-500">
+              Riservatezza: Le informazioni contenute in questo modulo sono confidenziali ai sensi del
+              Regolamento (UE) 2016/679 (GDPR). La divulgazione non autorizzata è vietata.
+            </p>
+
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? 'Salvataggio...' : 'Conferma e continua'}
             </Button>

@@ -20,6 +20,9 @@ import {
   type DdLastRunSnapshot,
 } from "@/features/eudr-due-diligence/aoiRiskGate"
 import type { RiskCalculationResult } from "@/lib/eudr-risk-calculator"
+import { computeEudrDdsOutcome } from "@/lib/eudr-dds-inputs"
+import { getEudrDdsDisplayLabel } from "@/lib/eudr-dds-determination"
+import type { EudrDdsType } from "@/types/session"
 import { RiskBarChart } from "@/components/RiskBarChart"
 import { MitigationHistorySection } from "@/components/MitigationHistorySection"
 import { ExportAnalysisPdfButton, PDF_DISCLAIMERS } from "@/components/ExportAnalysisPdfButton"
@@ -176,6 +179,16 @@ export default async function EudrRisultatoPage({
     : ddLastRun
   result = applyAoiGateToEudrRiskResult(result, ddLastRunNormalized)
 
+  const ddsOutcome = await computeEudrDdsOutcome(
+    supabase,
+    sessionId,
+    session.parent_session_id,
+    result,
+    ddLastRunNormalized
+  )
+  const displayOutcomeDescription = ddsOutcome.outcomeDescription
+  const ddsType: EudrDdsType = ddsOutcome.ddsType
+
   if (session.status !== "completed" || !session.final_outcome) {
     const updatePayload: Record<string, unknown> = {
       status: "completed",
@@ -192,6 +205,12 @@ export default async function EudrRisultatoPage({
         })),
         completed_at: new Date().toISOString(),
         expiry_date: result.expiryDate,
+        dds_type: ddsType,
+        dds_determined_at: new Date().toISOString(),
+        dds_non_eu_companies: ddsOutcome.ddsInputs.nonEuCompanyCount,
+        dds_country_count: ddsOutcome.ddsInputs.countryCount,
+        dds_country_risks: ddsOutcome.ddsInputs.countryRiskCodes,
+        outcome_description: displayOutcomeDescription,
         ...(ddLastRunNormalized?.triggers_non_accettabile
           ? {
               aoi_gate_triggered: true,
@@ -599,8 +618,19 @@ export default async function EudrRisultatoPage({
             <h1 className="text-2xl md:text-3xl font-bold text-slate-900 tracking-tight">
               {isAccettabile ? "Rischio Trascurabile" : "Rischio Non Trascurabile"}
             </h1>
-            <p className="mt-2 text-slate-600 text-sm leading-relaxed max-w-2xl">
-              {result.outcomeDescription}
+            <p className="mt-2 text-slate-600 text-sm leading-relaxed max-w-2xl whitespace-pre-line">
+              {displayOutcomeDescription}
+            </p>
+            <p className="mt-3">
+              <span
+                className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-semibold ${
+                  ddsType === "semplificata"
+                    ? "border-[#4a7c2e]/30 bg-[#4a7c2e]/10 text-[#2d5016]"
+                    : "border-slate-300 bg-slate-100 text-slate-700"
+                }`}
+              >
+                {getEudrDdsDisplayLabel(ddsType)}
+              </span>
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
               <div>
@@ -647,7 +677,8 @@ export default async function EudrRisultatoPage({
           userProfile={userProfile}
           disclaimerText={PDF_DISCLAIMERS.EUDR}
           outcome={result.outcome}
-          outcomeDescription={result.outcomeDescription}
+          outcomeDescription={displayOutcomeDescription}
+          ddsType={ddsType}
           specieName={specieName}
           countryName={countryName}
           countryHasConflicts={!!countryHasConflicts}

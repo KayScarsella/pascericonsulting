@@ -15,6 +15,7 @@ import {
   applyAoiGateToEudrRiskResult,
   type DdLastRunSnapshot,
 } from "@/features/eudr-due-diligence/aoiRiskGate"
+import { computeEudrDdsOutcome } from "@/lib/eudr-dds-inputs"
 import { validateSessionAccess } from "@/actions/questions"
 import { completeSessionAsExempt, upsertUserResponses } from "@/actions/workflows/shared"
 import {
@@ -394,6 +395,14 @@ export async function finalizeEudrAnalisi(sessionId: string): Promise<{ redirect
     const ddLastRun = oldMeta.dd_last_run as DdLastRunSnapshot | undefined
     riskResult = applyAoiGateToEudrRiskResult(riskResult, ddLastRun)
 
+    const ddsOutcome = await computeEudrDdsOutcome(
+      supabase,
+      sessionId,
+      sessionRow.parent_session_id,
+      riskResult,
+      ddLastRun
+    )
+
     const updatedMeta: Record<string, unknown> = {
       ...oldMeta,
       risk_score: riskResult.overallRisk,
@@ -403,6 +412,12 @@ export async function finalizeEudrAnalisi(sessionId: string): Promise<{ redirect
       })),
       expiry_date: riskResult.expiryDate || undefined,
       completed_at: new Date().toISOString(),
+      dds_type: ddsOutcome.ddsType,
+      dds_determined_at: new Date().toISOString(),
+      dds_non_eu_companies: ddsOutcome.ddsInputs.nonEuCompanyCount,
+      dds_country_count: ddsOutcome.ddsInputs.countryCount,
+      dds_country_risks: ddsOutcome.ddsInputs.countryRiskCodes,
+      outcome_description: ddsOutcome.outcomeDescription,
       ...(ddLastRun?.triggers_non_accettabile
         ? {
             aoi_gate_triggered: true,

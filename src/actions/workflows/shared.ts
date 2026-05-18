@@ -41,6 +41,21 @@ export function extractNomeCommerciale(
   return (extractedName && extractedName.trim()) || fallback
 }
 
+/** Apply workflow nome fields without overwriting user-edited names. */
+export function mergeNomeMetadata(
+  meta: SessionMetadata,
+  patch: { nome_commerciale?: string; nome_operazione?: string }
+): SessionMetadata {
+  const next: SessionMetadata = { ...meta }
+  if (patch.nome_commerciale !== undefined && !meta.nome_commerciale_manual) {
+    next.nome_commerciale = patch.nome_commerciale
+  }
+  if (patch.nome_operazione !== undefined && !meta.nome_operazione_manual) {
+    next.nome_operazione = patch.nome_operazione
+  }
+  return next
+}
+
 /** Upsert user_responses; no-op if empty. Throws with prefix user_responses: on failure. */
 export async function upsertUserResponses(
   supabase: SupabaseClient<Database>,

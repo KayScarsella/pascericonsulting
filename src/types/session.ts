@@ -1,11 +1,15 @@
 // types/session.ts
 
+export type EudrDdsType = 'semplificata' | 'standard'
+
 export type SessionMetadata = {
     // ── DATI COMUNI ──
     nome_operazione?: string;
+    nome_operazione_manual?: boolean;
     
     // ── SPECIFICI PER "VERIFICA" (Sessione Base) ──
     nome_commerciale?: string;
+    nome_commerciale_manual?: boolean;
     is_blocked?: boolean;       // True se un'eccezione (es. no EU) ha interrotto l'analisi
     block_reason?: string;      // Il messaggio dell'eccezione
     block_variant?: 'success' | 'warning' | 'error';
@@ -26,4 +30,8 @@ export type SessionMetadata = {
     eudr_prefill_source_parent_session_id?: string;
     eudr_prefill_rows_written?: number;
     eudr_prefill_reason?: string;
+
+    // ── EUDR DDS (analisi finale) ──
+    dds_type?: EudrDdsType;
+    dds_determined_at?: string;
 }

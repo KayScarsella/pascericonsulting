@@ -12,7 +12,12 @@ import {
 } from '@/lib/eudr-question-ids'
 import { validateSessionAccess } from '@/actions/questions'
 import { TablesInsert, Json, Database } from '@/types/supabase'
-import { completeSessionAsExempt, extractNomeCommerciale, upsertUserResponses } from '@/actions/workflows/shared'
+import {
+  completeSessionAsExempt,
+  extractNomeCommerciale,
+  mergeNomeMetadata,
+  upsertUserResponses,
+} from '@/actions/workflows/shared'
 import { materializeEudrFinalPrefillForParent } from '@/actions/workflows/eudr-prefill'
 
 type ValutazioneException = { isBlocked: boolean; blockReason: string; blockVariant: 'success' | 'warning' | 'error' }
@@ -124,9 +129,18 @@ export async function processEudrValutazione(
     const nomeCommerciale = extractNomeCommerciale(responses, NOME_COMMERCIALE_ID)
 
     if (exceptionData?.isBlocked && exceptionData.blockVariant === 'success') {
+      const { data: exemptRoot } = await supabase
+        .from('assessment_sessions')
+        .select('metadata')
+        .eq('id', sessionId)
+        .single()
+      const previousExemptMeta = (exemptRoot?.metadata as SessionMetadata | null) ?? {}
+
       const metadata: SessionMetadata = {
-        nome_commerciale: nomeCommerciale,
-        nome_operazione: nomeCommerciale,
+        ...mergeNomeMetadata(previousExemptMeta, {
+          nome_commerciale: nomeCommerciale,
+          nome_operazione: nomeCommerciale,
+        }),
         is_blocked: true,
         block_reason: exceptionData.blockReason,
         block_variant: 'success',
@@ -315,9 +329,10 @@ export async function processEudrValutazione(
     const previousMeta = (rootSession?.metadata as SessionMetadata | null) ?? {}
 
     const finalMetadata: SessionMetadata = {
-      ...previousMeta,
-      nome_commerciale: nomeCommerciale,
-      nome_operazione: nomeCommerciale,
+      ...mergeNomeMetadata(previousMeta, {
+        nome_commerciale: nomeCommerciale,
+        nome_operazione: nomeCommerciale,
+      }),
       is_blocked: false,
       step2_saved_at: new Date().toISOString(),
       resume_step: currentPairs.length > 0 ? "valutazione-finale" : "evaluation",

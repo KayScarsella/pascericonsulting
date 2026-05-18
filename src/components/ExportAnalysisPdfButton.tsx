@@ -5,6 +5,11 @@ import { FileDown, Loader2 } from 'lucide-react'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import type { RiskDetail } from '@/lib/risk-calculator'
+import {
+  getEudrDdsPdfOutcomeLine,
+  stripEudrDdsAppendix,
+} from '@/lib/eudr-dds-determination'
+import type { EudrDdsType } from '@/types/session'
 
 const DISCLAIMER_EUTR =
   "Il rapporto è stato generato tramite il portale timber tutor di Pasceri Consulting. La responsabilità della valutazione della trascurabilità del rischio ricade esclusivamente sull'operatore EUTR che utilizza tale strumento informatico."
@@ -85,6 +90,8 @@ export interface ExportAnalysisPdfProps {
   sectionsForPdf: SectionForPdf[]
   sessionId: string
   baseEvaluationCode?: number | null
+  /** Tipo DDS EUDR (semplificata / standard) — stampato nel box esito e in tabella sintesi */
+  ddsType?: EudrDdsType
   /** Opzionale: screening AOI — grafico a barre con colori blu/rosso come in app */
   ddPdfPayload?: DdPdfPayload | null
 }
@@ -126,6 +133,7 @@ function buildPdf(
     sectionsForPdf,
     sessionId,
     baseEvaluationCode,
+    ddsType,
     ddPdfPayload,
   } = props
 
@@ -271,15 +279,20 @@ function buildPdf(
   // Esito in evidenza prima della sintesi analisi (dettaglio dentro il box verde/rosso)
   const nonAcceptableMessage =
     'Esito non trascurabile non è conforme alla normativa EUDR a causa di evidenza geospaziale di possibile deforestazione. Sono necessarie verifiche e/o mitigazione.'
-  const outcomeDetailLines = !isAccettabile
-    ? doc.splitTextToSize(nonAcceptableMessage, pageW - 2 * margin - 10)
-    : []
-  const acceptableDetailLines = isAccettabile
-    ? doc.splitTextToSize((outcomeDescription || '').trim() || '—', pageW - 2 * margin - 10)
+  const ddsOutcomeLine =
+    isEudrPdf && ddsType ? getEudrDdsPdfOutcomeLine(ddsType) : null
+  const outcomeTextWidth = pageW - 2 * margin - 10
+  const mainOutcomeText = isAccettabile
+    ? stripEudrDdsAppendix((outcomeDescription || '').trim()) || '—'
+    : nonAcceptableMessage
+  const mainOutcomeLines = doc.splitTextToSize(mainOutcomeText, outcomeTextWidth)
+  const ddsOutcomeLines = ddsOutcomeLine
+    ? doc.splitTextToSize(ddsOutcomeLine, outcomeTextWidth)
     : []
   const outcomeBoxH =
     16 +
-    (isAccettabile ? acceptableDetailLines.length : outcomeDetailLines.length) * 4.2
+    mainOutcomeLines.length * 4.2 +
+    (ddsOutcomeLines.length > 0 ? 4 + ddsOutcomeLines.length * 4.2 : 0)
   const outcomeColor: [number, number, number] = isAccettabile ? [74, 124, 46] : [185, 28, 28]
   const outcomeBg: [number, number, number] = isAccettabile ? [232, 245, 226] : [254, 242, 242]
   doc.setFillColor(outcomeBg[0], outcomeBg[1], outcomeBg[2])
@@ -294,13 +307,12 @@ function buildPdf(
   doc.setFontSize(9)
   doc.setFont('helvetica', 'normal')
   doc.text(`Indice massimo: ${overallRisk.toFixed(2)}`, margin + 6, y + 13)
-  if (isAccettabile) {
-    doc.setFontSize(8.5)
-    doc.setTextColor(outcomeColor[0], outcomeColor[1], outcomeColor[2])
-    doc.text(acceptableDetailLines, margin + 6, y + 17)
-  } else {
-    doc.setFontSize(8.5)
-    doc.text(outcomeDetailLines, margin + 6, y + 17)
+  doc.setFontSize(8.5)
+  doc.setTextColor(outcomeColor[0], outcomeColor[1], outcomeColor[2])
+  doc.text(mainOutcomeLines, margin + 6, y + 17)
+  if (ddsOutcomeLines.length > 0) {
+    const ddsY = y + 17 + mainOutcomeLines.length * 4.2 + 4
+    doc.text(ddsOutcomeLines, margin + 6, ddsY)
   }
   doc.setTextColor(0, 0, 0)
   y += outcomeBoxH + 6
@@ -317,6 +329,7 @@ function buildPdf(
       ['Scadenza', expiryDate ? new Date(expiryDate).toLocaleDateString('it-IT') : '—'],
       ['Rischio complessivo (MAX)', overallRisk.toFixed(2)],
       ['Esito', isAccettabile ? outcomeLabels.acceptable : outcomeLabels.unacceptable],
+      ...(ddsOutcomeLine ? [['Tipo DDS', ddsOutcomeLine] as [string, string]] : []),
     ],
     margin: { left: margin, right: margin },
     theme: 'grid',

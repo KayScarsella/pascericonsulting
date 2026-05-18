@@ -5,7 +5,12 @@ import { TIMBER_TOOL_ID } from '@/lib/constants'
 import { SessionMetadata } from '@/types/session'
 import { validateSessionAccess } from '@/actions/questions'
 import { TablesInsert, Json } from '@/types/supabase'
-import { completeSessionAsExempt, extractNomeCommerciale, upsertUserResponses } from '@/actions/workflows/shared'
+import {
+  completeSessionAsExempt,
+  extractNomeCommerciale,
+  mergeNomeMetadata,
+  upsertUserResponses,
+} from '@/actions/workflows/shared'
 import { isYesLikeAnswer } from '@/lib/eudr-question-ids'
 
 type ValutazioneException = { isBlocked: boolean; blockReason: string; blockVariant: 'success' | 'warning' | 'error' }
@@ -90,9 +95,10 @@ export async function processTimberValutazione(
       const previousMeta = (rootSession?.metadata as SessionMetadata | null) ?? {}
 
       const metadata: SessionMetadata = {
-        ...previousMeta,
-        nome_commerciale: nomeCommerciale,
-        nome_operazione: nomeCommerciale,
+        ...mergeNomeMetadata(previousMeta, {
+          nome_commerciale: nomeCommerciale,
+          nome_operazione: nomeCommerciale,
+        }),
         is_blocked: true,
         block_reason: effectiveExceptionData.blockReason,
         block_variant: 'success',
@@ -282,9 +288,10 @@ export async function processTimberValutazione(
     const previousMeta = (rootSession?.metadata as SessionMetadata | null) ?? {}
 
     const finalMetadata: SessionMetadata = {
-        ...previousMeta,
-        nome_commerciale: nomeCommerciale,
-        nome_operazione: nomeCommerciale,
+        ...mergeNomeMetadata(previousMeta, {
+          nome_commerciale: nomeCommerciale,
+          nome_operazione: nomeCommerciale,
+        }),
         is_blocked: false,
         step2_saved_at: new Date().toISOString(),
         // Manteniamo il resume sulla pagina Evaluation della verifica base.

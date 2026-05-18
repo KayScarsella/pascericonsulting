@@ -11,6 +11,17 @@ export const EUDR_Q_CITES = "6e0896e6-0be7-4286-bd7a-3fba6e34b83f"
 /** Repeater Specie–Paesi (Valutazione / configurazione analisi finali) */
 export const EUDR_SPEC_PAESE_GRID_QUESTION_ID = "03dd3221-ba2f-4c83-9148-8fd06f389b0a"
 
+/**
+ * Analisi Rischio — "Procedura di importazione da fuori UE" (valori 1–11 = n. società extra-UE).
+ * Impostare l'UUID reale da Supabase se noto; altrimenti si usa resolveEudrImportQuestionId.
+ */
+export const EUDR_Q_IMPORTAZIONE: string | null = null
+
+/**
+ * Ultima sezione Analisi Rischio — numero paesi (se presente come domanda dedicata).
+ */
+export const EUDR_Q_NUM_PAESE: string | null = null
+
 /** Sezione G — Valutazione Finale (affidabilità / FLEGT–CITES override UI) */
 export const EUDR_SECTION_G = "c4d9e2b7-8a61-4a3f-b72a-45157b0dfc3f"
 
@@ -56,6 +67,56 @@ export function isYesLikeAnswer(v: unknown): boolean {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[.!?,;:]+$/g, "")
   return s === "si" || s === "yes" || s === "y" || s === "true" || s === "1"
+}
+
+async function resolveEudrQuestionIdByText(
+  supabase: SupabaseClient<Database>,
+  pattern: string
+): Promise<string | null> {
+  const { data: row } = await supabase
+    .from('questions')
+    .select('id, section_id')
+    .ilike('text', pattern)
+    .limit(1)
+    .maybeSingle()
+  if (!row?.id) return null
+  const { data: sec } = await supabase
+    .from('sections')
+    .select('id')
+    .eq('id', row.section_id)
+    .eq('tool_id', EUDR_TOOL_ID)
+    .maybeSingle()
+  return sec?.id ? row.id : null
+}
+
+export async function resolveEudrImportQuestionId(
+  supabase: SupabaseClient<Database>
+): Promise<string | null> {
+  if (EUDR_Q_IMPORTAZIONE) {
+    const { data } = await supabase
+      .from('questions')
+      .select('id')
+      .eq('id', EUDR_Q_IMPORTAZIONE)
+      .maybeSingle()
+    if (data?.id) return data.id
+  }
+  return resolveEudrQuestionIdByText(supabase, '%importazione%fuori%UE%')
+}
+
+export async function resolveEudrNumPaesiQuestionId(
+  supabase: SupabaseClient<Database>
+): Promise<string | null> {
+  if (EUDR_Q_NUM_PAESE) {
+    const { data } = await supabase
+      .from('questions')
+      .select('id')
+      .eq('id', EUDR_Q_NUM_PAESE)
+      .maybeSingle()
+    if (data?.id) return data.id
+  }
+  const byNumero = await resolveEudrQuestionIdByText(supabase, '%numero%paes%')
+  if (byNumero) return byNumero
+  return resolveEudrQuestionIdByText(supabase, '%quanti%paes%')
 }
 
 export async function resolveEudrFaoQuestionId(
