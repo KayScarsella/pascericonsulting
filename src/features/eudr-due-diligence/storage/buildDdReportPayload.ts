@@ -20,6 +20,10 @@ export type DdReportPayload = Omit<ReturnType<typeof buildDdReplicatePayload>, '
   gate_triggers_non_accettabile: boolean
   gate_reasons: string[]
   advisory_notes: string[]
+  /** ISO timestamp of completed AOI run (recovery if metadata.dd_last_run is missing) */
+  completed_at?: string
+  /** Full gate snapshot for recovery from storage */
+  dd_last_run?: DdLastRunSnapshot
 }
 
 const METHODOLOGY_BULLETS = [
@@ -141,5 +145,7 @@ export function buildDdReportPayload(
     gate_triggers_non_accettabile: ddSnapshot.triggers_non_accettabile,
     gate_reasons: ddSnapshot.reasons || [],
     advisory_notes: ddSnapshot.advisory_notes || [],
+    completed_at: meta.completed_at || meta.created_at,
+    dd_last_run: ddSnapshot,
   }
 }

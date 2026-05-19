@@ -4,8 +4,12 @@ import { EUDR_TOOL_ID } from "@/lib/constants"
 import { createClient } from "@/utils/supabase/server"
 import { logRoutePerf } from "@/lib/perf-debug"
 import { scheduleEudrSessionFinalize } from "@/lib/eudr-risultato-sync"
-import { EudrRisultatoDeferred } from "@/components/eudr/EudrRisultatoDeferred"
-import { EudrRisultatoDeferredSkeleton } from "@/components/eudr/EudrRisultatoDeferredSkeleton"
+import {
+  EudrRisultatoMitigationDeferred,
+  EudrRisultatoPdfDeferred,
+  type EudrRisultatoDeferredProps,
+} from "@/components/eudr/EudrRisultatoDeferred"
+import { EudrRisultatoPdfSkeleton } from "@/components/eudr/EudrRisultatoDeferredSkeleton"
 import { ShieldAlert, ArrowLeft, CheckCircle, AlertTriangle, Shield } from "lucide-react"
 import Link from "next/link"
 
@@ -24,6 +28,11 @@ import { computeEudrDdsOutcome } from "@/lib/eudr-dds-inputs"
 import { getEudrDdsDisplayLabel } from "@/lib/eudr-dds-determination"
 import type { EudrDdsType } from "@/types/session"
 import { RiskBarChart } from "@/components/RiskBarChart"
+import { createEudrRisultatoDeferredLoader } from "@/lib/eudr-risultato-deferred-data"
+import {
+  persistDdLastRunBackfill,
+  resolveDdLastRun,
+} from "@/features/eudr-due-diligence/storage/loadDdLastRunFromStorage"
 
 export default async function EudrRisultatoPage({
   searchParams,
@@ -148,7 +157,16 @@ export default async function EudrRisultatoPage({
   const countryHasConflicts = countryResult?.data?.conflicts ?? false
 
   let result: RiskCalculationResult = calculateEudrRisk(answersMap)
-  const ddLastRun = metadata?.dd_last_run as DdLastRunSnapshot | undefined
+  const metadataDdLastRun = metadata?.dd_last_run as DdLastRunSnapshot | undefined
+  const ddLastRun = await resolveDdLastRun(
+    supabase,
+    session.user_id,
+    sessionId,
+    metadataDdLastRun
+  )
+  if (ddLastRun && !metadataDdLastRun?.run_id) {
+    await persistDdLastRunBackfill(supabase, sessionId, ddLastRun, metadata)
+  }
   const normalizeAoiReasons = (reasons: string[] | undefined) => {
     const msg =
       'Verifica: Ogni perdita FORESTALE rilevata dopo il 31/12/2020 all’interno della maschera forestale 2020 costituisce una "evidenza" di possibile non conformità.'
@@ -172,7 +190,9 @@ export default async function EudrRisultatoPage({
   const ddsType: EudrDdsType = ddsOutcome.ddsType
 
   scheduleEudrSessionFinalize({
+    supabase,
     sessionId,
+    sessionUserId: session.user_id,
     sessionStatus: session.status,
     sessionFinalOutcome: session.final_outcome,
     metadata,
@@ -194,6 +214,32 @@ export default async function EudrRisultatoPage({
     durationMs: Date.now() - perfStart,
     dbMs: Date.now() - perfStart,
   })
+
+  const getDeferredData = createEudrRisultatoDeferredLoader({
+    sessionId,
+    sessionUserId: session.user_id,
+    answersMap,
+    answersJsonMap,
+    result,
+    ddLastRun: ddLastRunNormalized,
+  })
+
+  const deferredProps: EudrRisultatoDeferredProps = {
+    sessionId,
+    nomeOperazione,
+    userProfile,
+    displayOutcomeDescription,
+    ddsType,
+    specieName,
+    countryName,
+    countryHasConflicts,
+    baseEvaluationCode,
+    result,
+    answersMap,
+    answersJsonMap,
+    ddLastRunNormalized,
+    getDeferredData,
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-4 pb-16">
@@ -292,6 +338,10 @@ export default async function EudrRisultatoPage({
           </div>
         </div>
       </div>
+
+      <Suspense fallback={<EudrRisultatoPdfSkeleton />}>
+        <EudrRisultatoPdfDeferred {...deferredProps} />
+      </Suspense>
 
       {/* AOI / Hansen: esito esplicito positivo vs negativo (dd_last_run salvato al run) */}
       {ddLastRunNormalized && (
@@ -511,22 +561,8 @@ export default async function EudrRisultatoPage({
         </div>
       )}
 
-      <Suspense fallback={<EudrRisultatoDeferredSkeleton />}>
-        <EudrRisultatoDeferred
-          sessionId={sessionId}
-          nomeOperazione={nomeOperazione}
-          userProfile={userProfile}
-          displayOutcomeDescription={displayOutcomeDescription}
-          ddsType={ddsType}
-          specieName={specieName}
-          countryName={countryName}
-          countryHasConflicts={countryHasConflicts}
-          baseEvaluationCode={baseEvaluationCode}
-          result={result}
-          answersMap={answersMap}
-          answersJsonMap={answersJsonMap}
-          ddLastRunNormalized={ddLastRunNormalized}
-        />
+      <Suspense fallback={null}>
+        <EudrRisultatoMitigationDeferred {...deferredProps} />
       </Suspense>
     </div>
   )

@@ -1,6 +1,7 @@
 import { createClient } from "@/utils/supabase/server"
 import { getEudrPdfSections } from "@/lib/eudr-pdf-sections"
 import type { DdLastRunSnapshot } from "@/features/eudr-due-diligence/aoiRiskGate"
+import { loadDdLastRunFromStorage } from "@/features/eudr-due-diligence/storage/loadDdLastRunFromStorage"
 import {
   EUDR_SCORED_QUESTIONS,
   getEudrLabelForRaw,
@@ -76,15 +77,26 @@ const SUPPLIER_FIELDS: { key: keyof SupplierRecord; label: string }[] = [
   { key: "contact_person", label: "Referente" },
 ]
 
-export async function loadEudrRisultatoDeferredData(params: {
+export type EudrRisultatoDeferredLoadParams = {
   sessionId: string
+  sessionUserId: string
   answersMap: Record<string, string | null>
   answersJsonMap: Record<string, unknown>
   result: RiskCalculationResult
   ddLastRun?: DdLastRunSnapshot
-}): Promise<EudrRisultatoDeferredData> {
-  const { sessionId, answersMap, answersJsonMap, result, ddLastRun } = params
+}
+
+/** Per-request loader: must not use React cache (calls createClient → cookies). */
+export async function loadEudrRisultatoDeferredData(
+  params: EudrRisultatoDeferredLoadParams
+): Promise<EudrRisultatoDeferredData> {
+  const { sessionId, sessionUserId, answersMap, answersJsonMap, result, ddLastRun } = params
   const supabase = await createClient()
+  let effectiveDdLastRun = ddLastRun
+  if (!effectiveDdLastRun?.run_id) {
+    const fromStorage = await loadDdLastRunFromStorage(supabase, sessionUserId, sessionId)
+    if (fromStorage) effectiveDdLastRun = fromStorage
+  }
   let queryCount = 0
   let storageMs = 0
 
@@ -309,9 +321,9 @@ export async function loadEudrRisultatoDeferredData(params: {
     .filter((s) => s.questions.length > 0)
 
   let ddPdfPayload: DdPdfPayload | null = null
-  if (ddLastRun?.run_id) {
+  if (effectiveDdLastRun?.run_id) {
     const storageStart = Date.now()
-    const artifactSessionId = ddLastRun.dd_artifact_session_id ?? sessionId
+    const artifactSessionId = effectiveDdLastRun.dd_artifact_session_id ?? sessionId
     queryCount += 1
     const { data: artifactSession } = await supabase
       .from("assessment_sessions")
@@ -324,7 +336,7 @@ export async function loadEudrRisultatoDeferredData(params: {
       const base = `${uid}/eudr-due-diligence/${artifactSessionId}`
       const reportCandidates: { path: string; artifactPrefix: string }[] = [
         { path: `${base}/dd_report.json`, artifactPrefix: base },
-        { path: `${base}/${ddLastRun.run_id}/dd_report.json`, artifactPrefix: `${base}/${ddLastRun.run_id}` },
+        { path: `${base}/${effectiveDdLastRun.run_id}/dd_report.json`, artifactPrefix: `${base}/${effectiveDdLastRun.run_id}` },
       ]
       let blob: Blob | null = null
       let artifactPrefix = base
@@ -370,5 +382,17 @@ export async function loadEudrRisultatoDeferredData(params: {
     questionLabelsMap,
     queryCount,
     storageMs,
+  }
+}
+
+/**
+ * Deduplicates PDF + mitigation deferred segments on the same page (one DB round-trip).
+ * Call the returned function from both Suspense boundaries; do not wrap in React cache.
+ */
+export function createEudrRisultatoDeferredLoader(params: EudrRisultatoDeferredLoadParams) {
+  let promise: Promise<EudrRisultatoDeferredData> | undefined
+  return () => {
+    promise ??= loadEudrRisultatoDeferredData(params)
+    return promise
   }
 }

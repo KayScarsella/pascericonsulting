@@ -15,6 +15,7 @@ import {
   applyAoiGateToEudrRiskResult,
   type DdLastRunSnapshot,
 } from "@/features/eudr-due-diligence/aoiRiskGate"
+import { resolveDdLastRun } from "@/features/eudr-due-diligence/storage/loadDdLastRunFromStorage"
 import { computeEudrDdsOutcome } from "@/lib/eudr-dds-inputs"
 import { validateSessionAccess } from "@/actions/questions"
 import { completeSessionAsExempt, upsertUserResponses } from "@/actions/workflows/shared"
@@ -392,7 +393,12 @@ export async function finalizeEudrAnalisi(sessionId: string): Promise<{ redirect
 
     let riskResult = calculateEudrRisk(answersMap)
     const oldMeta = (sessionRow?.metadata as Record<string, unknown>) || {}
-    const ddLastRun = oldMeta.dd_last_run as DdLastRunSnapshot | undefined
+    const ddLastRun = await resolveDdLastRun(
+      supabase,
+      sessionOwnerId,
+      sessionId,
+      oldMeta.dd_last_run as DdLastRunSnapshot | undefined
+    )
     riskResult = applyAoiGateToEudrRiskResult(riskResult, ddLastRun)
 
     const ddsOutcome = await computeEudrDdsOutcome(
@@ -405,6 +411,7 @@ export async function finalizeEudrAnalisi(sessionId: string): Promise<{ redirect
 
     const updatedMeta: Record<string, unknown> = {
       ...oldMeta,
+      ...(ddLastRun ? { dd_last_run: ddLastRun } : {}),
       risk_score: riskResult.overallRisk,
       risk_details: riskResult.details.map((d) => ({
         shortLabel: d.shortLabel,

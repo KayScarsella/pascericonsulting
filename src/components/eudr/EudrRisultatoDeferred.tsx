@@ -1,4 +1,4 @@
-import { loadEudrRisultatoDeferredData } from "@/lib/eudr-risultato-deferred-data"
+import type { EudrRisultatoDeferredData } from "@/lib/eudr-risultato-deferred-data"
 import { logRoutePerf } from "@/lib/perf-debug"
 import type { DdLastRunSnapshot } from "@/features/eudr-due-diligence/aoiRiskGate"
 import type { RiskCalculationResult } from "@/lib/eudr-risk-calculator"
@@ -31,9 +31,10 @@ export type EudrRisultatoDeferredProps = {
   answersMap: Record<string, string | null>
   answersJsonMap: Record<string, unknown>
   ddLastRunNormalized?: DdLastRunSnapshot
+  getDeferredData: () => Promise<EudrRisultatoDeferredData>
 }
 
-export async function EudrRisultatoDeferred(props: EudrRisultatoDeferredProps) {
+export async function EudrRisultatoPdfDeferred(props: EudrRisultatoDeferredProps) {
   const perfStart = Date.now()
   const {
     sessionId,
@@ -46,20 +47,12 @@ export async function EudrRisultatoDeferred(props: EudrRisultatoDeferredProps) {
     countryHasConflicts,
     baseEvaluationCode,
     result,
-    answersMap,
-    answersJsonMap,
-    ddLastRunNormalized,
+    getDeferredData,
   } = props
 
-  const deferred = await loadEudrRisultatoDeferredData({
-    sessionId,
-    answersMap,
-    answersJsonMap,
-    result,
-    ddLastRun: ddLastRunNormalized,
-  })
+  const deferred = await getDeferredData()
 
-  logRoutePerf("/EUDR/risultato/deferred", {
+  logRoutePerf("/EUDR/risultato/deferred-pdf", {
     tab: sessionId,
     queryCount: deferred.queryCount,
     durationMs: Date.now() - perfStart,
@@ -67,37 +60,51 @@ export async function EudrRisultatoDeferred(props: EudrRisultatoDeferredProps) {
   })
 
   return (
-    <>
-      <div className="flex flex-wrap items-center gap-3 mb-10">
-        <EudrRisultatoPdfButton
-          variant="EUDR"
-          nomeOperazione={nomeOperazione}
-          userProfile={userProfile}
-          disclaimerText={PDF_DISCLAIMERS.EUDR}
-          outcome={result.outcome}
-          outcomeDescription={displayOutcomeDescription}
-          ddsType={ddsType}
-          specieName={specieName}
-          countryName={countryName}
-          countryHasConflicts={!!countryHasConflicts}
-          expiryDate={result.expiryDate}
-          overallRisk={result.overallRisk}
-          details={result.details}
-          sectionsForPdf={deferred.sectionsForPdf}
-          sessionId={sessionId}
-          baseEvaluationCode={baseEvaluationCode}
-          ddPdfPayload={deferred.ddPdfPayload}
-        />
-      </div>
+    <div className="flex flex-wrap items-center gap-3 mb-10">
+      <EudrRisultatoPdfButton
+        variant="EUDR"
+        nomeOperazione={nomeOperazione}
+        userProfile={userProfile}
+        disclaimerText={PDF_DISCLAIMERS.EUDR}
+        outcome={result.outcome}
+        outcomeDescription={displayOutcomeDescription}
+        ddsType={ddsType}
+        specieName={specieName}
+        countryName={countryName}
+        countryHasConflicts={!!countryHasConflicts}
+        expiryDate={result.expiryDate}
+        overallRisk={result.overallRisk}
+        details={result.details}
+        sectionsForPdf={deferred.sectionsForPdf}
+        sessionId={sessionId}
+        baseEvaluationCode={baseEvaluationCode}
+        ddPdfPayload={deferred.ddPdfPayload}
+      />
+    </div>
+  )
+}
 
-      {deferred.mitigationHistory.length > 0 && (
-        <MitigationHistorySection
-          sessionId={sessionId}
-          history={deferred.mitigationHistory}
-          questionLabelsMap={deferred.questionLabelsMap}
-          currentDetails={result.details}
-        />
-      )}
-    </>
+export async function EudrRisultatoMitigationDeferred(props: EudrRisultatoDeferredProps) {
+  const perfStart = Date.now()
+  const { sessionId, result, getDeferredData } = props
+
+  const deferred = await getDeferredData()
+
+  logRoutePerf("/EUDR/risultato/deferred-mitigation", {
+    tab: sessionId,
+    queryCount: deferred.queryCount,
+    durationMs: Date.now() - perfStart,
+    storageMs: deferred.storageMs,
+  })
+
+  if (deferred.mitigationHistory.length === 0) return null
+
+  return (
+    <MitigationHistorySection
+      sessionId={sessionId}
+      history={deferred.mitigationHistory}
+      questionLabelsMap={deferred.questionLabelsMap}
+      currentDetails={result.details}
+    />
   )
 }

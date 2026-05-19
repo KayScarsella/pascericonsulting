@@ -463,21 +463,38 @@ export async function runDueDiligenceAoiAnalysis(
     delete prevWithoutLock.dd_analysis_started_at
     delete prevWithoutLock.dd_analysis_run_id
 
-    await supabase
+    const { error: metaUpdateError } = await supabase
       .from('assessment_sessions')
       .update({
         metadata: {
           ...prevWithoutLock,
           dd_last_run: ddSnapshot,
-          ...(!ddSnapshot.triggers_non_accettabile
+          ...(ddSnapshot.triggers_non_accettabile
             ? {
+                aoi_gate_triggered: true,
+                aoi_gate_reasons: ddSnapshot.reasons,
+              }
+            : {
                 aoi_gate_triggered: false,
                 aoi_gate_reasons: [],
-              }
-            : {}),
+              }),
         } as Json,
       })
       .eq('id', sessionId)
+
+    if (metaUpdateError) {
+      console.error('[DD_LAST_RUN_SAVE_FAILED]', {
+        sessionId,
+        runId,
+        message: metaUpdateError.message,
+      })
+      return {
+        runId,
+        metadata: completedMeta,
+        error:
+          "Analisi completata e salvata su storage, ma non è stato possibile registrare l'esito sulla sessione. Ricaricare la pagina risultato o ripetere l'analisi.",
+      }
+    }
 
     return {
       runId,
