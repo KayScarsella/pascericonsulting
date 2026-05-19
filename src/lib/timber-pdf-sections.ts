@@ -1,4 +1,4 @@
-import { unstable_cache } from "next/cache"
+import { cache } from "react"
 import { createClient } from "@/utils/supabase/server"
 import { TIMBER_TOOL_ID } from "@/lib/constants"
 import type { QuestionConfig } from "@/types/questions"
@@ -21,7 +21,8 @@ export type TimberPdfSectionRow = {
 
 const HIDDEN_SECTION_TITLE = "DATI RELATIVI ALLE COMPONENTI DEL PRODOTTO (SPECIE E PAESI)"
 
-async function loadTimberPdfSectionsUncached(): Promise<TimberPdfSectionRow[]> {
+/** Per-request dedup (RLS via session cookies). Cross-request cache richiederebbe service role. */
+export const getTimberPdfSections = cache(async (): Promise<TimberPdfSectionRow[]> => {
   const supabase = await createClient()
   const { data, error } = await supabase
     .from("sections")
@@ -39,11 +40,4 @@ async function loadTimberPdfSectionsUncached(): Promise<TimberPdfSectionRow[]> {
   return ((data || []) as TimberPdfSectionRow[]).filter(
     (s) => !s.title.includes(HIDDEN_SECTION_TITLE)
   )
-}
-
-/** Master sections/questions change rarely — cache 5 min per deploy. */
-export const getTimberPdfSections = unstable_cache(
-  loadTimberPdfSectionsUncached,
-  ["timber-pdf-sections"],
-  { revalidate: 300 }
-)
+})
