@@ -16,7 +16,7 @@ todos:
     status: pending
   - id: fix-timber-search
     content: "Fase 3: Replicare fix su /timberRegulation/search (dopo validazione EUDR)"
-    status: pending
+    status: completed
   - id: refactor-other-routes
     content: "Fase 4+: risultato, documenti, altre pagine (uno alla volta)"
     status: pending

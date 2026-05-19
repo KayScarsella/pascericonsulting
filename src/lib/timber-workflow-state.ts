@@ -63,35 +63,98 @@ function buildResumeUrl(
   return `/timberRegulation/valutazione-finale?session_id=${finalSessionId}`
 }
 
+export type TimberWorkflowRootInput = Pick<
+  SessionRow,
+  "id" | "status" | "final_outcome" | "metadata"
+> & {
+  fallbackStep1Completed?: boolean
+}
+
+type WorkflowChildRow = {
+  id: string
+  status: string | null
+  created_at: string | null
+  parent_session_id: string | null
+}
+
+function workflowSnapshotFromChildren(
+  rootSession: TimberWorkflowRootInput,
+  childRows: WorkflowChildRow[]
+): WorkflowSnapshot {
+  const metadata = (rootSession.metadata as SessionMetadata | null) ?? null
+  const sorted = [...childRows].sort((a, b) => {
+    const ta = a.created_at ? new Date(a.created_at).getTime() : 0
+    const tb = b.created_at ? new Date(b.created_at).getTime() : 0
+    return tb - ta
+  })
+  const inProgressChild = sorted.find((row) => row.status !== "completed") ?? null
+  const latestChild = sorted[0] ?? null
+
+  return {
+    rootSessionId: rootSession.id,
+    status: rootSession.status,
+    finalOutcome: rootSession.final_outcome,
+    metadata,
+    childCount: sorted.length,
+    inProgressChildId: inProgressChild?.id ?? null,
+    latestChildId: latestChild?.id ?? null,
+    fallbackStep1Completed: rootSession.fallbackStep1Completed,
+  }
+}
+
+/** One query for all verification rows instead of N calls to resolveTimberWorkflowState. */
+export async function resolveTimberWorkflowStatesBatch(
+  supabase: SupabaseClient<Database>,
+  rootSessions: TimberWorkflowRootInput[]
+): Promise<Map<string, TimberWorkflowState>> {
+  const result = new Map<string, TimberWorkflowState>()
+  if (rootSessions.length === 0) return result
+
+  const parentIds = rootSessions.map((s) => s.id)
+  const { data: childRows, error } = await supabase
+    .from("assessment_sessions")
+    .select("id, status, created_at, parent_session_id")
+    .eq("tool_id", TIMBER_TOOL_ID)
+    .eq("session_type", "analisi_finale")
+    .in("parent_session_id", parentIds)
+    .order("created_at", { ascending: false })
+
+  if (error) {
+    console.error("Errore batch workflow Timber:", error)
+  }
+
+  const childrenByParent = new Map<string, WorkflowChildRow[]>()
+  for (const row of childRows ?? []) {
+    if (!row.parent_session_id) continue
+    const list = childrenByParent.get(row.parent_session_id) ?? []
+    list.push(row)
+    childrenByParent.set(row.parent_session_id, list)
+  }
+
+  for (const root of rootSessions) {
+    const children = childrenByParent.get(root.id) ?? []
+    result.set(
+      root.id,
+      deriveTimberWorkflowStateFromSnapshot(workflowSnapshotFromChildren(root, children))
+    )
+  }
+
+  return result
+}
+
 export async function resolveTimberWorkflowState(
   supabase: SupabaseClient<Database>,
   rootSession: Pick<SessionRow, "id" | "status" | "final_outcome" | "metadata">,
   fallbackStep1Completed: boolean = false
 ): Promise<TimberWorkflowState> {
-  const metadata = (rootSession.metadata as SessionMetadata | null) ?? null
-
-  const { data: childRows } = await supabase
-    .from("assessment_sessions")
-    .select("id, status, created_at")
-    .eq("tool_id", TIMBER_TOOL_ID)
-    .eq("session_type", "analisi_finale")
-    .eq("parent_session_id", rootSession.id)
-    .order("created_at", { ascending: false })
-
-  const childCount = childRows?.length ?? 0
-  const inProgressChild = childRows?.find((row) => row.status !== "completed") ?? null
-  const latestChild = childRows?.[0] ?? null
-
-  return deriveTimberWorkflowStateFromSnapshot({
-    rootSessionId: rootSession.id,
-    status: rootSession.status,
-    finalOutcome: rootSession.final_outcome,
-    metadata,
-    childCount,
-    inProgressChildId: inProgressChild?.id ?? null,
-    latestChildId: latestChild?.id ?? null,
-    fallbackStep1Completed,
-  })
+  const batch = await resolveTimberWorkflowStatesBatch(supabase, [
+    { ...rootSession, fallbackStep1Completed },
+  ])
+  const state = batch.get(rootSession.id)
+  if (!state) {
+    throw new Error(`Workflow state missing for session ${rootSession.id}`)
+  }
+  return state
 }
 
 export function deriveTimberWorkflowStateFromSnapshot(

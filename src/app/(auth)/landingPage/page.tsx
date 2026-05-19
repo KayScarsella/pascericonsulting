@@ -1,7 +1,5 @@
 import { redirect } from "next/navigation"
 import Link from "next/link"
-import { createServerClient } from "@supabase/ssr"
-import { cookies } from "next/headers"
 import { Wrench, Shield, ExternalLink, User, Lock, Clock, LogOut, AlertCircle } from "lucide-react"
 
 import {
@@ -17,8 +15,10 @@ import { Button } from "@/components/ui/button"
 // Assicurati che il percorso ai tipi sia corretto in base a dove si trova questo file
 import { Database } from "@/types/supabase"
 
-import { signOutAction } from "@/actions/auth" // O il percorso corretto della tua action
-import { isOnboardingComplete } from "@/lib/onboarding"
+import { signOutAction } from "@/actions/auth"
+import { createClient } from "@/utils/supabase/server"
+import { resolveToolBasePath } from "@/lib/tool-paths"
+import { logRoutePerf } from "@/lib/perf-debug"
 
 // Aggiungiamo base_path ai dati richiesti
 type ToolData = Pick<Database['public']['Tables']['tools']['Row'], 'name' | 'description' | 'is_active' | 'base_path'>
@@ -29,37 +29,27 @@ type ToolAccessWithTool = {
   tools: ToolData | null
 }
 
-async function createClient() {
-  const cookieStore = await cookies()
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(cookiesToSet) { try { cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options)) } catch {} },
-      },
-    }
-  )
-}
-
 export default async function LandingPage() {
+  const perfStart = Date.now()
+  let queryCount = 0
+
   const supabase = await createClient()
 
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) {
     redirect("/login")
   }
+  queryCount += 1
 
-  const onboardingComplete = await isOnboardingComplete()
-  if (!onboardingComplete) {
-    redirect("/onboarding")
-  }
-
-  // Fetch dei tool e del percorso base_path
-  const { data, error: toolsError } = await supabase
-    .from('tool_access')
-    .select(`
+  const [{ data: profile }, { data, error: toolsError }] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("onboarding_completed")
+      .eq("id", user.id)
+      .maybeSingle(),
+    supabase
+      .from("tool_access")
+      .select(`
       role,
       tool_id,
       tools:tool_id (
@@ -69,7 +59,19 @@ export default async function LandingPage() {
         base_path
       )
     `)
-    .eq('user_id', user.id)
+      .eq("user_id", user.id),
+  ])
+  queryCount += 2
+
+  if (!profile?.onboarding_completed) {
+    redirect("/onboarding")
+  }
+
+  logRoutePerf("/landingPage", {
+    tab: "all",
+    queryCount,
+    durationMs: Date.now() - perfStart,
+  })
 
   if (toolsError) {
     return (
@@ -124,10 +126,11 @@ export default async function LandingPage() {
             {sortedAccesses.map((access) => {
               if (!access.tools) return null;
               return (
-                <ToolCard 
-                  key={access.tool_id} 
-                  tool={access.tools} 
-                  role={access.role} 
+                <ToolCard
+                  key={access.tool_id}
+                  toolId={access.tool_id}
+                  tool={access.tools}
+                  role={access.role}
                 />
               )
             })}
@@ -140,13 +143,18 @@ export default async function LandingPage() {
   )
 }
 
-function ToolCard({ tool, role }: { tool: ToolData, role: string }) {
+function ToolCard({
+  toolId,
+  tool,
+  role,
+}: {
+  toolId: string
+  tool: ToolData
+  role: string
+}) {
     const isAdmin = role === 'admin'
     const isActive = tool.is_active === true
-    
-    // LOGICA URL: Se manca base_path nel DB, il link è nullo
-    const targetUrl = tool.base_path
-    // Se isActive è vero MA manca il link nel DB, consideriamo il tool "rotto" o non configurato
+    const targetUrl = resolveToolBasePath(toolId, tool.base_path)
     const isConfigured = !!targetUrl
 
     return (
@@ -205,7 +213,7 @@ function ToolCard({ tool, role }: { tool: ToolData, role: string }) {
              isConfigured ? (
                 // CASO 1: Attivo e Configurato -> Mostra Link
                 <Button asChild className="w-full gap-2 transition-all group-hover:bg-blue-600 group-hover:text-white" variant={isAdmin ? "outline" : "default"}>
-                <Link href={targetUrl}>
+                <Link href={targetUrl!}>
                     Apri Tool <ExternalLink className="h-4 w-4 opacity-50 transition-opacity group-hover:opacity-100" />
                 </Link>
                 </Button>
@@ -218,7 +226,7 @@ function ToolCard({ tool, role }: { tool: ToolData, role: string }) {
           ) : isAdmin && isConfigured ? (
             // In sviluppo: solo admin apre anteprima
             <Button asChild className="w-full gap-2 border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100" variant="outline">
-              <Link href={targetUrl}>
+              <Link href={targetUrl!}>
                 Anteprima admin <ExternalLink className="h-4 w-4 opacity-70" />
               </Link>
             </Button>

@@ -1,9 +1,7 @@
 import { getToolAccess } from "@/lib/tool-auth"
 import { EUDR_TOOL_ID } from "@/lib/constants"
-import { createServerClient } from "@supabase/ssr"
-import { cookies } from "next/headers"
-import { Database } from "@/types/supabase"
 import { Lock } from "lucide-react"
+import { createClient } from "@/utils/supabase/server"
 
 import { EudrSearchView, type EudrVerificationRow } from "@/components/EudrSearchView"
 import type { EudrAssessmentSessionRow } from "@/components/EudrAnalisiTable"
@@ -17,6 +15,7 @@ import {
   ANALISI_FINALE_NEGATIVE_OUTCOMES,
 } from "@/lib/final-outcome"
 import { resolveEudrWorkflowStatesBatch } from "@/lib/eudr-workflow-state"
+import { normalizeEudrSearchTab } from "@/lib/eudr-search-routing"
 import { logRoutePerf } from "@/lib/perf-debug"
 
 export default async function EudrSearchPage({
@@ -28,7 +27,7 @@ export default async function EudrSearchPage({
   let queryCount = 0
 
   const params = await searchParams
-  const tab = (params.tab as string) || "analisi"
+  const tab = normalizeEudrSearchTab(params.tab as string | undefined)
   const isVerificheTab = tab === "verifiche"
   const page = parsePageParam(params.page, 1)
   const vpage = parsePageParam(params.vpage, 1)
@@ -54,12 +53,7 @@ export default async function EudrSearchPage({
     return <LockedSearchView />
   }
 
-  const cookieStore = await cookies()
-  const supabase = createServerClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } }
-  )
+  const supabase = await createClient()
 
   let formattedAnalisi: EudrAssessmentSessionRow[] = []
   let totalPages = 1
