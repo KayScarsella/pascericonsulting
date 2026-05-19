@@ -49,7 +49,11 @@ export async function GET(request: Request) {
     )
     const { error } = await supabase.auth.exchangeCodeForSession(code)
     if (!error) {
-      return NextResponse.redirect(`${origin}${next}`)
+      const response = NextResponse.redirect(`${origin}${next}`)
+      if (next === "/landingPage" || next.startsWith("/landingPage?")) {
+        response.headers.set("Link", '</landingPage>; rel=prefetch')
+      }
+      return response
     }
     await supabase.auth.signOut()
   }

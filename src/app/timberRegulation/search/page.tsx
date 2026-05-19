@@ -191,24 +191,6 @@ export default async function SearchPage({
     if (baseSessions && baseSessions.length > 0) {
       const sessionIds = baseSessions.map((s) => s.id)
 
-      queryCount += 1
-      const { data: nomeRows } = await supabase
-        .from("user_responses")
-        .select("session_id, answer_text, answer_json")
-        .eq("tool_id", TIMBER_TOOL_ID)
-        .in("session_id", sessionIds)
-        .eq("question_id", NOME_COMMERCIALE_QUESTION_ID)
-
-      const nomeBySession = new Map<string, string>()
-      for (const r of nomeRows || []) {
-        let val = (r.answer_text || "").toString().trim()
-        if (!val && r.answer_json) {
-          const j = r.answer_json as Record<string, unknown>
-          val = (j?.value ?? j?.text ?? JSON.stringify(j) ?? "").toString().trim()
-        }
-        if (val) nomeBySession.set(r.session_id, val)
-      }
-
       const workflowInputs = baseSessions.map((session) => ({
         id: session.id,
         status: session.status,
@@ -218,8 +200,26 @@ export default async function SearchPage({
           session.status === "completed" && session.final_outcome !== "Esente / Non Soggetto",
       }))
 
-      queryCount += 1
-      const workflowById = await resolveTimberWorkflowStatesBatch(supabase, workflowInputs)
+      queryCount += 2
+      const [nomeRowsResult, workflowById] = await Promise.all([
+        supabase
+          .from("user_responses")
+          .select("session_id, answer_text, answer_json")
+          .eq("tool_id", TIMBER_TOOL_ID)
+          .in("session_id", sessionIds)
+          .eq("question_id", NOME_COMMERCIALE_QUESTION_ID),
+        resolveTimberWorkflowStatesBatch(supabase, workflowInputs),
+      ])
+
+      const nomeBySession = new Map<string, string>()
+      for (const r of nomeRowsResult.data || []) {
+        let val = (r.answer_text || "").toString().trim()
+        if (!val && r.answer_json) {
+          const j = r.answer_json as Record<string, unknown>
+          val = (j?.value ?? j?.text ?? JSON.stringify(j) ?? "").toString().trim()
+        }
+        if (val) nomeBySession.set(r.session_id, val)
+      }
 
       verificationRows = baseSessions.map((session) => {
         const metadata = (session.metadata as SessionMetadata | null) ?? null

@@ -1,4 +1,4 @@
-import { cache } from "react"
+import { unstable_cache } from "next/cache"
 import { createClient } from "@/utils/supabase/server"
 import { EUDR_TOOL_ID } from "@/lib/constants"
 import type { QuestionConfig } from "@/types/questions"
@@ -21,8 +21,7 @@ export type EudrPdfSectionRow = {
 
 const EXCLUDED_SECTION_ID = "a3df1e07-a678-49d2-9a4d-f134fba3498c"
 
-/** Per-request dedup (RLS via session cookies). Cross-request cache richiederebbe service role. */
-export const getEudrPdfSections = cache(async (): Promise<EudrPdfSectionRow[]> => {
+async function fetchEudrPdfSectionsUncached(): Promise<EudrPdfSectionRow[]> {
   const supabase = await createClient()
   const { data, error } = await supabase
     .from("sections")
@@ -38,4 +37,11 @@ export const getEudrPdfSections = cache(async (): Promise<EudrPdfSectionRow[]> =
   }
 
   return ((data || []) as EudrPdfSectionRow[]).filter((s) => s.id !== EXCLUDED_SECTION_ID)
-})
+}
+
+/** Master sections for PDF — cached 1h; invalidate with tag `eudr-master-sections` on master edits. */
+export const getEudrPdfSections = unstable_cache(
+  fetchEudrPdfSectionsUncached,
+  ["eudr-pdf-sections"],
+  { revalidate: 3600, tags: ["eudr-master-sections"] }
+)
