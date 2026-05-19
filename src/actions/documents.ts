@@ -6,11 +6,28 @@ import {
   createDocumentSignedUrls,
   DOCUMENT_SIGNED_URL_TTL_SEC,
 } from "@/lib/documents-download"
+import {
+  buildDocumentStoragePath,
+  validateDocumentFileMetadata,
+} from "@/lib/documents-upload"
 import { revalidatePath } from "next/cache"
 import { createClient } from "@/utils/supabase/server"
 
 async function getSupabase() {
   return createClient()
+}
+
+async function requireDocumentAdmin(toolId: string) {
+  const supabase = await getSupabase()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { error: "Non autenticato" as const }
+
+  const { role } = await getToolAccess(toolId)
+  if (role !== "admin") return { error: "Non autorizzato: servono permessi admin" as const }
+
+  return { supabase, user }
 }
 
 /**
@@ -35,55 +52,86 @@ export async function createFolder(toolId: string, parentId: string | null, name
   return { success: true }
 }
 
-/**
- * Carica un file.
- * Richiede ruolo 'admin' per quel tool_id.
- * Salva nello storage con path: {toolId}/{timestamp}_{filename} per isolamento.
- */
-export async function uploadFile(formData: FormData, parentId: string | null, toolId: string, pathRevalidate: string) {
-  const supabase = await getSupabase()
-  
-  // 1. Verifica Sessione
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: "Non autenticato" }
+/** Step 1: autorizza admin e riserva path storage (payload leggero, niente file). */
+export async function prepareDocumentUpload(
+  toolId: string,
+  fileName: string,
+  fileSize: number,
+  mimeType: string
+) {
+  const auth = await requireDocumentAdmin(toolId)
+  if ("error" in auth) return { error: auth.error }
 
-  // 2. Verifica Ruolo nel Tool specifico
-  const { role } = await getToolAccess(toolId)
-  if (role !== 'admin') return { error: "Non autorizzato: servono permessi admin" }
+  const validationError = validateDocumentFileMetadata({ fileName, fileSize, mimeType })
+  if (validationError) return { error: validationError }
 
-  const file = formData.get('file') as File
-  if (!file) return { error: "File mancante" }
+  const storagePath = buildDocumentStoragePath(toolId, fileName)
+  return { storagePath }
+}
 
-  // 3. Preparazione Path (Isolamento per Tool)
-  const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
-  const storagePath = `${toolId}/${Date.now()}_${safeName}`
+/** Step 2: registra metadati DB dopo upload diretto client → Storage. */
+export async function finalizeDocumentUpload(
+  toolId: string,
+  parentId: string | null,
+  storagePath: string,
+  fileName: string,
+  mimeType: string,
+  size: number,
+  pathRevalidate: string
+) {
+  const auth = await requireDocumentAdmin(toolId)
+  if ("error" in auth) return { error: auth.error }
+  const { supabase, user } = auth
 
-  // 4. Upload Storage
-  const { error: uploadError } = await supabase.storage
-    .from('documents')
-    .upload(storagePath, file)
+  const validationError = validateDocumentFileMetadata({ fileName, fileSize: size, mimeType })
+  if (validationError) return { error: validationError }
 
-  if (uploadError) return { error: uploadError.message }
+  try {
+    assertStoragePathForTool(storagePath, toolId)
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Percorso non valido" }
+  }
 
-  // 5. Insert DB
-  const { error: dbError } = await supabase.from('documents').insert({
+  const { error: existsError } = await supabase.storage
+    .from("documents")
+    .createSignedUrl(storagePath, 60)
+  if (existsError) {
+    return { error: "File non trovato in storage. Riprova l'upload." }
+  }
+
+  const { error: dbError } = await supabase.from("documents").insert({
     tool_id: toolId,
     parent_id: parentId,
-    name: file.name,
-    type: 'file',
+    name: fileName,
+    type: "file",
     storage_path: storagePath,
-    mime_type: file.type,
-    size: file.size,
-    created_by: user.id
+    mime_type: mimeType || null,
+    size,
+    created_by: user.id,
   })
 
-  // Rollback se fallisce il DB
   if (dbError) {
-    await supabase.storage.from('documents').remove([storagePath])
+    await supabase.storage.from("documents").remove([storagePath])
     return { error: dbError.message }
   }
 
   revalidatePath(pathRevalidate)
+  return { success: true }
+}
+
+/** Cleanup se l'upload client fallisce dopo prepare. */
+export async function abortDocumentUpload(toolId: string, storagePath: string) {
+  const auth = await requireDocumentAdmin(toolId)
+  if ("error" in auth) return { error: auth.error }
+  const { supabase } = auth
+
+  try {
+    assertStoragePathForTool(storagePath, toolId)
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Percorso non valido" }
+  }
+
+  await supabase.storage.from("documents").remove([storagePath])
   return { success: true }
 }
 

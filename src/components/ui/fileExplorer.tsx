@@ -3,9 +3,19 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Folder, FileText, Download, Upload, Plus, ArrowLeft, Trash2, Loader2 } from "lucide-react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
-// Importiamo le actions aggiornate
-import { createFolder, uploadFile, deleteItem, getDownloadUrl, getDownloadUrls } from "@/actions/documents"
+import {
+  abortDocumentUpload,
+  createFolder,
+  deleteItem,
+  finalizeDocumentUpload,
+  getDownloadUrl,
+  getDownloadUrls,
+  prepareDocumentUpload,
+} from "@/actions/documents"
+import { uploadDocumentWithProgress } from "@/lib/documents-upload-client"
+import { validateDocumentFileMetadata } from "@/lib/documents-upload"
 import { Database } from "@/types/supabase"
 
 // Tipo derivato direttamente dal DB
@@ -33,6 +43,7 @@ export function FileExplorer({
 }: FileExplorerProps) {
   const router = useRouter()
   const [isUploading, setIsUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [isDeleting, setIsDeleting] = useState<string | null>(null)
   const [isDownloading, setIsDownloading] = useState<string | null>(null)
 
@@ -121,20 +132,77 @@ export function FileExplorer({
     if (result?.error) alert("Errore: " + result.error)
   }
 
-  // --- UPLOAD ---
+  // --- UPLOAD (client → Supabase Storage, server actions solo per auth + DB) ---
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
-    const formData = new FormData()
-    formData.append('file', file)
-    
-    setIsUploading(true)
-    const result = await uploadFile(formData, currentFolderId, toolId, pathRevalidate)
-    setIsUploading(false)
-    e.target.value = '' // Reset input
+    const clientError = validateDocumentFileMetadata({
+      fileName: file.name,
+      fileSize: file.size,
+      mimeType: file.type,
+    })
+    if (clientError) {
+      toast.error(clientError)
+      e.target.value = ""
+      return
+    }
 
-    if (result?.error) alert("Errore upload: " + result.error)
+    setIsUploading(true)
+    setUploadProgress(0)
+    const toastId = toast.loading(`Preparazione upload: ${file.name}`)
+
+    let storagePath: string | null = null
+
+    try {
+      const prepared = await prepareDocumentUpload(toolId, file.name, file.size, file.type)
+      if (prepared.error || !prepared.storagePath) {
+        toast.error(prepared.error ?? "Preparazione upload fallita", { id: toastId })
+        return
+      }
+      storagePath = prepared.storagePath
+
+      toast.loading(`Caricamento ${file.name}… 0%`, { id: toastId })
+      const uploadResult = await uploadDocumentWithProgress(storagePath, file, (percent) => {
+        setUploadProgress(percent)
+        toast.loading(`Caricamento ${file.name}… ${percent}%`, { id: toastId })
+      })
+
+      if (uploadResult.error) {
+        await abortDocumentUpload(toolId, storagePath)
+        toast.error(uploadResult.error, { id: toastId })
+        return
+      }
+
+      toast.loading("Registrazione documento…", { id: toastId })
+      const finalized = await finalizeDocumentUpload(
+        toolId,
+        currentFolderId,
+        storagePath,
+        file.name,
+        file.type,
+        file.size,
+        pathRevalidate
+      )
+
+      if (finalized.error) {
+        toast.error(finalized.error, { id: toastId })
+        return
+      }
+
+      toast.success(`${file.name} caricato con successo`, { id: toastId })
+      router.refresh()
+    } catch (err) {
+      console.error(err)
+      if (storagePath) {
+        await abortDocumentUpload(toolId, storagePath).catch(() => undefined)
+      }
+      toast.error("Errore imprevisto durante l'upload", { id: toastId })
+    } finally {
+      setIsUploading(false)
+      setUploadProgress(null)
+      e.target.value = ""
+    }
   }
 
   // --- NAVIGAZIONE ---
@@ -197,6 +265,21 @@ export function FileExplorer({
           )}
         </div>
       </div>
+
+      {isUploading && uploadProgress !== null && (
+        <div className="border-b border-slate-100 bg-white px-4 py-2">
+          <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
+            <span>Upload in corso</span>
+            <span>{uploadProgress}%</span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+            <div
+              className="h-full rounded-full bg-[#967635] transition-all duration-200"
+              style={{ width: `${uploadProgress}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* LISTA OGGETTI */}
       <ul className="divide-y divide-slate-100 flex-1">
