@@ -1,5 +1,5 @@
 ﻿import { Suspense } from "react"
-import { SignOutButton } from "@/components/landing/SignOutButton"
+import { SignOutForm } from "@/components/landing/SignOutForm"
 import { LandingToolGrid } from "@/components/landing/LandingToolGrid"
 import { ToolGridSkeleton } from "@/components/landing/ToolGridSkeleton"
 
@@ -14,7 +14,7 @@ export default function LandingPage() {
             </h1>
             <p className="text-slate-500">Benvenuto, seleziona un modulo per iniziare.</p>
           </div>
-          <SignOutButton />
+          <SignOutForm />
         </header>
         <Suspense fallback={<ToolGridSkeleton />}>
           <LandingToolGrid />
