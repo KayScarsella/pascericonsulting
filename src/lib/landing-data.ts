@@ -14,11 +14,20 @@ export type LandingToolAccess = {
   tools: LandingToolRow | null
 }
 
-type ProfileToolsRow = {
+export type LandingToolItem = {
+  toolId: string
+  tool: LandingToolRow
+  hasAccess: boolean
+  role: string | null
+}
+
+type ProfileAccessRow = {
   onboarding_completed: boolean | null
   must_reset_password: boolean | null
-  tool_access: LandingToolAccess[] | null
+  tool_access: { role: string; tool_id: string }[] | null
 }
+
+type ToolCatalogRow = LandingToolRow & { id: string }
 
 export const getLandingAuth = cache(async () => {
   const supabase = await createClient()
@@ -32,8 +41,7 @@ export const getLandingAuth = cache(async () => {
   return { supabase, user }
 })
 
-/** Single DB round-trip: profile + nested tool_access + tools. */
-export async function fetchLandingToolAccesses(): Promise<LandingToolAccess[]> {
+async function assertLandingProfileReady(): Promise<Map<string, string>> {
   const { supabase, user } = await getLandingAuth()
 
   const { data, error } = await supabase
@@ -44,13 +52,7 @@ export async function fetchLandingToolAccesses(): Promise<LandingToolAccess[]> {
       must_reset_password,
       tool_access (
         role,
-        tool_id,
-        tools:tool_id (
-          name,
-          description,
-          is_active,
-          base_path
-        )
+        tool_id
       )
     `
     )
@@ -58,11 +60,11 @@ export async function fetchLandingToolAccesses(): Promise<LandingToolAccess[]> {
     .maybeSingle()
 
   if (error) {
-    console.error("Errore caricamento landing tools:", error)
-    throw new Error("tools_fetch_failed")
+    console.error("Errore caricamento profilo landing:", error)
+    throw new Error("profile_fetch_failed")
   }
 
-  const row = data as ProfileToolsRow | null
+  const row = data as ProfileAccessRow | null
   if (row?.must_reset_password) {
     redirect("/auth/reset-password")
   }
@@ -71,12 +73,58 @@ export async function fetchLandingToolAccesses(): Promise<LandingToolAccess[]> {
     redirect("/onboarding")
   }
 
-  const accesses = row.tool_access ?? []
-  return accesses.sort((a, b) => {
-    const activeA = a.tools?.is_active ?? false
-    const activeB = b.tools?.is_active ?? false
-    if (activeA && !activeB) return -1
-    if (!activeA && activeB) return 1
-    return 0
+  return new Map((row.tool_access ?? []).map((access) => [access.tool_id, access.role]))
+}
+
+/** Catalogo completo tool — stesso payload per tutti gli utenti autenticati. */
+export const fetchAllToolsCatalog = cache(async (): Promise<ToolCatalogRow[]> => {
+  const { supabase } = await getLandingAuth()
+
+  const { data, error } = await supabase
+    .from("tools")
+    .select("id, name, description, is_active, base_path")
+    .order("name", { ascending: true })
+
+  if (error) {
+    console.error("Errore caricamento catalogo tool:", error)
+    throw new Error("tools_catalog_fetch_failed")
+  }
+
+  return (data ?? []) as ToolCatalogRow[]
+})
+
+function sortLandingToolItems(items: LandingToolItem[]): LandingToolItem[] {
+  const priority = (item: LandingToolItem) => {
+    const active = item.tool.is_active === true
+    if (item.hasAccess && active) return 0
+    if (item.hasAccess && !active) return 1
+    if (!item.hasAccess && active) return 2
+    return 3
+  }
+
+  return items.sort((a, b) => {
+    const diff = priority(a) - priority(b)
+    if (diff !== 0) return diff
+    return a.tool.name.localeCompare(b.tool.name, "it")
   })
+}
+
+/** Due query in parallelo: profilo/accessi + catalogo tool. */
+export async function fetchLandingToolItems(): Promise<LandingToolItem[]> {
+  const [accessByToolId, catalog] = await Promise.all([
+    assertLandingProfileReady(),
+    fetchAllToolsCatalog(),
+  ])
+
+  const items: LandingToolItem[] = catalog.map(({ id, ...tool }) => {
+    const role = accessByToolId.get(id) ?? null
+    return {
+      toolId: id,
+      tool,
+      hasAccess: role !== null,
+      role,
+    }
+  })
+
+  return sortLandingToolItems(items)
 }
