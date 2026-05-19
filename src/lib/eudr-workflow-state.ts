@@ -55,35 +55,98 @@ function buildResumeUrl(
   return `/EUDR/valutazione-finale?session_id=${finalSessionId}`
 }
 
+export type EudrWorkflowRootInput = Pick<
+  SessionRow,
+  "id" | "status" | "final_outcome" | "metadata"
+> & {
+  fallbackStep1Completed?: boolean
+}
+
+type WorkflowChildRow = {
+  id: string
+  status: string | null
+  created_at: string | null
+  parent_session_id: string | null
+}
+
+function workflowSnapshotFromChildren(
+  rootSession: EudrWorkflowRootInput,
+  childRows: WorkflowChildRow[]
+): WorkflowSnapshot {
+  const metadata = (rootSession.metadata as SessionMetadata | null) ?? null
+  const sorted = [...childRows].sort((a, b) => {
+    const ta = a.created_at ? new Date(a.created_at).getTime() : 0
+    const tb = b.created_at ? new Date(b.created_at).getTime() : 0
+    return tb - ta
+  })
+  const inProgressChild = sorted.find((row) => row.status !== "completed") ?? null
+  const latestChild = sorted[0] ?? null
+
+  return {
+    rootSessionId: rootSession.id,
+    status: rootSession.status,
+    finalOutcome: rootSession.final_outcome,
+    metadata,
+    childCount: sorted.length,
+    inProgressChildId: inProgressChild?.id ?? null,
+    latestChildId: latestChild?.id ?? null,
+    fallbackStep1Completed: rootSession.fallbackStep1Completed,
+  }
+}
+
+/** One query for all verification rows instead of N calls to resolveEudrWorkflowState. */
+export async function resolveEudrWorkflowStatesBatch(
+  supabase: SupabaseClient<Database>,
+  rootSessions: EudrWorkflowRootInput[]
+): Promise<Map<string, EudrWorkflowState>> {
+  const result = new Map<string, EudrWorkflowState>()
+  if (rootSessions.length === 0) return result
+
+  const parentIds = rootSessions.map((s) => s.id)
+  const { data: childRows, error } = await supabase
+    .from("assessment_sessions")
+    .select("id, status, created_at, parent_session_id")
+    .eq("tool_id", EUDR_TOOL_ID)
+    .eq("session_type", "analisi_finale")
+    .in("parent_session_id", parentIds)
+    .order("created_at", { ascending: false })
+
+  if (error) {
+    console.error("Errore batch workflow EUDR:", error)
+  }
+
+  const childrenByParent = new Map<string, WorkflowChildRow[]>()
+  for (const row of childRows ?? []) {
+    if (!row.parent_session_id) continue
+    const list = childrenByParent.get(row.parent_session_id) ?? []
+    list.push(row)
+    childrenByParent.set(row.parent_session_id, list)
+  }
+
+  for (const root of rootSessions) {
+    const children = childrenByParent.get(root.id) ?? []
+    result.set(
+      root.id,
+      deriveEudrWorkflowStateFromSnapshot(workflowSnapshotFromChildren(root, children))
+    )
+  }
+
+  return result
+}
+
 export async function resolveEudrWorkflowState(
   supabase: SupabaseClient<Database>,
   rootSession: Pick<SessionRow, "id" | "status" | "final_outcome" | "metadata">,
   fallbackStep1Completed: boolean = false
 ): Promise<EudrWorkflowState> {
-  const metadata = (rootSession.metadata as SessionMetadata | null) ?? null
-
-  const { data: childRows } = await supabase
-    .from("assessment_sessions")
-    .select("id, status, created_at")
-    .eq("tool_id", EUDR_TOOL_ID)
-    .eq("session_type", "analisi_finale")
-    .eq("parent_session_id", rootSession.id)
-    .order("created_at", { ascending: false })
-
-  const childCount = childRows?.length ?? 0
-  const inProgressChild = childRows?.find((row) => row.status !== "completed") ?? null
-  const latestChild = childRows?.[0] ?? null
-
-  return deriveEudrWorkflowStateFromSnapshot({
-    rootSessionId: rootSession.id,
-    status: rootSession.status,
-    finalOutcome: rootSession.final_outcome,
-    metadata,
-    childCount,
-    inProgressChildId: inProgressChild?.id ?? null,
-    latestChildId: latestChild?.id ?? null,
-    fallbackStep1Completed,
-  })
+  const batch = await resolveEudrWorkflowStatesBatch(supabase, [
+    { ...rootSession, fallbackStep1Completed },
+  ])
+  const state = batch.get(rootSession.id)
+  if (!state) {
+    throw new Error(`Workflow state missing for session ${rootSession.id}`)
+  }
+  return state
 }
 
 export function deriveEudrWorkflowStateFromSnapshot(snapshot: WorkflowSnapshot): EudrWorkflowState {

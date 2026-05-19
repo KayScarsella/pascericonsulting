@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 // 1. Importa il componente Toaster
 import { Toaster } from "@/components/ui/sonner";
@@ -22,6 +23,7 @@ export default function RootLayout({
         {children}
         {/* 2. Aggiungilo qui, prima della chiusura del body */}
         <Toaster />
+        <SpeedInsights />
       </body>
     </html>
   );
