@@ -1,6 +1,11 @@
-'use server'
+"use server"
 
 import { getToolAccess } from "@/lib/tool-auth"
+import {
+  assertStoragePathForTool,
+  createDocumentSignedUrls,
+  DOCUMENT_SIGNED_URL_TTL_SEC,
+} from "@/lib/documents-download"
 import { revalidatePath } from "next/cache"
 import { createClient } from "@/utils/supabase/server"
 
@@ -130,23 +135,35 @@ export async function deleteItem(id: string, toolId: string, pathRevalidate: str
 }
 
 /**
- * Ottiene URL firmato per il download.
- * Accessibile a chiunque abbia accesso al tool (anche 'standard').
+ * URL firmato singolo (fallback se prefetch scaduto).
+ * Richiede accesso al tool; il path deve essere sotto `{toolId}/`.
  */
-export async function getDownloadUrl(storagePath: string) {
-  const supabase = await getSupabase()
-  
-  // Verifica minima sessione
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: "Utente non autenticato" }
+export async function getDownloadUrl(storagePath: string, toolId: string) {
+  const { role } = await getToolAccess(toolId)
+  if (!role) return { error: "Accesso negato al tool" }
 
+  try {
+    assertStoragePathForTool(storagePath, toolId)
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Percorso non valido" }
+  }
+
+  const supabase = await getSupabase()
   const { data, error } = await supabase.storage
-    .from('documents')
-    .createSignedUrl(storagePath, 60, { 
-      download: true 
-    })
+    .from("documents")
+    .createSignedUrl(storagePath, DOCUMENT_SIGNED_URL_TTL_SEC, { download: true })
 
   if (error) return { error: error.message }
   return { signedUrl: data.signedUrl }
+}
+
+/** Batch signed URLs — 1 server action per N file (es. download multiplo). */
+export async function getDownloadUrls(storagePaths: string[], toolId: string) {
+  const { role } = await getToolAccess(toolId)
+  if (!role) return { error: "Accesso negato al tool", urls: {} as Record<string, string> }
+
+  const supabase = await getSupabase()
+  const urls = await createDocumentSignedUrls(supabase, toolId, storagePaths)
+  return { urls }
 }
 

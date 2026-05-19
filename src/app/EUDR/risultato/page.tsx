@@ -1,9 +1,10 @@
 import { getToolAccess } from "@/lib/tool-auth"
 import { EUDR_TOOL_ID } from "@/lib/constants"
-import { createServerClient } from "@supabase/ssr"
-import { cookies } from "next/headers"
-import { Database } from "@/types/supabase"
+import { createClient } from "@/utils/supabase/server"
 import { redirect } from "next/navigation"
+import { logRoutePerf } from "@/lib/perf-debug"
+import { getEudrPdfSections } from "@/lib/eudr-pdf-sections"
+import { scheduleEudrSessionFinalize } from "@/lib/eudr-risultato-sync"
 import { ShieldAlert, ArrowLeft, CheckCircle, AlertTriangle, Shield } from "lucide-react"
 import Link from "next/link"
 
@@ -25,7 +26,8 @@ import { getEudrDdsDisplayLabel } from "@/lib/eudr-dds-determination"
 import type { EudrDdsType } from "@/types/session"
 import { RiskBarChart } from "@/components/RiskBarChart"
 import { MitigationHistorySection } from "@/components/MitigationHistorySection"
-import { ExportAnalysisPdfButton, PDF_DISCLAIMERS } from "@/components/ExportAnalysisPdfButton"
+import { PDF_DISCLAIMERS } from "@/components/ExportAnalysisPdfButton"
+import { EudrRisultatoPdfButton } from "@/components/eudr/EudrRisultatoPdfButton"
 import type { QuestionConfig } from "@/types/questions"
 
 type DynamicTableClient = {
@@ -47,30 +49,14 @@ export default async function EudrRisultatoPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
+  const perfStart = Date.now()
+  let queryCount = 0
+
   const params = await searchParams
   const sessionId = params.session_id as string | undefined
 
-  const cookieStore = await cookies()
-  const supabase = createServerClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } }
-  )
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) redirect("/login")
-
-  const { data: userProfile } = await supabase
-    .from("profiles")
-    .select(
-      "full_name,ragione_sociale,cf_partita_iva,indirizzo,cap,citta,provincia,recapito_telefonico,email"
-    )
-    .eq("id", user.id)
-    .single()
-
-  const { role } = await getToolAccess(EUDR_TOOL_ID)
+  const { role, userId } = await getToolAccess(EUDR_TOOL_ID)
+  const supabase = await createClient()
   if (!role || role === "standard") {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center space-y-4">
@@ -96,15 +82,27 @@ export default async function EudrRisultatoPage({
     )
   }
 
-  const { data: session } = await supabase
-    .from("assessment_sessions")
-    .select("id, user_id, session_type, parent_session_id, metadata, status, final_outcome, evaluation_code")
-    .eq("id", sessionId)
-    .single()
+  queryCount += 1
+  const [{ data: session }, { data: userProfile }] = await Promise.all([
+    supabase
+      .from("assessment_sessions")
+      .select(
+        "id, user_id, session_type, parent_session_id, metadata, status, final_outcome, evaluation_code"
+      )
+      .eq("id", sessionId)
+      .single(),
+    supabase
+      .from("profiles")
+      .select(
+        "full_name,ragione_sociale,cf_partita_iva,indirizzo,cap,citta,provincia,recapito_telefonico,email"
+      )
+      .eq("id", userId)
+      .single(),
+  ])
 
   if (!session)
     return <div className="p-8 text-center text-red-600 font-bold">Sessione non trovata.</div>
-  if (session.user_id !== user.id && role !== "admin")
+  if (session.user_id !== userId && role !== "admin")
     return <div className="p-8 text-center text-red-600 font-bold">Accesso negato.</div>
 
   const metadata = session.metadata as Record<string, unknown> | null
@@ -124,14 +122,17 @@ export default async function EudrRisultatoPage({
 
   let allResponses: { question_id: string; answer_text: string | null; answer_json: unknown }[] = []
   if (session.parent_session_id) {
-    const { data: parentResponses } = await supabase
-      .from("user_responses")
-      .select("question_id, answer_text, answer_json")
-      .eq("session_id", session.parent_session_id)
-    const { data: childResponses } = await supabase
-      .from("user_responses")
-      .select("question_id, answer_text, answer_json")
-      .eq("session_id", sessionId)
+    queryCount += 1
+    const [{ data: parentResponses }, { data: childResponses }] = await Promise.all([
+      supabase
+        .from("user_responses")
+        .select("question_id, answer_text, answer_json")
+        .eq("session_id", session.parent_session_id),
+      supabase
+        .from("user_responses")
+        .select("question_id, answer_text, answer_json")
+        .eq("session_id", sessionId),
+    ])
     allResponses = [...(parentResponses || []), ...(childResponses || [])]
   } else {
     const { data: childResponses } = await supabase
@@ -189,61 +190,17 @@ export default async function EudrRisultatoPage({
   const displayOutcomeDescription = ddsOutcome.outcomeDescription
   const ddsType: EudrDdsType = ddsOutcome.ddsType
 
-  if (session.status !== "completed" || !session.final_outcome) {
-    const updatePayload: Record<string, unknown> = {
-      status: "completed",
-      final_outcome:
-        result.outcome === "accettabile"
-          ? "Rischio Trascurabile"
-          : "Rischio Non Trascurabile",
-      metadata: {
-        ...(metadata || {}),
-        risk_score: result.overallRisk,
-        risk_details: result.details.map((d) => ({
-          shortLabel: d.shortLabel,
-          riskIndex: d.riskIndex,
-        })),
-        completed_at: new Date().toISOString(),
-        expiry_date: result.expiryDate,
-        dds_type: ddsType,
-        dds_determined_at: new Date().toISOString(),
-        dds_non_eu_companies: ddsOutcome.ddsInputs.nonEuCompanyCount,
-        dds_country_count: ddsOutcome.ddsInputs.countryCount,
-        dds_country_risks: ddsOutcome.ddsInputs.countryRiskCodes,
-        outcome_description: displayOutcomeDescription,
-        ...(ddLastRunNormalized?.triggers_non_accettabile
-          ? {
-              aoi_gate_triggered: true,
-              aoi_gate_reasons: ddLastRunNormalized.reasons,
-            }
-          : {}),
-      },
-    }
-    await supabase.from("assessment_sessions").update(updatePayload).eq("id", sessionId)
-  } else if (
-    ddLastRunNormalized?.triggers_non_accettabile &&
-    session.final_outcome === "Rischio Trascurabile"
-  ) {
-    // AOI run after finalize: align stored outcome with gate (non accettabile)
-    await supabase
-      .from("assessment_sessions")
-      .update({
-        final_outcome: "Rischio Non Trascurabile",
-        metadata: {
-          ...(metadata || {}),
-          risk_score: result.overallRisk,
-          risk_details: result.details.map((d) => ({
-            shortLabel: d.shortLabel,
-            riskIndex: d.riskIndex,
-          })),
-          expiry_date: null,
-          aoi_gate_triggered: true,
-          aoi_gate_reasons: ddLastRunNormalized.reasons,
-          aoi_gate_synced_at: new Date().toISOString(),
-        },
-      })
-      .eq("id", sessionId)
-  }
+  scheduleEudrSessionFinalize({
+    sessionId,
+    sessionStatus: session.status,
+    sessionFinalOutcome: session.final_outcome,
+    metadata,
+    result,
+    ddsType,
+    displayOutcomeDescription,
+    ddsOutcome,
+    ddLastRunNormalized,
+  })
 
   let mitigationHistory: {
     id: string
@@ -284,14 +241,7 @@ export default async function EudrRisultatoPage({
     }
   }
 
-  const { data: sectionsForPdfRaw } = await supabase
-    .from("sections")
-    .select("id, title, order_index, group_name, questions(id, text, order_index, type, config)")
-    .eq("tool_id", EUDR_TOOL_ID)
-    .in("group_name", ["Analisi Rischio", "Valutazione", "Valutazione Finale"])
-    .order("order_index", { ascending: true })
-    .order("order_index", { foreignTable: "questions", ascending: true })
-
+  const sectionsDataFiltered = await getEudrPdfSections()
   type QuestionRow = {
     id: string
     text: string
@@ -306,10 +256,6 @@ export default async function EudrRisultatoPage({
     group_name: string | null
     questions: QuestionRow[] | null
   }
-  const sectionsData = (sectionsForPdfRaw || []) as SectionRow[]
-  const sectionsDataFiltered = sectionsData.filter(
-    (s) => s.id !== "a3df1e07-a678-49d2-9a4d-f134fba3498c"
-  )
 
   const supplierIds = new Set<string>()
   for (const section of sectionsDataFiltered) {
@@ -572,6 +518,12 @@ export default async function EudrRisultatoPage({
     }
   }
 
+  logRoutePerf("/EUDR/risultato", {
+    tab: sessionId,
+    queryCount,
+    durationMs: Date.now() - perfStart,
+  })
+
   return (
     <div className="max-w-5xl mx-auto px-4 pb-16">
       <Link
@@ -671,7 +623,7 @@ export default async function EudrRisultatoPage({
       </div>
 
       <div className="flex flex-wrap items-center gap-3 mb-10">
-        <ExportAnalysisPdfButton
+        <EudrRisultatoPdfButton
           variant="EUDR"
           nomeOperazione={nomeOperazione}
           userProfile={userProfile}

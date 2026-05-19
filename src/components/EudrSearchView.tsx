@@ -1,14 +1,26 @@
 'use client'
 
+import dynamic from "next/dynamic"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import {
-  DataManagementTable,
-  type DataManagementColumn,
-} from "@/components/admin/DataManagementTable"
+import type { DataManagementColumn } from "@/components/admin/DataManagementTable"
 import { deleteRecords } from "@/actions/actions"
 import { cn } from "@/lib/utils"
-import { EudrAnalisiTable, type EudrAssessmentSessionRow } from "@/components/EudrAnalisiTable"
+import type { EudrAssessmentSessionRow } from "@/components/EudrAnalisiTable"
+import { SearchTabSkeleton } from "@/components/search/SearchTabSkeleton"
+
+const EudrAnalisiTable = dynamic(
+  () => import("@/components/EudrAnalisiTable").then((m) => ({ default: m.EudrAnalisiTable })),
+  { loading: () => <SearchTabSkeleton /> }
+)
+
+const DataManagementTable = dynamic(
+  () =>
+    import("@/components/admin/DataManagementTable").then((m) => ({
+      default: m.DataManagementTable,
+    })),
+  { loading: () => <SearchTabSkeleton /> }
+) as typeof import("@/components/admin/DataManagementTable").DataManagementTable
 
 export type EudrVerificationRow = {
   id: string

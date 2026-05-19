@@ -1,16 +1,29 @@
 'use client'
 
+import dynamic from "next/dynamic"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import {
-  DataManagementTable,
-  type DataManagementColumn,
-} from "@/components/admin/DataManagementTable"
+import type { DataManagementColumn } from "@/components/admin/DataManagementTable"
 import { deleteRecords } from "@/actions/actions"
 import { Edit } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { TimberAnalisiTable, type AssessmentSessionRow } from "@/components/TimberAnalisiTable"
+import type { AssessmentSessionRow } from "@/components/TimberAnalisiTable"
 import { normalizeTimberSearchTab, resolveTimberVerificheActionUrl } from "@/lib/timber-search-routing"
+import { SearchTabSkeleton } from "@/components/search/SearchTabSkeleton"
+
+const TimberAnalisiTable = dynamic(
+  () =>
+    import("@/components/TimberAnalisiTable").then((m) => ({ default: m.TimberAnalisiTable })),
+  { loading: () => <SearchTabSkeleton /> }
+)
+
+const DataManagementTable = dynamic(
+  () =>
+    import("@/components/admin/DataManagementTable").then((m) => ({
+      default: m.DataManagementTable,
+    })),
+  { loading: () => <SearchTabSkeleton /> }
+) as typeof import("@/components/admin/DataManagementTable").DataManagementTable
 
 // --- Verification row type (used by search page for data shape) ---
 export interface VerificationRow {

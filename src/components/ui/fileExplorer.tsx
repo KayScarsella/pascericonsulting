@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { Folder, FileText, Download, Upload, Plus, ArrowLeft, Trash2, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 // Importiamo le actions aggiornate
-import { createFolder, uploadFile, deleteItem, getDownloadUrl } from "@/actions/documents"
+import { createFolder, uploadFile, deleteItem, getDownloadUrl, getDownloadUrls } from "@/actions/documents"
 import { Database } from "@/types/supabase"
 
 // Tipo derivato direttamente dal DB
@@ -16,8 +16,10 @@ interface FileExplorerProps {
   currentFolderId: string | null
   parentFolderId: string | null
   isAdmin: boolean
-  toolId: string        // ID del tool corrente (es. TIMBER, ALTRO)
-  pathRevalidate: string // L'URL corrente della pagina (per ricaricare i dati)
+  toolId: string
+  pathRevalidate: string
+  /** Prefetch server-side (batch signed URLs, TTL 5 min). */
+  downloadUrls?: Record<string, string>
 }
 
 export function FileExplorer({ 
@@ -26,7 +28,8 @@ export function FileExplorer({
   parentFolderId, 
   isAdmin, 
   toolId,
-  pathRevalidate 
+  pathRevalidate,
+  downloadUrls = {},
 }: FileExplorerProps) {
   const router = useRouter()
   const [isUploading, setIsUploading] = useState(false)
@@ -34,22 +37,61 @@ export function FileExplorer({
   const [isDownloading, setIsDownloading] = useState<string | null>(null)
 
   // --- DOWNLOAD ---
+  const triggerDownload = (signedUrl: string, filename: string) => {
+    const link = document.createElement("a")
+    link.href = signedUrl
+    link.setAttribute("download", filename)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
   const handleDownload = async (path: string | null, filename: string) => {
     if (!path) return
+    const prefetched = downloadUrls[path]
+    if (prefetched) {
+      triggerDownload(prefetched, filename)
+      return
+    }
+
     setIsDownloading(path)
     try {
-      const { signedUrl, error } = await getDownloadUrl(path)
+      const { signedUrl, error } = await getDownloadUrl(path, toolId)
       if (error) {
         alert("Errore download: " + error)
         return
       }
-      if (signedUrl) {
-        const link = document.createElement('a')
-        link.href = signedUrl
-        link.setAttribute('download', filename)
-        document.body.appendChild(link)
-        link.click()
-        link.remove()
+      if (signedUrl) triggerDownload(signedUrl, filename)
+    } catch (e) {
+      console.error(e)
+      alert("Errore imprevisto")
+    } finally {
+      setIsDownloading(null)
+    }
+  }
+
+  const handleDownloadAll = async () => {
+    const files = items.filter((i) => i.type === "file" && i.storage_path)
+    if (files.length === 0) return
+
+    setIsDownloading("__all__")
+    try {
+      const paths = files.map((f) => f.storage_path as string)
+      const missing = paths.filter((p) => !downloadUrls[p])
+      let urlMap = { ...downloadUrls }
+
+      if (missing.length > 0) {
+        const { urls, error } = await getDownloadUrls(missing, toolId)
+        if (error) {
+          alert("Errore download: " + error)
+          return
+        }
+        urlMap = { ...urlMap, ...urls }
+      }
+
+      for (const file of files) {
+        const url = urlMap[file.storage_path as string]
+        if (url) triggerDownload(url, file.name)
       }
     } catch (e) {
       console.error(e)
@@ -116,9 +158,25 @@ export function FileExplorer({
            )}
         </div>
 
-        {/* TOOLBAR ADMIN */}
-        {isAdmin && (
-          <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {items.some((i) => i.type === "file") && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleDownloadAll}
+              disabled={isDownloading === "__all__"}
+            >
+              {isDownloading === "__all__" ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4 mr-2" />
+              )}
+              Scarica tutti
+            </Button>
+          )}
+
+          {isAdmin && (
+            <>
             <Button size="sm" variant="outline" onClick={handleCreateFolder}>
               <Plus className="w-4 h-4 mr-2" /> Nuova Cartella
             </Button>
@@ -135,8 +193,9 @@ export function FileExplorer({
                   {isUploading ? 'Caricamento...' : 'Carica File'}
                 </Button>
             </div>
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* LISTA OGGETTI */}

@@ -60,6 +60,12 @@ export async function updateSession(request: NextRequest) {
 
   if (user) {
     const pathname = request.nextUrl.pathname;
+
+    // Landing loads profile/onboarding in RSC; skip extra DB round-trip here.
+    if (pathname === "/landingPage") {
+      return response;
+    }
+
     const allowedWhenResetPending = [
       "/auth/reset-password",
       "/auth/callback",

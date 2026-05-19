@@ -1,16 +1,17 @@
 import { getToolAccess } from "@/lib/tool-auth"
 import { TIMBER_TOOL_ID } from "@/lib/constants"
-import { createServerClient } from "@supabase/ssr"
-import { cookies } from "next/headers"
-import { Database } from "@/types/supabase"
-import { redirect } from "next/navigation"
+import { createClient } from "@/utils/supabase/server"
+import { logRoutePerf } from "@/lib/perf-debug"
+import { getTimberPdfSections } from "@/lib/timber-pdf-sections"
+import { scheduleTimberSessionFinalize } from "@/lib/timber-risultato-sync"
 import { ShieldAlert, ArrowLeft, CheckCircle, AlertTriangle, Shield } from "lucide-react"
 import Link from "next/link"
 
 import { calculateRisk, RiskCalculationResult, RISK_THRESHOLD, SCORED_QUESTIONS, getLabelForRaw } from "@/lib/risk-calculator"
 import { RiskBarChart } from "@/components/RiskBarChart"
 import { MitigationHistorySection } from "@/components/MitigationHistorySection"
-import { ExportAnalysisPdfButton, PDF_DISCLAIMERS } from "@/components/ExportAnalysisPdfButton"
+import { PDF_DISCLAIMERS } from "@/components/ExportAnalysisPdfButton"
+import { TimberRisultatoPdfButton } from "@/components/timber/TimberRisultatoPdfButton"
 import type { QuestionConfig } from "@/types/questions"
 
 type DynamicTableClient = {
@@ -32,28 +33,14 @@ export default async function RisultatoPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
+  const perfStart = Date.now()
+  let queryCount = 0
+
   const params = await searchParams
   const sessionId = params.session_id as string | undefined
 
-  const cookieStore = await cookies()
-  const supabase = createServerClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll(), setAll: () => { } } }
-  )
-
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
-
-  const { data: userProfile } = await supabase
-    .from('profiles')
-    .select(
-      'full_name,ragione_sociale,cf_partita_iva,indirizzo,cap,citta,provincia,recapito_telefonico,email'
-    )
-    .eq('id', user.id)
-    .single()
-
-  const { role } = await getToolAccess(TIMBER_TOOL_ID)
+  const { role, userId } = await getToolAccess(TIMBER_TOOL_ID)
+  const supabase = await createClient()
   if (!role || role === 'standard') {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center space-y-4">
@@ -77,15 +64,28 @@ export default async function RisultatoPage({
     )
   }
 
-  // 1. Fetch session info
-  const { data: session } = await supabase
-    .from('assessment_sessions')
-    .select('id, user_id, session_type, parent_session_id, metadata, status, final_outcome, evaluation_code')
-    .eq('id', sessionId)
-    .single()
+  queryCount += 1
+  const [{ data: session }, { data: userProfile }] = await Promise.all([
+    supabase
+      .from("assessment_sessions")
+      .select(
+        "id, user_id, session_type, parent_session_id, metadata, status, final_outcome, evaluation_code"
+      )
+      .eq("id", sessionId)
+      .single(),
+    supabase
+      .from("profiles")
+      .select(
+        "full_name,ragione_sociale,cf_partita_iva,indirizzo,cap,citta,provincia,recapito_telefonico,email"
+      )
+      .eq("id", userId)
+      .single(),
+  ])
 
-  if (!session) return <div className="p-8 text-center text-red-600 font-bold">Sessione non trovata.</div>
-  if (session.user_id !== user.id && role !== 'admin') return <div className="p-8 text-center text-red-600 font-bold">Accesso negato.</div>
+  if (!session)
+    return <div className="p-8 text-center text-red-600 font-bold">Sessione non trovata.</div>
+  if (session.user_id !== userId && role !== "admin")
+    return <div className="p-8 text-center text-red-600 font-bold">Accesso negato.</div>
 
   const metadata = session.metadata as Record<string, unknown> | null
   let baseEvaluationCode = session.evaluation_code ?? null
@@ -111,19 +111,25 @@ export default async function RisultatoPage({
   const countryName = countryResult?.data?.country_name || 'N/D'
   const countryHasConflicts = countryResult?.data?.conflicts ?? false
 
-  // 3. Fetch all responses: current session + parent session (answer_text + answer_json for display resolution)
   let allResponses: { question_id: string; answer_text: string | null; answer_json: unknown }[] = []
-  const { data: childResponses } = await supabase
-    .from('user_responses')
-    .select('question_id, answer_text, answer_json')
-    .eq('session_id', sessionId)
   if (session.parent_session_id) {
-    const { data: parentResponses } = await supabase
-      .from('user_responses')
-      .select('question_id, answer_text, answer_json')
-      .eq('session_id', session.parent_session_id)
+    queryCount += 1
+    const [{ data: parentResponses }, { data: childResponses }] = await Promise.all([
+      supabase
+        .from("user_responses")
+        .select("question_id, answer_text, answer_json")
+        .eq("session_id", session.parent_session_id),
+      supabase
+        .from("user_responses")
+        .select("question_id, answer_text, answer_json")
+        .eq("session_id", sessionId),
+    ])
     allResponses = [...(parentResponses || []), ...(childResponses || [])]
   } else {
+    const { data: childResponses } = await supabase
+      .from("user_responses")
+      .select("question_id, answer_text, answer_json")
+      .eq("session_id", sessionId)
     allResponses = childResponses || []
   }
   const answersMap: Record<string, string | null> = {}
@@ -133,33 +139,17 @@ export default async function RisultatoPage({
     if (r.answer_json != null) answersJsonMap[r.question_id] = r.answer_json
   }
 
-  // 4. Calculate risk
   const result: RiskCalculationResult = calculateRisk(answersMap)
 
-  // 5. Update session if not already completed
-  if (session.status !== 'completed' || !session.final_outcome) {
-    const updatePayload: Record<string, unknown> = {
-      status: 'completed',
-      final_outcome: result.outcome === 'accettabile' ? 'Rischio Trascurabile' : 'Rischio Non Trascurabile',
-      metadata: {
-        ...(metadata || {}),
-        risk_score: result.overallRisk,
-        risk_details: result.details.map(d => ({
-          shortLabel: d.shortLabel,
-          riskIndex: d.riskIndex,
-        })),
-        completed_at: new Date().toISOString(),
-        expiry_date: result.expiryDate,
-      },
-    }
+  scheduleTimberSessionFinalize({
+    sessionId,
+    sessionStatus: session.status,
+    sessionFinalOutcome: session.final_outcome,
+    metadata,
+    result,
+  })
 
-    await supabase
-      .from('assessment_sessions')
-      .update(updatePayload)
-      .eq('id', sessionId)
-  }
-
-  // 6. Fetch mitigation history (with comment, file_path; sorted by mitigated_at desc)
+  // Fetch mitigation history (with comment, file_path; sorted by mitigated_at desc)
   let mitigationHistory: { id: string; question_id: string; previous_answer: string | null; new_answer: string; mitigated_at: string; comment?: string | null; file_path?: string | null }[] = []
   try {
     const dynamicClient = supabase as unknown as DynamicTableClient
@@ -182,24 +172,14 @@ export default async function RisultatoPage({
     questionLabelsMap[sq.id] = { label: sq.label, shortLabel: sq.shortLabel, lookup: sq.lookup, labels: sq.labels }
   }
 
-  // Fetch all sections with questions (incl. type and config for display value resolution)
-  const { data: sectionsForPdfRaw } = await supabase
-    .from('sections')
-    .select('id, title, order_index, group_name, questions(id, text, order_index, type, config)')
-    .eq('tool_id', TIMBER_TOOL_ID)
-    .in('group_name', ['Analisi Rischio', 'Valutazione', 'Valutazione Finale'])
-    .order('order_index', { ascending: true })
-    .order('order_index', { foreignTable: 'questions', ascending: true })
-
-  type QuestionRow = { id: string; text: string; order_index: number | null; type: string; config: QuestionConfig | null }
-  type SectionRow = { id: string; title: string; order_index: number | null; group_name: string | null; questions: QuestionRow[] | null }
-  const sectionsDataRaw = (sectionsForPdfRaw || []) as SectionRow[]
-
-  // Hide section "C ) DATI RELATIVI ALLE COMPONENTI DEL PRODOTTO (SPECIE E PAESI)"
-  const HIDDEN_SECTION_TITLE = 'DATI RELATIVI ALLE COMPONENTI DEL PRODOTTO (SPECIE E PAESI)'
-  const sectionsData = sectionsDataRaw.filter(
-    (s) => !s.title.includes(HIDDEN_SECTION_TITLE)
-  )
+  const sectionsData = await getTimberPdfSections()
+  type QuestionRow = {
+    id: string
+    text: string
+    order_index: number | null
+    type: string
+    config: QuestionConfig | null
+  }
 
   // Pre-fetch suppliers referenced by supplier_manager answers
   const supplierIds = new Set<string>()
@@ -389,6 +369,12 @@ export default async function RisultatoPage({
     }
   }).filter(s => s.questions.length > 0)
 
+  logRoutePerf("/timberRegulation/risultato", {
+    tab: sessionId,
+    queryCount,
+    durationMs: Date.now() - perfStart,
+  })
+
   return (
     <div className="max-w-5xl mx-auto px-4 pb-16">
 
@@ -481,7 +467,7 @@ export default async function RisultatoPage({
 
       {/* PDF export: complete analysis with all questions */}
       <div className="flex flex-wrap items-center gap-3 mb-10">
-        <ExportAnalysisPdfButton
+        <TimberRisultatoPdfButton
           variant="EUTR"
           nomeOperazione={nomeOperazione}
           userProfile={userProfile}

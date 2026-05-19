@@ -13,13 +13,13 @@ todos:
     status: completed
   - id: eudr-search-client-profile
     content: "Fase 2: Profiling incognito + @next/bundle-analyzer; dynamic import tab verifiche"
-    status: pending
+    status: completed
   - id: fix-timber-search
     content: "Fase 3: Replicare fix su /timberRegulation/search (dopo validazione EUDR)"
     status: completed
   - id: refactor-other-routes
-    content: "Fase 4+: risultato, documenti, altre pagine (uno alla volta)"
-    status: pending
+    content: "Fase 4+: risultato EUDR/Timber, documentazione batch signed URLs"
+    status: completed
 isProject: false
 ---
 

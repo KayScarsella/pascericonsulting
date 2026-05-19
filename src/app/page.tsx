@@ -19,7 +19,7 @@ export default async function Home() {
   // 3. SE SIAMO QUI, L'UTENTE NON È LOGGATO
   // Mostriamo solo la schermata di benvenuto con Login/Registrati
   return (
-    <div className="relative flex min-h-screen flex-col items-center justify-center p-24 gap-8">
+    <div className="relative flex min-h-screen flex-col items-center justify-center p-24 gap-8 site-forest-bg">
       <div className="absolute right-4 top-4 z-10 sm:right-6 sm:top-6">
         <ArchiveBackButton />
       </div>
