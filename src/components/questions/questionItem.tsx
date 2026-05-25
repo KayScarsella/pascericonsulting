@@ -2,10 +2,11 @@
 
 import { CheckCircle2, Circle } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { QuestionWithConfig, QuestionType } from "@/types/questions"
-// 🛠️ Importiamo i tipi esatti da dynamicInput per evitare any e unknown
-import { DynamicInput, AnswerValue, RepeaterConfig } from "./dynamicInput"
+import { QuestionWithConfig, AnswerValue, YearValuesQuestionConfig } from "@/types/questions"
+import { DynamicInput, RepeaterConfig } from "./dynamicInput"
+import { YearValuesInput } from "./YearValuesInput"
 import { ResponseUploader } from "./FileUploader"
+import { isQuestionAnsweredByType, isYearValuesQuestionType } from "@/lib/question-type-utils"
 
 interface QuestionItemProps {
   question: QuestionWithConfig
@@ -23,6 +24,45 @@ interface QuestionItemProps {
   uploadReadOnly?: boolean
   /** Optional: render a static display instead of DynamicInput */
   staticDisplayText?: string | null
+}
+
+function QuestionFieldInput({
+  question,
+  value,
+  onAnswerChange,
+  onExtraChange,
+  readOnly,
+  toolId,
+}: {
+  question: QuestionWithConfig
+  value: AnswerValue
+  onAnswerChange: (value: AnswerValue) => void
+  onExtraChange?: (extraData: Record<string, unknown> | null) => void
+  readOnly?: boolean
+  toolId: string
+}) {
+  if (isYearValuesQuestionType(question.type)) {
+    return (
+      <YearValuesInput
+        config={(question.config as YearValuesQuestionConfig) ?? {}}
+        value={value}
+        onChange={onAnswerChange}
+        readOnly={readOnly}
+      />
+    )
+  }
+
+  return (
+    <DynamicInput
+      type={question.type}
+      config={question.config as RepeaterConfig}
+      value={value}
+      onChange={onAnswerChange}
+      onExtraChange={onExtraChange}
+      readOnly={readOnly}
+      toolId={toolId}
+    />
+  )
 }
 
 export function QuestionItem({
@@ -44,14 +84,13 @@ export function QuestionItem({
   const effectiveInputReadOnly = inputReadOnly ?? readOnly
   const effectiveUploadReadOnly = uploadReadOnly ?? readOnly
 
-  const isAnswered =
-    (value !== null &&
-      value !== undefined &&
-      value !== "" &&
-      (!Array.isArray(value) || value.length > 0)) ||
-    filePath !== null
-  
-  // Cast sicuro al tipo RepeaterConfig che include le proprietà base di QuestionConfig
+  const isAnswered = isQuestionAnsweredByType(
+    question.type,
+    question.config,
+    value,
+    filePath
+  )
+
   const typedConfig = question.config as RepeaterConfig
   const noteText = null
 
@@ -90,11 +129,10 @@ export function QuestionItem({
               {staticDisplayText}
             </div>
           ) : (
-            <DynamicInput
-              type={question.type as QuestionType | "supplier_manager"}
-              config={typedConfig}
+            <QuestionFieldInput
+              question={question}
               value={value}
-              onChange={onAnswerChange}
+              onAnswerChange={onAnswerChange}
               onExtraChange={onExtraChange}
               readOnly={effectiveInputReadOnly}
               toolId={toolId}
@@ -138,11 +176,10 @@ export function QuestionItem({
 
         {/* Input Manager Fornitore che ora può espandersi liberamente */}
         <div className="w-full pt-2">
-          <DynamicInput
-            type={question.type as QuestionType | 'supplier_manager'}
-            config={typedConfig}
+          <QuestionFieldInput
+            question={question}
             value={value}
-            onChange={onAnswerChange}
+            onAnswerChange={onAnswerChange}
             onExtraChange={onExtraChange}
             readOnly={readOnly}
             toolId={toolId}
@@ -207,11 +244,10 @@ export function QuestionItem({
             {staticDisplayText}
           </div>
         ) : (
-          <DynamicInput
-            type={question.type as QuestionType | "supplier_manager"}
-            config={typedConfig}
+          <QuestionFieldInput
+            question={question}
             value={value}
-            onChange={onAnswerChange}
+            onAnswerChange={onAnswerChange}
             onExtraChange={onExtraChange}
             readOnly={effectiveInputReadOnly}
             toolId={toolId}

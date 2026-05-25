@@ -22,9 +22,9 @@ const COUNTRY_SORT_FIELDS = [
   'corruption_code',
   'country_risk',
   'fao',
-  'FSI',
-  'RLI',
-  'ILO',
+  'cpi_23',
+  'cpi_24',
+  'cpi_25',
 ] as const
 const NOTIFICATION_SORT_FIELDS = ['created_at', 'title', 'expires_at', 'is_active'] as const
 

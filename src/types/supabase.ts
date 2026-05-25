@@ -85,12 +85,12 @@ export type Database = {
           country_name: string | null
           country_risk: Database["public"]["Enums"]["country_risk"] | null
           extra_eu: boolean | null
+          cpi_23: number | null
+          cpi_24: number | null
+          cpi_25: number | null
           fao: number | null
           flegt_partner: boolean
-          FSI: number | null
           id: string
-          ILO: number | null
-          RLI: number | null
           sanction: boolean | null
         }
         Insert: {
@@ -101,12 +101,12 @@ export type Database = {
           country_name?: string | null
           country_risk?: Database["public"]["Enums"]["country_risk"] | null
           extra_eu?: boolean | null
+          cpi_23?: number | null
+          cpi_24?: number | null
+          cpi_25?: number | null
           fao?: number | null
           flegt_partner?: boolean
-          FSI?: number | null
           id?: string
-          ILO?: number | null
-          RLI?: number | null
           sanction?: boolean | null
         }
         Update: {
@@ -117,12 +117,12 @@ export type Database = {
           country_name?: string | null
           country_risk?: Database["public"]["Enums"]["country_risk"] | null
           extra_eu?: boolean | null
+          cpi_23?: number | null
+          cpi_24?: number | null
+          cpi_25?: number | null
           fao?: number | null
           flegt_partner?: boolean
-          FSI?: number | null
           id?: string
-          ILO?: number | null
-          RLI?: number | null
           sanction?: boolean | null
         }
         Relationships: []

@@ -5,6 +5,13 @@ import { Database } from "./supabase";
 export type QuestionRow = Database['public']['Tables']['questions']['Row'];
 export type UserResponseRow = Database['public']['Tables']['user_responses']['Row'];
 
+export type AnswerValue =
+  | string
+  | number
+  | null
+  | Record<string, unknown>[]
+  | Record<string, unknown>;
+
 // Tipi di risposta supportati
 export type QuestionType =
   | 'text'
@@ -13,7 +20,8 @@ export type QuestionType =
   | 'async_select'
   | 'repeater'
   | 'supplier_manager'
-  | 'date_range';
+  | 'date_range'
+  | 'year_values';
 
 // Interfaccia per il JSON "config"
 export interface QuestionConfig {
@@ -29,6 +37,11 @@ export interface QuestionConfig {
   file_upload_enabled?: boolean;
   optional?: boolean; // Indica se la domanda è facoltativa
 }
+
+/** Config JSON for `year_values` questions (`config.fields` in DB) */
+export type YearValuesQuestionConfig = QuestionConfig & {
+  fields?: { key: string; label: string }[];
+};
 
 // Tipo esteso che forza "config" ad essere QuestionConfig invece di Json
 export interface QuestionWithConfig extends Omit<QuestionRow, 'config'> {

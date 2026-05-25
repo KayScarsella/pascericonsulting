@@ -198,9 +198,9 @@ export function MasterSectionClient({
     'none'
   )
   const [faoStr, setFaoStr] = useState('')
-  const [fsiStr, setFsiStr] = useState('')
-  const [rliStr, setRliStr] = useState('')
-  const [iloStr, setIloStr] = useState('')
+  const [cpi23Str, setCpi23Str] = useState('')
+  const [cpi24Str, setCpi24Str] = useState('')
+  const [cpi25Str, setCpi25Str] = useState('')
   const [notifTitle, setNotifTitle] = useState('')
   const [notifMessage, setNotifMessage] = useState('')
   const [notifExpiresAt, setNotifExpiresAt] = useState('')
@@ -1501,9 +1501,9 @@ export function MasterSectionClient({
     setCorruptionCode('')
     setCountryRiskSel('none')
     setFaoStr('')
-    setFsiStr('')
-    setRliStr('')
-    setIloStr('')
+    setCpi23Str('')
+    setCpi24Str('')
+    setCpi25Str('')
   }
   const openCreate = () => {
     resetForm()
@@ -1523,30 +1523,30 @@ export function MasterSectionClient({
     const r = row.country_risk
     setCountryRiskSel(r === 'RA' || r === 'RB' || r === 'RS' ? r : 'none')
     setFaoStr(row.fao != null ? String(row.fao) : '')
-    setFsiStr(row.FSI != null ? String(row.FSI) : '')
-    setRliStr(row.RLI != null ? String(row.RLI) : '')
-    setIloStr(row.ILO != null ? String(row.ILO) : '')
+    setCpi23Str(row.cpi_23 != null ? String(row.cpi_23) : '')
+    setCpi24Str(row.cpi_24 != null ? String(row.cpi_24) : '')
+    setCpi25Str(row.cpi_25 != null ? String(row.cpi_25) : '')
     setDialogOpen(true)
   }
   const handleSubmit = async () => {
     const fao = parseOptionalCountryNumber(faoStr)
-    const fsi = parseOptionalCountryNumber(fsiStr)
-    const rli = parseOptionalCountryNumber(rliStr)
-    const ilo = parseOptionalCountryNumber(iloStr)
+    const cpi23 = parseOptionalCountryNumber(cpi23Str)
+    const cpi24 = parseOptionalCountryNumber(cpi24Str)
+    const cpi25 = parseOptionalCountryNumber(cpi25Str)
     if (fao === false) {
       toast.error('Valore FAO non valido.')
       return
     }
-    if (fsi === false) {
-      toast.error('Valore FSI non valido.')
+    if (cpi23 === false) {
+      toast.error('Valore CPI 2023 non valido.')
       return
     }
-    if (rli === false) {
-      toast.error('Valore RLI non valido.')
+    if (cpi24 === false) {
+      toast.error('Valore CPI 2024 non valido.')
       return
     }
-    if (ilo === false) {
-      toast.error('Valore ILO non valido.')
+    if (cpi25 === false) {
+      toast.error('Valore CPI 2025 non valido.')
       return
     }
     const country_risk =
@@ -1561,9 +1561,9 @@ export function MasterSectionClient({
         corruption_code: corruptionPayload,
         country_risk,
         fao,
-        FSI: fsi,
-        RLI: rli,
-        ILO: ilo,
+        cpi_23: cpi23,
+        cpi_24: cpi24,
+        cpi_25: cpi25,
       })
       if (res.error) {
         toast.error(res.error)
@@ -1579,9 +1579,9 @@ export function MasterSectionClient({
         corruption_code: corruptionPayload,
         country_risk,
         fao,
-        FSI: fsi,
-        RLI: rli,
-        ILO: ilo,
+        cpi_23: cpi23,
+        cpi_24: cpi24,
+        cpi_25: cpi25,
       })
       if (res.error) {
         toast.error(res.error)
@@ -1633,32 +1633,32 @@ export function MasterSectionClient({
       ),
     },
     {
-      id: 'FSI',
-      header: 'FSI',
-      sortKey: 'FSI',
+      id: 'cpi_23',
+      header: 'CPI 2023',
+      sortKey: 'cpi_23',
       render: (row) => (
         <span className="text-slate-600 tabular-nums text-xs">
-          {formatCountryNumber(row.FSI)}
+          {formatCountryNumber(row.cpi_23)}
         </span>
       ),
     },
     {
-      id: 'RLI',
-      header: 'RLI',
-      sortKey: 'RLI',
+      id: 'cpi_24',
+      header: 'CPI 2024',
+      sortKey: 'cpi_24',
       render: (row) => (
         <span className="text-slate-600 tabular-nums text-xs">
-          {formatCountryNumber(row.RLI)}
+          {formatCountryNumber(row.cpi_24)}
         </span>
       ),
     },
     {
-      id: 'ILO',
-      header: 'ILO',
-      sortKey: 'ILO',
+      id: 'cpi_25',
+      header: 'CPI 2025',
+      sortKey: 'cpi_25',
       render: (row) => (
         <span className="text-slate-600 tabular-nums text-xs">
-          {formatCountryNumber(row.ILO)}
+          {formatCountryNumber(row.cpi_25)}
         </span>
       ),
     },
@@ -1911,32 +1911,32 @@ export function MasterSectionClient({
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="country-fsi">FSI</Label>
+                <Label htmlFor="country-cpi-23">CPI 2023</Label>
                 <Input
-                  id="country-fsi"
+                  id="country-cpi-23"
                   inputMode="decimal"
-                  value={fsiStr}
-                  onChange={(e) => setFsiStr(e.target.value)}
+                  value={cpi23Str}
+                  onChange={(e) => setCpi23Str(e.target.value)}
                   placeholder="opzionale"
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="country-rli">RLI</Label>
+                <Label htmlFor="country-cpi-24">CPI 2024</Label>
                 <Input
-                  id="country-rli"
+                  id="country-cpi-24"
                   inputMode="decimal"
-                  value={rliStr}
-                  onChange={(e) => setRliStr(e.target.value)}
+                  value={cpi24Str}
+                  onChange={(e) => setCpi24Str(e.target.value)}
                   placeholder="opzionale"
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="country-ilo">ILO</Label>
+                <Label htmlFor="country-cpi-25">CPI 2025</Label>
                 <Input
-                  id="country-ilo"
+                  id="country-cpi-25"
                   inputMode="decimal"
-                  value={iloStr}
-                  onChange={(e) => setIloStr(e.target.value)}
+                  value={cpi25Str}
+                  onChange={(e) => setCpi25Str(e.target.value)}
                   placeholder="opzionale"
                 />
               </div>

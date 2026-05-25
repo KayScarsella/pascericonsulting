@@ -1,11 +1,14 @@
 import { UserResponseRow, SectionLogicRule } from "@/types/questions";
+import { hasMeaningfulAnswerJson } from "@/lib/question-type-utils";
 
 function isNonEmptyResponse(r: UserResponseRow): boolean {
   const t = r.answer_text
   if (t !== null && t !== undefined && String(t).trim() !== '') return true
-  if (r.answer_json !== null && r.answer_json !== undefined) {
+  if (r.answer_json != null && r.answer_json !== undefined) {
     if (Array.isArray(r.answer_json) && r.answer_json.length > 0) return true
-    if (typeof r.answer_json === 'object' && !Array.isArray(r.answer_json)) return true
+    if (typeof r.answer_json === 'object' && !Array.isArray(r.answer_json)) {
+      return hasMeaningfulAnswerJson(r.answer_json)
+    }
   }
   if (r.file_path) return true
   return false
@@ -47,8 +50,7 @@ export function mapResponses(responses: UserResponseRow[] | null) {
       if (Array.isArray(r.answer_json) && r.answer_json.length > 0) {
         map[r.question_id] = r.answer_json
       } else if (typeof r.answer_json === 'object' && !Array.isArray(r.answer_json)) {
-        const keys = Object.keys(r.answer_json as object)
-        if (keys.length > 0) map[r.question_id] = r.answer_json
+        if (hasMeaningfulAnswerJson(r.answer_json)) map[r.question_id] = r.answer_json
       }
     }
   });

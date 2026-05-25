@@ -145,14 +145,19 @@ export default async function EudrRisultatoPage({
 
   const [speciesResult, countryResult] = await Promise.all([
     specieId
-      ? supabase.from("species").select("common_name").eq("id", specieId).single()
+      ? supabase.from("species").select("common_name, scientific_name").eq("id", specieId).single()
       : null,
     countryId
       ? supabase.from("country").select("country_name, conflicts").eq("id", countryId).single()
       : null,
   ])
 
-  const specieName = speciesResult?.data?.common_name || "N/D"
+  const specieCommon = String(speciesResult?.data?.common_name ?? "").trim()
+  const specieScientific = String(speciesResult?.data?.scientific_name ?? "").trim()
+  const specieName =
+    specieCommon && specieScientific
+      ? `${specieCommon} - ${specieScientific}`
+      : specieCommon || specieScientific || "N/D"
   const countryName = countryResult?.data?.country_name || "N/D"
   const countryHasConflicts = countryResult?.data?.conflicts ?? false
 

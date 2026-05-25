@@ -13,14 +13,27 @@ import { EUDR_TOOL_ID, TIMBER_TOOL_ID } from "@/lib/constants"
 import {
     EUDR_Q_CITES,
     EUDR_Q_FLEGT,
+    EUDR_Q_CPI,
+    EUDR_PREFILL_DERIVED_QUESTION_IDS,
     EUDR_SECTION_G,
     isYesLikeAnswer,
 } from "@/lib/eudr-question-ids"
+import { buildCpiAnswerFromExtra } from "@/lib/year-values"
+import { isQuestionAnsweredByType, isJsonAnswerQuestionType } from "@/lib/question-type-utils"
 import { EmbeddedDueDiligenceBlock } from "@/features/eudr-due-diligence/EmbeddedDueDiligenceBlock"
 
 /** Sezione E — Paese di raccolta: dopo "Rischio paese" mostra blocco AOI inline */
 const SECTION_E_PAES_EMBED_AFTER = "8e3c8459-5a9b-4ecf-8a4e-9f9da2b53cc1"
 const QUESTION_RISCHIO_PAESE_ID = "e8f9a0b1-c2d3-4e4f-8a9b-0c1d2e3f4a65"
+const QUESTION_PAESE_RACCOLTA_ID = EUDR_PREFILL_DERIVED_QUESTION_IDS.PAESE_RACCOLTA
+
+function isQuestionAnswered(
+    q: Tables<'questions'>,
+    val: unknown,
+    fileVal: string | null | undefined
+): boolean {
+    return isQuestionAnsweredByType(q.type, q.config, val, fileVal)
+}
 
 const RELIABILITY_OPTIONS_SIGNATURE = [
     { label: "Affidabilità alta", value: "1" },
@@ -48,8 +61,7 @@ function hasReliabilitySelectConfig(q: Tables<'questions'>): boolean {
 
 // 🛠️ IMPORT RIGOROSI: Niente interfacce clonate localmente
 import { Tables } from "@/types/supabase"
-import { QuestionWithConfig, SectionLogicRule } from "@/types/questions"
-import { AnswerValue } from "./dynamicInput" // Aggiusta il percorso se necessario
+import { QuestionWithConfig, SectionLogicRule, AnswerValue } from "@/types/questions"
 
 // 🛠️ Usiamo i tipi delle tabelle per estendere le sezioni
 type SectionWithQuestions = Tables<'sections'> & {
@@ -124,6 +136,18 @@ export function SectionList({
 
     const handleExtraDataChange = (questionId: string, extra: Record<string, unknown> | null) => {
         setLocalExtraData(prev => ({ ...prev, [questionId]: extra || {} }));
+
+        if (
+            questionId === QUESTION_PAESE_RACCOLTA_ID &&
+            extra &&
+            !isQuestionAnsweredByType("year_values", null, localAnswers[EUDR_Q_CPI], null) &&
+            !isQuestionAnsweredByType("year_values", null, initialAnswers[EUDR_Q_CPI], null)
+        ) {
+            const cpiAnswer = buildCpiAnswerFromExtra(extra)
+            if (cpiAnswer) {
+                setLocalAnswers(prev => ({ ...prev, [EUDR_Q_CPI]: cpiAnswer }))
+            }
+        }
     };
 
     const sectionsForRender = useMemo(() => {
@@ -172,7 +196,7 @@ export function SectionList({
                     visibleQs.push(q);
                     const val = localAnswers[q.id];
                     const fileVal = localFiles[q.id];
-                    const isAnswered = (val !== undefined && val !== null && val !== '') || (fileVal !== undefined && fileVal !== null);
+                    const isAnswered = isQuestionAnswered(q, val, fileVal);
 
                     if (isAnswered) {
                         answersSoFar[q.id] = val;
@@ -230,7 +254,7 @@ export function SectionList({
             // geolocation evidence is handled by the dedicated AOI flow / other questions.
             const isAnswered = isReliabilitySelect
                 ? true
-                : (val !== undefined && val !== null && val !== '') || (fileVal !== undefined && fileVal !== null);
+                : isQuestionAnswered(q, val, fileVal);
 
             const initialVal = initialAnswers[q.id];
             const initialFileVal = initialFiles[q.id];
@@ -255,7 +279,7 @@ export function SectionList({
                     }
                     continue;
                 }
-                const isJson = typeof val === 'object' && val !== null;
+                const isJson = isJsonAnswerQuestionType(q.type) || (typeof val === 'object' && val !== null);
                 payloadToSave.push({
                     questionId: q.id,
                     value: val,
@@ -324,7 +348,7 @@ export function SectionList({
             const isNaInSectionG = isEudrSectionG && triggerGeoOnly && !isReliabilitySelect
             if (isNaInSectionG) return true
             if (isReliabilitySelect) return true
-            return (val !== undefined && val !== null && val !== '' && (!Array.isArray(val) || val.length > 0)) || (file !== undefined && file !== null);
+            return isQuestionAnswered(q, val, file);
         }).length;
         return { total: visibleQs.length, answered: answeredCount };
     };

@@ -213,9 +213,9 @@ export async function listCountriesPaginated(
       | 'corruption_code'
       | 'country_risk'
       | 'fao'
-      | 'FSI'
-      | 'RLI'
-      | 'ILO'
+      | 'cpi_23'
+      | 'cpi_24'
+      | 'cpi_25'
     dir?: SortDir
   }
 ): Promise<{ data: CountryRow[] | null; totalCount: number; error: string | null }> {
@@ -268,9 +268,9 @@ export async function createCountry(
     corruption_code?: string | null
     country_risk?: Database['public']['Enums']['country_risk'] | null
     fao?: number | null
-    FSI?: number | null
-    RLI?: number | null
-    ILO?: number | null
+    cpi_23?: number | null
+    cpi_24?: number | null
+    cpi_25?: number | null
   }
 ): Promise<{ data: CountryRow | null; error: string | null }> {
   try {
@@ -284,9 +284,9 @@ export async function createCountry(
       corruption_code: (payload.corruption_code ?? null) as CountryInsert["corruption_code"],
       country_risk: payload.country_risk ?? null,
       fao: payload.fao ?? null,
-      FSI: payload.FSI ?? null,
-      RLI: payload.RLI ?? null,
-      ILO: payload.ILO ?? null,
+      cpi_23: payload.cpi_23 ?? null,
+      cpi_24: payload.cpi_24 ?? null,
+      cpi_25: payload.cpi_25 ?? null,
     }
     const { data, error } = await supabase.from('country').insert(insert).select().single()
     if (error) return { data: null, error: error.message }
@@ -307,9 +307,9 @@ export async function updateCountry(
     corruption_code?: string | null
     country_risk?: Database['public']['Enums']['country_risk'] | null
     fao?: number | null
-    FSI?: number | null
-    RLI?: number | null
-    ILO?: number | null
+    cpi_23?: number | null
+    cpi_24?: number | null
+    cpi_25?: number | null
   }
 ): Promise<{ data: CountryRow | null; error: string | null }> {
   try {
@@ -325,9 +325,9 @@ export async function updateCountry(
         corruption_code: payload.corruption_code as CountryInsert["corruption_code"],
         country_risk: payload.country_risk,
         fao: payload.fao,
-        FSI: payload.FSI,
-        RLI: payload.RLI,
-        ILO: payload.ILO,
+        cpi_23: payload.cpi_23,
+        cpi_24: payload.cpi_24,
+        cpi_25: payload.cpi_25,
       })
       .eq('id', id)
       .select()

@@ -33,12 +33,15 @@ export const EUDR_FAO_ANNEX_QUESTION_ID: string | null = null
 
 export const EUDR_PREFILL_VERSION = 1 as const
 
+export const EUDR_Q_CPI = "f1a2b3c4-d5e6-4789-a012-3456789abcde"
+
 export const EUDR_PREFILL_DERIVED_QUESTION_IDS = {
   PAESE_RACCOLTA: "d5e6f7a8-b9c0-4d1e-9f2a-3b4c5d6e7f54",
   SPECIE: "ce302e2d-e894-4cc1-bc8b-9b580e163e7f",
   RISCHIO_PAESE: "e8f9a0b1-c2d3-4e4f-8a9b-0c1d2e3f4a65",
   CONFLITTI: "f4a5b6c7-d8e9-4f0a-8b1c-2d3e4f5a6b21",
   SANZIONI: "d6e7f8a9-b0c1-4d2e-9f3a-4b5c6d7e8f70",
+  CPI: EUDR_Q_CPI,
 } as const
 
 export const EUDR_PREFILL_DERIVED_QUESTION_ID_SET = new Set<string>(

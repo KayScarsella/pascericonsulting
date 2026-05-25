@@ -12,7 +12,8 @@ import { RiskBarChart } from "@/components/RiskBarChart"
 import { MitigationHistorySection } from "@/components/MitigationHistorySection"
 import { PDF_DISCLAIMERS } from "@/components/ExportAnalysisPdfButton"
 import { TimberRisultatoPdfButton } from "@/components/timber/TimberRisultatoPdfButton"
-import type { QuestionConfig } from "@/types/questions"
+import type { QuestionConfig, YearValuesQuestionConfig } from "@/types/questions"
+import { resolveQuestionDisplayAnswer } from "@/lib/question-answer-display"
 
 type DynamicTableClient = {
   from: (table: string) => {
@@ -103,11 +104,16 @@ export default async function RisultatoPage({
 
   // 2. Fetch supplementary data (species name, country name + conflicts)
   const [speciesResult, countryResult] = await Promise.all([
-    specieId ? supabase.from('species').select('common_name').eq('id', specieId).single() : null,
+    specieId ? supabase.from('species').select('common_name, scientific_name').eq('id', specieId).single() : null,
     countryId ? supabase.from('country').select('country_name, conflicts').eq('id', countryId).single() : null,
   ])
 
-  const specieName = speciesResult?.data?.common_name || 'N/D'
+  const specieCommon = String(speciesResult?.data?.common_name ?? '').trim()
+  const specieScientific = String(speciesResult?.data?.scientific_name ?? '').trim()
+  const specieName =
+    specieCommon && specieScientific
+      ? `${specieCommon} - ${specieScientific}`
+      : specieCommon || specieScientific || 'N/D'
   const countryName = countryResult?.data?.country_name || 'N/D'
   const countryHasConflicts = countryResult?.data?.conflicts ?? false
 
@@ -314,6 +320,12 @@ export default async function RisultatoPage({
     if (q.type === 'repeater' && Array.isArray(answerJson)) {
       return answerJson.length ? `${answerJson.length} elemento/i` : '—'
     }
+    const structured = resolveQuestionDisplayAnswer(
+      { type: q.type, config: q.config as YearValuesQuestionConfig | null },
+      answerText,
+      answerJson
+    )
+    if (structured) return structured
     return raw || '—'
   }
 

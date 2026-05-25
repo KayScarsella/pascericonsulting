@@ -8,6 +8,8 @@ import {
   EUDR_PREFILL_VERSION,
   resolveEudrFaoQuestionId,
 } from "@/lib/eudr-question-ids"
+import { buildCpiAnswerFromCountry } from "@/lib/year-values"
+import { hasMeaningfulAnswerJson } from "@/lib/question-type-utils"
 import { upsertUserResponses } from "@/actions/workflows/shared"
 
 type UserResponseRow = Pick<
@@ -15,21 +17,24 @@ type UserResponseRow = Pick<
   "question_id" | "answer_text" | "answer_json" | "file_path"
 >
 
+type DerivedPrefillRow = {
+  question_id: string
+  answer_text?: string | null
+  answer_json?: Json | null
+}
+
 type PrefillInput = {
   userId: string
   finalSessionId: string
   existingChildRows: UserResponseRow[]
   parentRows: UserResponseRow[]
-  derivedRows: Array<{ question_id: string; answer_text: string }>
+  derivedRows: DerivedPrefillRow[]
 }
 
 function isNonEmptyResponse(row: UserResponseRow | null | undefined): boolean {
   if (!row) return false
   if (row.answer_text != null && String(row.answer_text).trim() !== "") return true
-  if (row.answer_json != null) {
-    if (Array.isArray(row.answer_json)) return row.answer_json.length > 0
-    if (typeof row.answer_json === "object") return Object.keys(row.answer_json as object).length > 0
-  }
+  if (row.answer_json != null && hasMeaningfulAnswerJson(row.answer_json)) return true
   return Boolean(row.file_path)
 }
 
@@ -93,7 +98,7 @@ export async function materializeEudrFinalPrefillForSession(
     countryId
       ? supabase
           .from("country")
-          .select("id, conflicts, sanction, country_risk, fao")
+          .select("id, conflicts, sanction, country_risk, fao, cpi_23, cpi_24, cpi_25")
           .eq("id", countryId)
           .maybeSingle()
       : Promise.resolve({ data: null }),
@@ -102,7 +107,7 @@ export async function materializeEudrFinalPrefillForSession(
 
   const now = new Date().toISOString()
 
-  const derivedQuestionRows: Array<{ question_id: string; answer_text: string }> = []
+  const derivedQuestionRows: DerivedPrefillRow[] = []
   if (countryId) {
     derivedQuestionRows.push({
       question_id: EUDR_PREFILL_DERIVED_QUESTION_IDS.PAESE_RACCOLTA,
@@ -139,6 +144,13 @@ export async function materializeEudrFinalPrefillForSession(
       derivedQuestionRows.push({
         question_id: qFaoId,
         answer_text: String(fao),
+      })
+    }
+    const cpiAnswer = buildCpiAnswerFromCountry(countryRes.data)
+    if (cpiAnswer) {
+      derivedQuestionRows.push({
+        question_id: EUDR_PREFILL_DERIVED_QUESTION_IDS.CPI,
+        answer_json: cpiAnswer as unknown as Json,
       })
     }
   }
@@ -206,7 +218,8 @@ export function buildEudrPrefillRows(input: PrefillInput): TablesInsert<"user_re
       tool_id: EUDR_TOOL_ID,
       session_id: input.finalSessionId,
       question_id: derived.question_id,
-      answer_text: derived.answer_text,
+      answer_text: derived.answer_text ?? null,
+      answer_json: derived.answer_json ?? null,
     })
   }
 

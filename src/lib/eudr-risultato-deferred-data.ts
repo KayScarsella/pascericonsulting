@@ -7,7 +7,8 @@ import {
   getEudrLabelForRaw,
   type RiskCalculationResult,
 } from "@/lib/eudr-risk-calculator"
-import type { QuestionConfig } from "@/types/questions"
+import type { QuestionConfig, YearValuesQuestionConfig } from "@/types/questions"
+import { resolveQuestionDisplayAnswer } from "@/lib/question-answer-display"
 import type { DdPdfPayload } from "@/components/ExportAnalysisPdfButton"
 import type { SectionForPdf } from "@/components/ExportAnalysisPdfButton"
 
@@ -251,6 +252,12 @@ export async function loadEudrRisultatoDeferredData(
     }
     if (q.type === "repeater" && Array.isArray(answerJson))
       return answerJson.length ? `${answerJson.length} elemento/i` : "—"
+    const structured = resolveQuestionDisplayAnswer(
+      { type: q.type, config: q.config as YearValuesQuestionConfig | null },
+      answerText,
+      answerJson
+    )
+    if (structured) return structured
     return raw || "—"
   }
 

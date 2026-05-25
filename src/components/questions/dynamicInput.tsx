@@ -8,12 +8,16 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Check, CheckCircle2, Circle, ChevronsUpDown, Loader2, Plus, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { QuestionConfig, QuestionType } from "@/types/questions"
+import { QuestionConfig, QuestionType, AnswerValue } from "@/types/questions"
 import { fetchDynamicOptionsByIds, fetchDynamicOptionsPaged } from "@/actions/questions"
 import { toast } from "sonner" 
 import { SupplierManager } from "./SupplierManager"
+import { normalizeQuestionType, isYearValuesQuestionType } from "@/lib/question-type-utils"
+import { YearValuesInput } from "./YearValuesInput"
 
-export type AnswerValue = string | number | null | Record<string, unknown>[] | Record<string, unknown>
+import type { YearValueField } from "@/lib/year-values"
+
+export type { AnswerValue }
 
 interface RepeaterField {
     name: string
@@ -28,8 +32,12 @@ export interface RepeaterConfig extends QuestionConfig {
     fields?: RepeaterField[]
 }
 
+export type YearValuesConfig = QuestionConfig & {
+  fields?: YearValueField[]
+}
+
 interface DynamicInputProps {
-  type: QuestionType 
+  type: string
   config: RepeaterConfig 
   value: AnswerValue
   onChange: (val: AnswerValue) => void
@@ -88,8 +96,9 @@ function DebouncedInput({
 }
 
 export function DynamicInput({ type, config, value, onChange, onExtraChange, readOnly, toolId}: DynamicInputProps) {
+  const normalizedType = normalizeQuestionType(type)
 
-if (type === 'supplier_manager') {
+  if (normalizedType === 'supplier_manager') {
     return (
       <SupplierManager 
         value={value as string | null} 
@@ -100,11 +109,11 @@ if (type === 'supplier_manager') {
     )
   }
   
-  if (type === 'text' || type === 'number') {
+  if (normalizedType === 'text' || normalizedType === 'number') {
     const stringValue = (value === null || value === undefined || Array.isArray(value)) ? '' : value.toString()
     return (
-      <DebouncedInput // 🛠️ Utilizzo del componente debounced
-        type={type} 
+      <DebouncedInput
+        type={normalizedType === 'number' ? 'number' : 'text'} 
         placeholder={config.placeholder}
         value={stringValue} 
         onChange={onChange} 
@@ -114,7 +123,7 @@ if (type === 'supplier_manager') {
     )
   }
 
-  if (type === 'date_range') {
+  if (normalizedType === 'date_range') {
     const current =
       value && !Array.isArray(value) && typeof value === 'object'
         ? (value as { start?: string | null; end?: string | null })
@@ -158,7 +167,18 @@ if (type === 'supplier_manager') {
     )
   }
 
-  if (type === 'select') {
+  if (isYearValuesQuestionType(type)) {
+    return (
+      <YearValuesInput
+        config={config as YearValuesConfig}
+        value={value}
+        onChange={onChange}
+        readOnly={readOnly}
+      />
+    )
+  }
+
+  if (normalizedType === "select") {
     const stringValue = (value === null || value === undefined || Array.isArray(value)) ? undefined : value.toString()
     const options = config.options as { label: string; value: string }[] | undefined
 
@@ -180,7 +200,7 @@ if (type === 'supplier_manager') {
     )
   }
 
-  if (type === 'async_select') {
+  if (normalizedType === 'async_select') {
     return (
       <AsyncSelect
         config={config}
@@ -193,7 +213,7 @@ if (type === 'supplier_manager') {
     )
   }
 
-  if (type === 'repeater') {
+  if (normalizedType === 'repeater') {
     return (
       <RepeaterInput
         config={config}
@@ -205,7 +225,12 @@ if (type === 'supplier_manager') {
     )
   }
 
-  return <div className="text-red-500 text-xs">Tipo non supportato: {type}</div>
+  return (
+    <div className="text-red-500 text-xs">
+      Tipo non supportato: {type || "(vuoto)"}
+      {normalizedType && normalizedType !== String(type ?? "").trim() ? ` (normalizzato: ${normalizedType})` : ""}
+    </div>
+  )
 }
 
 // ----------------------------------------------------

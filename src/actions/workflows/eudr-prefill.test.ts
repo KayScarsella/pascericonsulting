@@ -57,3 +57,72 @@ test("does not inherit parent values for derived question IDs", () => {
 
   assert.equal(rows.length, 0)
 })
+
+test("prefills derived CPI answer_json when child row is empty", () => {
+  const rows = buildEudrPrefillRows({
+    userId: "u1",
+    finalSessionId: "s1",
+    existingChildRows: [],
+    parentRows: [],
+    derivedRows: [
+      {
+        question_id: EUDR_PREFILL_DERIVED_QUESTION_IDS.CPI,
+        answer_json: { cpi_23: 36, cpi_24: 38 },
+      },
+    ],
+  })
+
+  assert.equal(rows.length, 1)
+  const cpi = rows.find((r) => r.question_id === EUDR_PREFILL_DERIVED_QUESTION_IDS.CPI)
+  assert.deepEqual(cpi?.answer_json, { cpi_23: 36, cpi_24: 38 })
+  assert.equal(cpi?.answer_text, null)
+})
+
+test("keeps existing child CPI answer_json over derived prefill", () => {
+  const rows = buildEudrPrefillRows({
+    userId: "u1",
+    finalSessionId: "s1",
+    existingChildRows: [
+      {
+        question_id: EUDR_PREFILL_DERIVED_QUESTION_IDS.CPI,
+        answer_text: null,
+        answer_json: { cpi_23: 10 },
+        file_path: null,
+      },
+    ],
+    parentRows: [],
+    derivedRows: [
+      {
+        question_id: EUDR_PREFILL_DERIVED_QUESTION_IDS.CPI,
+        answer_json: { cpi_23: 36, cpi_24: 38, cpi_25: 40 },
+      },
+    ],
+  })
+
+  assert.equal(rows.length, 0)
+})
+
+test("does not treat empty CPI json object as existing child answer", () => {
+  const rows = buildEudrPrefillRows({
+    userId: "u1",
+    finalSessionId: "s1",
+    existingChildRows: [
+      {
+        question_id: EUDR_PREFILL_DERIVED_QUESTION_IDS.CPI,
+        answer_text: null,
+        answer_json: {},
+        file_path: null,
+      },
+    ],
+    parentRows: [],
+    derivedRows: [
+      {
+        question_id: EUDR_PREFILL_DERIVED_QUESTION_IDS.CPI,
+        answer_json: { cpi_25: 41 },
+      },
+    ],
+  })
+
+  assert.equal(rows.length, 1)
+  assert.deepEqual(rows[0].answer_json, { cpi_25: 41 })
+})
