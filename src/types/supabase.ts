@@ -133,6 +133,7 @@ export type Database = {
           created_by: string | null
           id: string
           mime_type: string | null
+          min_role: Database["public"]["Enums"]["app_role"]
           name: string
           parent_id: string | null
           size: number | null
@@ -145,6 +146,7 @@ export type Database = {
           created_by?: string | null
           id?: string
           mime_type?: string | null
+          min_role?: Database["public"]["Enums"]["app_role"]
           name: string
           parent_id?: string | null
           size?: number | null
@@ -157,6 +159,7 @@ export type Database = {
           created_by?: string | null
           id?: string
           mime_type?: string | null
+          min_role?: Database["public"]["Enums"]["app_role"]
           name?: string
           parent_id?: string | null
           size?: number | null

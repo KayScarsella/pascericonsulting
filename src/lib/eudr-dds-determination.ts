@@ -6,9 +6,13 @@ export const EUDR_DDS_SEMPLIFICATA_APPENDIX =
   "Dichiarazione di Dovuta Diligenza Semplificata ai sensi dell'Articolo 13 del Regolamento (UE) 2023/1115 (EUDR)"
 
 export const EUDR_DDS_STANDARD_LABEL =
+  "Dichiarazione di Dovuta Diligenza standard ai sensi dell'articolo 8 del Regolamento (UE) 2023/1115 (EUDR)"
+
+/** Testo legacy Art. 10–11 (sessioni salvate prima dell'aggiornamento). */
+export const EUDR_DDS_STANDARD_LABEL_LEGACY =
   'Dichiarazione di Dovuta Diligenza ai sensi degli articoli 10–11 del Regolamento (UE) 2023/1115 (EUDR)'
 
-export const EUDR_DDS_STANDARD_PDF_LABEL = 'DDS standard'
+export const EUDR_DDS_STANDARD_PDF_LABEL = EUDR_DDS_STANDARD_LABEL
 
 const MAX_NON_EU_COMPANIES_SEMPLIFICATA = 5
 const MAX_COUNTRIES_SEMPLIFICATA = 2
@@ -43,7 +47,7 @@ export function determineEudrDdsType(input: EudrDdsDeterminationInput): EudrDdsT
 }
 
 export function getEudrDdsDisplayLabel(ddsType: EudrDdsType): string {
-  return ddsType === 'semplificata' ? 'DDS Semplificata (Art. 13)' : 'DDS Standard (Art. 10–11)'
+  return ddsType === 'semplificata' ? 'DDS Semplificata (Art. 13)' : 'DDS Standard (Art. 8)'
 }
 
 export function getEudrDdsPdfOutcomeLine(ddsType: EudrDdsType): string {
@@ -55,7 +59,11 @@ export function getEudrDdsPdfOutcomeLine(ddsType: EudrDdsType): string {
 /** Rimuove appendix DDS già inclusi in outcomeDescription per evitare duplicati nel PDF. */
 export function stripEudrDdsAppendix(description: string): string {
   let text = (description || '').trim()
-  for (const appendix of [EUDR_DDS_SEMPLIFICATA_APPENDIX, EUDR_DDS_STANDARD_LABEL]) {
+  for (const appendix of [
+    EUDR_DDS_SEMPLIFICATA_APPENDIX,
+    EUDR_DDS_STANDARD_LABEL,
+    EUDR_DDS_STANDARD_LABEL_LEGACY,
+  ]) {
     if (text.includes(appendix)) {
       text = text.replace(appendix, '').replace(/\n{2,}/g, '\n\n').trim()
     }

@@ -35,7 +35,7 @@ export default function LoginPage() {
 
   return (
     <AuthBrandedShell>
-      <Card className="w-full max-w-sm border-slate-200/80 shadow-lg">
+      <Card className="w-full max-w-sm border-slate-200/80 bg-white/90 shadow-lg backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="text-2xl">Accedi</CardTitle>
           <CardDescription>Inserisci le tue credenziali per entrare.</CardDescription>

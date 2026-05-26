@@ -4,7 +4,7 @@ import {
   buildEudrOutcomeDescription,
   determineEudrDdsType,
   EUDR_DDS_SEMPLIFICATA_APPENDIX,
-  EUDR_DDS_STANDARD_PDF_LABEL,
+  EUDR_DDS_STANDARD_LABEL,
   getEudrDdsPdfOutcomeLine,
 } from '@/lib/eudr-dds-determination'
 
@@ -82,6 +82,12 @@ test('getEudrDdsPdfOutcomeLine: semplificata → appendix Art. 13', () => {
   assert.equal(getEudrDdsPdfOutcomeLine('semplificata'), EUDR_DDS_SEMPLIFICATA_APPENDIX)
 })
 
-test('getEudrDdsPdfOutcomeLine: standard → DDS standard', () => {
-  assert.equal(getEudrDdsPdfOutcomeLine('standard'), EUDR_DDS_STANDARD_PDF_LABEL)
+test('getEudrDdsPdfOutcomeLine: standard → appendix Art. 8', () => {
+  assert.equal(getEudrDdsPdfOutcomeLine('standard'), EUDR_DDS_STANDARD_LABEL)
+})
+
+test('buildEudrOutcomeDescription appende Art. 8 per standard', () => {
+  const text = buildEudrOutcomeDescription(baseAccettabile, 'standard', true)
+  assert.ok(text.includes(baseAccettabile))
+  assert.ok(text.includes(EUDR_DDS_STANDARD_LABEL))
 })

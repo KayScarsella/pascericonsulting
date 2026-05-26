@@ -126,7 +126,7 @@
 
 /* Custom visual helpers for stronger section contrast and background image */
 .site-forest-bg {
-  background-image: linear-gradient(rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.88)),
+  background-image: linear-gradient(rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.4)),
     url("/bosco.webp");
   background-size: cover;
   background-position: center;

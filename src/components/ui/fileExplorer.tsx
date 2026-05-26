@@ -2,12 +2,19 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { Folder, FileText, Download, Upload, Plus, ArrowLeft, Trash2, Loader2 } from "lucide-react"
+import { Folder, FileText, Download, Upload, Plus, ArrowLeft, Trash2, Loader2, Lock, Shield } from "lucide-react"
+import type { ToolRole } from "@/lib/tool-auth"
+import { canAccessMinRole, type DocumentMinRole } from "@/lib/tool-role-access"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { FolderAccessDialog } from "@/components/documents/FolderAccessDialog"
+import { PremiumFolderUpsell } from "@/components/documents/PremiumFolderUpsell"
+import {
+  Dialog,
+  DialogContent,
+} from "@/components/ui/dialog"
 import {
   abortDocumentUpload,
-  createFolder,
   deleteItem,
   finalizeDocumentUpload,
   getDownloadUrl,
@@ -22,23 +29,28 @@ import { Database } from "@/types/supabase"
 export type DocItem = Database['public']['Tables']['documents']['Row']
 
 interface FileExplorerProps {
-  items: DocItem[] 
+  items: DocItem[]
   currentFolderId: string | null
   parentFolderId: string | null
   isAdmin: boolean
+  userRole: ToolRole
   toolId: string
   pathRevalidate: string
+  /** Cartella corrente (parent dei nuovi elementi) è premium → i figli ereditano. */
+  parentIsPremium?: boolean
   /** Prefetch server-side (batch signed URLs, TTL 5 min). */
   downloadUrls?: Record<string, string>
 }
 
-export function FileExplorer({ 
-  items, 
-  currentFolderId, 
-  parentFolderId, 
-  isAdmin, 
+export function FileExplorer({
+  items,
+  currentFolderId,
+  parentFolderId,
+  isAdmin,
+  userRole,
   toolId,
   pathRevalidate,
+  parentIsPremium = false,
   downloadUrls = {},
 }: FileExplorerProps) {
   const router = useRouter()
@@ -46,6 +58,21 @@ export function FileExplorer({
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [isDeleting, setIsDeleting] = useState<string | null>(null)
   const [isDownloading, setIsDownloading] = useState<string | null>(null)
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [editFolder, setEditFolder] = useState<{
+    id: string
+    name: string
+    minRole: DocumentMinRole
+  } | null>(null)
+  const [premiumUpsellFolder, setPremiumUpsellFolder] = useState<{
+    id: string
+    name: string
+  } | null>(null)
+
+  const isPremiumFolderLocked = (item: DocItem) =>
+    item.type === "folder" &&
+    (item.min_role ?? "standard") === "premium" &&
+    !canAccessMinRole(userRole, "premium")
 
   // --- DOWNLOAD ---
   const triggerDownload = (signedUrl: string, filename: string) => {
@@ -124,14 +151,6 @@ export function FileExplorer({
     if (result?.error) alert("Errore: " + result.error)
   }
 
-  // --- CREATE FOLDER ---
-  const handleCreateFolder = async () => {
-    const name = prompt("Nome cartella:")
-    if (!name) return
-    const result = await createFolder(toolId, currentFolderId, name, pathRevalidate)
-    if (result?.error) alert("Errore: " + result.error)
-  }
-
   // --- UPLOAD (client → Supabase Storage, server actions solo per auth + DB) ---
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -207,9 +226,17 @@ export function FileExplorer({
 
   // --- NAVIGAZIONE ---
   const handleNavigate = (folderId: string | null) => {
-    // Mantiene i parametri URL esistenti o pulisce
-    const url = folderId ? `?folderId=${folderId}` : '?'
+    const url = folderId ? `${pathRevalidate}?folderId=${folderId}` : pathRevalidate
     router.push(url)
+  }
+
+  const handleFolderClick = (item: DocItem) => {
+    if (item.type !== "folder") return
+    if (isPremiumFolderLocked(item)) {
+      setPremiumUpsellFolder({ id: item.id, name: item.name })
+      return
+    }
+    handleNavigate(item.id)
   }
 
   return (
@@ -245,7 +272,7 @@ export function FileExplorer({
 
           {isAdmin && (
             <>
-            <Button size="sm" variant="outline" onClick={handleCreateFolder}>
+            <Button size="sm" variant="outline" onClick={() => setCreateDialogOpen(true)}>
               <Plus className="w-4 h-4 mr-2" /> Nuova Cartella
             </Button>
             
@@ -290,21 +317,59 @@ export function FileExplorer({
             </li>
         )}
 
-        {items.map((item) => (
-          <li key={item.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors group">
-            
-            {/* Area Cliccabile */}
-            <div 
-                className="flex items-center gap-3 cursor-pointer flex-1 select-none"
-                onClick={() => item.type === 'folder' && handleNavigate(item.id)}
+        {items.map((item) => {
+          const lockedPremium = isPremiumFolderLocked(item)
+          return (
+          <li
+            key={item.id}
+            className={`p-4 flex items-center justify-between transition-colors group ${
+              lockedPremium ? "bg-slate-50/80 hover:bg-amber-50/40" : "hover:bg-slate-50"
+            }`}
+          >
+            <div
+              className={`flex items-center gap-3 flex-1 select-none ${
+                item.type === "folder" ? "cursor-pointer" : ""
+              }`}
+              onClick={() => item.type === "folder" && handleFolderClick(item)}
             >
-              <div className={`p-2 rounded ${item.type === 'folder' ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600'}`}>
-                {item.type === 'folder' ? <Folder className="w-5 h-5" /> : <FileText className="w-5 h-5" />}
+              <div
+                className={`p-2 rounded ${
+                  lockedPremium
+                    ? "bg-slate-100 text-slate-400"
+                    : item.type === "folder"
+                      ? "bg-amber-50 text-amber-600"
+                      : "bg-blue-50 text-blue-600"
+                }`}
+              >
+                {item.type === "folder" ? (
+                  lockedPremium ? <Lock className="w-5 h-5" /> : <Folder className="w-5 h-5" />
+                ) : (
+                  <FileText className="w-5 h-5" />
+                )}
               </div>
               <div>
-                <p className="font-medium text-slate-900">{item.name}</p>
-                {item.type === 'file' && item.size && (
-                    <p className="text-xs text-slate-500">{(item.size / 1024 / 1024).toFixed(2)} MB</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p
+                    className={`font-medium ${
+                      lockedPremium ? "text-slate-600" : "text-slate-900"
+                    }`}
+                  >
+                    {item.name}
+                  </p>
+                  {item.type === "folder" && item.min_role === "premium" && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                      <Lock className="h-3 w-3" />
+                      Premium
+                    </span>
+                  )}
+                </div>
+                {lockedPremium && (
+                  <p className="text-xs text-amber-700/90 mt-0.5">
+                    Disponibile con account Premium — clicca per saperne di più
+                  </p>
+                )}
+                {item.type === "file" && item.size && (
+                  <p className="text-xs text-slate-500">{(item.size / 1024 / 1024).toFixed(2)} MB</p>
                 )}
               </div>
             </div>
@@ -327,6 +392,25 @@ export function FileExplorer({
                 </Button>
                 )}
 
+              {isAdmin && item.type === "folder" && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  title="Visibilità cartella"
+                  className="hover:bg-amber-50"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setEditFolder({
+                      id: item.id,
+                      name: item.name,
+                      minRole: (item.min_role ?? "standard") as DocumentMinRole,
+                    })
+                  }}
+                >
+                  <Shield className="w-4 h-4 text-slate-400 hover:text-amber-700" />
+                </Button>
+              )}
+
               {isAdmin && (
                 <Button 
                     variant="ghost" 
@@ -345,8 +429,48 @@ export function FileExplorer({
               )}
             </div>
           </li>
-        ))}
+        )})}
       </ul>
+
+      <FolderAccessDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        mode="create"
+        toolId={toolId}
+        pathRevalidate={pathRevalidate}
+        parentFolderId={currentFolderId}
+        parentIsPremium={parentIsPremium}
+      />
+
+      <Dialog
+        open={!!premiumUpsellFolder}
+        onOpenChange={(open) => !open && setPremiumUpsellFolder(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          {premiumUpsellFolder && (
+            <PremiumFolderUpsell
+              folderName={premiumUpsellFolder.name}
+              archivePath={pathRevalidate}
+              variant="dialog"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {editFolder && (
+        <FolderAccessDialog
+          open={!!editFolder}
+          onOpenChange={(open) => !open && setEditFolder(null)}
+          mode="edit"
+          toolId={toolId}
+          pathRevalidate={pathRevalidate}
+          parentFolderId={currentFolderId}
+          parentIsPremium={parentIsPremium}
+          folderId={editFolder.id}
+          initialName={editFolder.name}
+          initialMinRole={editFolder.minRole}
+        />
+      )}
     </div>
   )
 }

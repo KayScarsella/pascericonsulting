@@ -1,6 +1,11 @@
 "use server"
 
 import { getToolAccess } from "@/lib/tool-auth"
+import type { ToolRole } from "@/lib/tool-auth"
+import {
+  canAccessMinRole,
+  type DocumentMinRole,
+} from "@/lib/tool-role-access"
 import {
   assertStoragePathForTool,
   createDocumentSignedUrls,
@@ -12,6 +17,8 @@ import {
 } from "@/lib/documents-upload"
 import { revalidatePath } from "next/cache"
 import { createClient } from "@/utils/supabase/server"
+import type { SupabaseClient } from "@supabase/supabase-js"
+import type { Database } from "@/types/supabase"
 
 async function getSupabase() {
   return createClient()
@@ -30,26 +37,166 @@ async function requireDocumentAdmin(toolId: string) {
   return { supabase, user }
 }
 
+async function resolveEffectiveMinRole(
+  supabase: SupabaseClient<Database>,
+  toolId: string,
+  parentId: string | null,
+  requestedMinRole: DocumentMinRole
+): Promise<DocumentMinRole> {
+  if (!parentId) return requestedMinRole
+
+  const { data: parent } = await supabase
+    .from("documents")
+    .select("min_role, type")
+    .eq("id", parentId)
+    .eq("tool_id", toolId)
+    .single()
+
+  if (!parent || parent.type !== "folder") return requestedMinRole
+  const parentMin = parent.min_role as DocumentMinRole
+  if (parentMin === "premium") return "premium"
+  return requestedMinRole
+}
+
+async function assertDocumentDownloadAccess(
+  supabase: SupabaseClient<Database>,
+  storagePath: string,
+  toolId: string,
+  role: ToolRole
+): Promise<{ error?: string }> {
+  const { data: doc } = await supabase
+    .from("documents")
+    .select("min_role")
+    .eq("storage_path", storagePath)
+    .eq("tool_id", toolId)
+    .eq("type", "file")
+    .maybeSingle()
+
+  if (!doc) return { error: "Documento non trovato" }
+  if (!canAccessMinRole(role, doc.min_role as DocumentMinRole)) {
+    return { error: "Contenuto riservato agli utenti Premium" }
+  }
+  return {}
+}
+
 /**
  * Crea una cartella.
  * Richiede ruolo 'admin' per quel tool_id.
  */
-export async function createFolder(toolId: string, parentId: string | null, name: string, pathRevalidate: string) {
+export async function createFolder(
+  toolId: string,
+  parentId: string | null,
+  name: string,
+  pathRevalidate: string,
+  minRole: DocumentMinRole = "standard"
+) {
   const { role } = await getToolAccess(toolId)
-  if (role !== 'admin') return { error: "Non autorizzato: servono permessi admin" }
+  if (role !== "admin") return { error: "Non autorizzato: servono permessi admin" }
 
   const supabase = await getSupabase()
-  const { error } = await supabase.from('documents').insert({
+  const effectiveMinRole = await resolveEffectiveMinRole(supabase, toolId, parentId, minRole)
+
+  const { error } = await supabase.from("documents").insert({
     tool_id: toolId,
     parent_id: parentId,
     name,
-    type: 'folder'
+    type: "folder",
+    min_role: effectiveMinRole,
   })
 
   if (error) return { error: error.message }
-  
+
   revalidatePath(pathRevalidate)
   return { success: true }
+}
+
+async function cascadeDocumentMinRole(
+  supabase: SupabaseClient<Database>,
+  folderId: string,
+  toolId: string,
+  minRole: DocumentMinRole
+): Promise<void> {
+  const { data: children } = await supabase
+    .from("documents")
+    .select("id, type")
+    .eq("parent_id", folderId)
+    .eq("tool_id", toolId)
+
+  for (const child of children ?? []) {
+    const { data: updatedChild, error: childError } = await supabase
+      .from("documents")
+      .update({ min_role: minRole })
+      .eq("id", child.id)
+      .eq("tool_id", toolId)
+      .select("id")
+
+    if (childError) throw new Error(childError.message)
+    if (!updatedChild?.length) {
+      throw new Error("Impossibile aggiornare un elemento nella cartella")
+    }
+
+    if (child.type === "folder") {
+      await cascadeDocumentMinRole(supabase, child.id, toolId, minRole)
+    }
+  }
+}
+
+/**
+ * Aggiorna visibilità di una cartella esistente (e propaga ai contenuti).
+ * Richiede ruolo admin.
+ */
+export async function updateFolderMinRole(
+  folderId: string,
+  toolId: string,
+  minRole: DocumentMinRole,
+  pathRevalidate: string
+) {
+  const auth = await requireDocumentAdmin(toolId)
+  if ("error" in auth) return { error: auth.error }
+  const { supabase } = auth
+
+  const { data: folder, error: fetchError } = await supabase
+    .from("documents")
+    .select("id, type, parent_id, name")
+    .eq("id", folderId)
+    .eq("tool_id", toolId)
+    .single()
+
+  if (fetchError || !folder) return { error: "Cartella non trovata" }
+  if (folder.type !== "folder") return { error: "L'elemento selezionato non è una cartella" }
+
+  const effectiveMinRole = await resolveEffectiveMinRole(
+    supabase,
+    toolId,
+    folder.parent_id,
+    minRole
+  )
+
+  const { data: updatedFolder, error: updateError } = await supabase
+    .from("documents")
+    .update({ min_role: effectiveMinRole })
+    .eq("id", folderId)
+    .eq("tool_id", toolId)
+    .select("id, min_role")
+
+  if (updateError) return { error: updateError.message }
+  if (!updatedFolder?.length) {
+    return {
+      error:
+        "Aggiornamento non applicato: verifica i permessi admin sul tool o riprova.",
+    }
+  }
+
+  try {
+    await cascadeDocumentMinRole(supabase, folderId, toolId, effectiveMinRole)
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : "Errore durante l'aggiornamento dei contenuti",
+    }
+  }
+
+  revalidatePath(pathRevalidate)
+  return { success: true, minRole: updatedFolder[0].min_role as DocumentMinRole }
 }
 
 /** Step 1: autorizza admin e riserva path storage (payload leggero, niente file). */
@@ -99,6 +246,8 @@ export async function finalizeDocumentUpload(
     return { error: "File non trovato in storage. Riprova l'upload." }
   }
 
+  const fileMinRole = await resolveEffectiveMinRole(supabase, toolId, parentId, "standard")
+
   const { error: dbError } = await supabase.from("documents").insert({
     tool_id: toolId,
     parent_id: parentId,
@@ -108,6 +257,7 @@ export async function finalizeDocumentUpload(
     mime_type: mimeType || null,
     size,
     created_by: user.id,
+    min_role: fileMinRole,
   })
 
   if (dbError) {
@@ -135,30 +285,26 @@ export async function abortDocumentUpload(toolId: string, storagePath: string) {
   return { success: true }
 }
 
-// actions/documents.ts
-
 export async function deleteItem(id: string, toolId: string, pathRevalidate: string) {
-  // 1. Verifica permessi Admin
   const { role } = await getToolAccess(toolId)
-  if (role !== 'admin') return { error: "Non autorizzato" }
+  if (role !== "admin") return { error: "Non autorizzato" }
 
   const supabase = await getSupabase()
 
   try {
-    const { data: pathsToDelete, error: rpcError } = await supabase
-      .rpc('get_recursive_storage_paths', { target_id: id })
+    const { data: pathsToDelete, error: rpcError } = await supabase.rpc(
+      "get_recursive_storage_paths",
+      { target_id: id }
+    )
 
     if (rpcError) {
       console.error("Errore RPC:", rpcError)
       return { error: "Impossibile recuperare i file da eliminare" }
     }
     if (pathsToDelete && pathsToDelete.length > 0) {
-      // Estraiamo l'array di stringhe, es: ['tool/123.pdf', 'tool/456.jpg']
       const paths = pathsToDelete.map((row: { storage_path: string }) => row.storage_path)
-      
-      const { error: storageError } = await supabase.storage
-        .from('documents')
-        .remove(paths) // Supabase accetta un array per eliminazione multipla
+
+      const { error: storageError } = await supabase.storage.from("documents").remove(paths)
 
       if (storageError) {
         console.error("Errore Storage:", storageError)
@@ -166,16 +312,15 @@ export async function deleteItem(id: string, toolId: string, pathRevalidate: str
     }
 
     const { error: dbError } = await supabase
-      .from('documents')
+      .from("documents")
       .delete()
-      .eq('id', id)
-      .eq('tool_id', toolId) // Sicurezza extra
+      .eq("id", id)
+      .eq("tool_id", toolId)
 
     if (dbError) return { error: dbError.message }
 
     revalidatePath(pathRevalidate)
     return { success: true }
-
   } catch (err) {
     console.error(err)
     return { error: "Errore imprevisto durante l'eliminazione" }
@@ -197,6 +342,9 @@ export async function getDownloadUrl(storagePath: string, toolId: string) {
   }
 
   const supabase = await getSupabase()
+  const access = await assertDocumentDownloadAccess(supabase, storagePath, toolId, role)
+  if (access.error) return { error: access.error }
+
   const { data, error } = await supabase.storage
     .from("documents")
     .createSignedUrl(storagePath, DOCUMENT_SIGNED_URL_TTL_SEC, { download: true })
@@ -211,7 +359,22 @@ export async function getDownloadUrls(storagePaths: string[], toolId: string) {
   if (!role) return { error: "Accesso negato al tool", urls: {} as Record<string, string> }
 
   const supabase = await getSupabase()
-  const urls = await createDocumentSignedUrls(supabase, toolId, storagePaths)
+  const allowedPaths: string[] = []
+
+  for (const path of storagePaths) {
+    try {
+      assertStoragePathForTool(path, toolId)
+      const access = await assertDocumentDownloadAccess(supabase, path, toolId, role)
+      if (!access.error) allowedPaths.push(path)
+    } catch {
+      // skip invalid paths
+    }
+  }
+
+  const urls =
+    allowedPaths.length > 0
+      ? await createDocumentSignedUrls(supabase, toolId, allowedPaths)
+      : {}
+
   return { urls }
 }
-
