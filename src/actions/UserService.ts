@@ -72,7 +72,7 @@ export class UserService {
         user_id,
         role,
         created_at,
-        profiles (
+        profiles!inner (
           id,
           full_name,
           avatar_url,
@@ -125,7 +125,7 @@ export class UserService {
         user_id,
         role,
         created_at,
-        profiles (
+        profiles!inner (
           id,
           full_name,
           avatar_url,
@@ -152,14 +152,17 @@ export class UserService {
       .order('created_at', { ascending: false })
       .range(from, to);
 
-    const q = (opts?.q ?? '').trim()
-    if (q) {
+    const qRaw = (opts?.q ?? '').trim()
+    const qSafe = qRaw.replace(/[,%()]/g, ' ').trim()
+    if (qSafe) {
       query.or(
         [
-          `profiles.full_name.ilike.%${q}%`,
-          `profiles.email.ilike.%${q}%`,
-          `profiles.ragione_sociale.ilike.%${q}%`,
-        ].join(',')
+          `full_name.ilike.%${qSafe}%`,
+          `email.ilike.%${qSafe}%`,
+          `username.ilike.%${qSafe}%`,
+          `ragione_sociale.ilike.%${qSafe}%`,
+        ].join(','),
+        { foreignTable: 'profiles' }
       )
     }
 

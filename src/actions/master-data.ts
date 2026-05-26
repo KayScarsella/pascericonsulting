@@ -367,7 +367,18 @@ export async function deleteCountriesBulk(toolId: string, ids: string[]): Promis
 export async function updateCountriesBulk(
   toolId: string,
   ids: string[],
-  patch: Partial<Pick<CountryRow, 'extra_eu' | 'conflicts' | 'sanction' | 'corruption_code'>>
+  patch: Partial<
+    Pick<
+      CountryRow,
+      | 'extra_eu'
+      | 'conflicts'
+      | 'sanction'
+      | 'corruption_code'
+      | 'cpi_23'
+      | 'cpi_24'
+      | 'cpi_25'
+    >
+  >
 ): Promise<{ success: boolean; error?: string }> {
   try {
     await requireToolAdmin(toolId)
@@ -386,6 +397,12 @@ export async function updateCountriesBulk(
     if (typeof patch.corruption_code === 'string' && patch.corruption_code.trim()) {
       update.corruption_code = patch.corruption_code.trim() as CountryInsert['corruption_code']
     }
+    if (patch.cpi_23 === null) update.cpi_23 = null
+    if (typeof patch.cpi_23 === 'number') update.cpi_23 = patch.cpi_23
+    if (patch.cpi_24 === null) update.cpi_24 = null
+    if (typeof patch.cpi_24 === 'number') update.cpi_24 = patch.cpi_24
+    if (patch.cpi_25 === null) update.cpi_25 = null
+    if (typeof patch.cpi_25 === 'number') update.cpi_25 = patch.cpi_25
 
     if (Object.keys(update).length === 0) {
       return { success: false, error: 'Nessun campo valido da aggiornare.' }

@@ -105,12 +105,13 @@ function isNotifExpiryMode(value: string): value is 'clear' {
 
 function isCountryBulkField(
   value: string
-): value is 'conflicts' | 'sanction' | 'extra_eu' | 'corruption_code' {
+): value is 'conflicts' | 'sanction' | 'extra_eu' | 'corruption_code' | 'cpi_multi' {
   return (
     value === 'conflicts' ||
     value === 'sanction' ||
     value === 'extra_eu' ||
-    value === 'corruption_code'
+    value === 'corruption_code' ||
+    value === 'cpi_multi'
   )
 }
 
@@ -244,9 +245,15 @@ export function MasterSectionClient({
   const [bulkNotifExpiryMode, setBulkNotifExpiryMode] = useState<'clear'>('clear')
   const [bulkNotifLoading, setBulkNotifLoading] = useState(false)
   const [selectedCountryIds, setSelectedCountryIds] = useState<string[]>([])
-  const [bulkField, setBulkField] = useState<'conflicts' | 'sanction' | 'extra_eu' | 'corruption_code'>('conflicts')
+  const [bulkField, setBulkField] = useState<'conflicts' | 'sanction' | 'extra_eu' | 'corruption_code' | 'cpi_multi'>('conflicts')
   const [bulkBoolValue, setBulkBoolValue] = useState<'true' | 'false'>('false')
   const [bulkCorruptionCode, setBulkCorruptionCode] = useState<'AA' | 'MA' | 'MB' | 'MM' | 'TT'>('MM')
+  const [bulkCpi23Enabled, setBulkCpi23Enabled] = useState(false)
+  const [bulkCpi24Enabled, setBulkCpi24Enabled] = useState(false)
+  const [bulkCpi25Enabled, setBulkCpi25Enabled] = useState(false)
+  const [bulkCpi23, setBulkCpi23] = useState('')
+  const [bulkCpi24, setBulkCpi24] = useState('')
+  const [bulkCpi25, setBulkCpi25] = useState('')
   const [bulkLoading, setBulkLoading] = useState(false)
   const [emailDeliveryBanner, setEmailDeliveryBanner] = useState<string | null>(null)
 
@@ -1731,10 +1738,68 @@ export function MasterSectionClient({
                 <SelectItem value="sanction">Imposta “Sanzioni”</SelectItem>
                 <SelectItem value="extra_eu">Imposta “Extra UE”</SelectItem>
                 <SelectItem value="corruption_code">Imposta “Cod. corruzione”</SelectItem>
+                  <SelectItem value="cpi_multi">Imposta CPI (più anni)</SelectItem>
               </SelectContent>
             </Select>
 
-            {bulkField === 'corruption_code' ? (
+            {bulkField === 'cpi_multi' ? (
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    checked={bulkCpi23Enabled}
+                    onCheckedChange={(c) => setBulkCpi23Enabled(Boolean(c))}
+                    id="bulk-cpi-23-enabled"
+                  />
+                  <Label htmlFor="bulk-cpi-23-enabled" className="text-xs text-slate-700">
+                    CPI 2023
+                  </Label>
+                  <Input
+                    className="h-8 w-[110px] bg-white"
+                    inputMode="decimal"
+                    value={bulkCpi23}
+                    onChange={(e) => setBulkCpi23(e.target.value)}
+                    placeholder={bulkCpi23Enabled ? 'valore / vuoto=svuota' : '—'}
+                    disabled={!bulkCpi23Enabled}
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    checked={bulkCpi24Enabled}
+                    onCheckedChange={(c) => setBulkCpi24Enabled(Boolean(c))}
+                    id="bulk-cpi-24-enabled"
+                  />
+                  <Label htmlFor="bulk-cpi-24-enabled" className="text-xs text-slate-700">
+                    CPI 2024
+                  </Label>
+                  <Input
+                    className="h-8 w-[110px] bg-white"
+                    inputMode="decimal"
+                    value={bulkCpi24}
+                    onChange={(e) => setBulkCpi24(e.target.value)}
+                    placeholder={bulkCpi24Enabled ? 'valore / vuoto=svuota' : '—'}
+                    disabled={!bulkCpi24Enabled}
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    checked={bulkCpi25Enabled}
+                    onCheckedChange={(c) => setBulkCpi25Enabled(Boolean(c))}
+                    id="bulk-cpi-25-enabled"
+                  />
+                  <Label htmlFor="bulk-cpi-25-enabled" className="text-xs text-slate-700">
+                    CPI 2025
+                  </Label>
+                  <Input
+                    className="h-8 w-[110px] bg-white"
+                    inputMode="decimal"
+                    value={bulkCpi25}
+                    onChange={(e) => setBulkCpi25(e.target.value)}
+                    placeholder={bulkCpi25Enabled ? 'valore / vuoto=svuota' : '—'}
+                    disabled={!bulkCpi25Enabled}
+                  />
+                </div>
+              </div>
+            ) : bulkField === 'corruption_code' ? (
               <Select
                 value={bulkCorruptionCode}
                 onValueChange={(v) => {
@@ -1775,6 +1840,39 @@ export function MasterSectionClient({
               className="h-8"
               disabled={bulkLoading}
               onClick={async () => {
+                  if (bulkField === 'cpi_multi') {
+                    if (!bulkCpi23Enabled && !bulkCpi24Enabled && !bulkCpi25Enabled) return
+                    const cpi23 = bulkCpi23Enabled ? parseOptionalCountryNumber(bulkCpi23) : undefined
+                    const cpi24 = bulkCpi24Enabled ? parseOptionalCountryNumber(bulkCpi24) : undefined
+                    const cpi25 = bulkCpi25Enabled ? parseOptionalCountryNumber(bulkCpi25) : undefined
+                    if (cpi23 === false) {
+                      toast.error('Valore CPI 2023 non valido.')
+                      return
+                    }
+                    if (cpi24 === false) {
+                      toast.error('Valore CPI 2024 non valido.')
+                      return
+                    }
+                    if (cpi25 === false) {
+                      toast.error('Valore CPI 2025 non valido.')
+                      return
+                    }
+                    setBulkLoading(true)
+                    const patch: Partial<Pick<CountryRow, 'cpi_23' | 'cpi_24' | 'cpi_25'>> = {}
+                    if (bulkCpi23Enabled) patch.cpi_23 = cpi23 ?? null
+                    if (bulkCpi24Enabled) patch.cpi_24 = cpi24 ?? null
+                    if (bulkCpi25Enabled) patch.cpi_25 = cpi25 ?? null
+                    const res = await updateCountriesBulk(toolId, selectedCountryIds, patch)
+                    setBulkLoading(false)
+                    if (res.success) {
+                      toast.success('Aggiornamento massivo completato.')
+                      setSelectionResetKey((k) => k + 1)
+                      router.refresh()
+                    } else {
+                      toast.error(res.error ?? 'Aggiornamento massivo fallito.')
+                    }
+                    return
+                  }
                 setBulkLoading(true)
                 const patch =
                   bulkField === 'corruption_code'
