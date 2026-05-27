@@ -184,6 +184,600 @@ export type Database = {
           },
         ]
       }
+      fsc_alert_outbox: {
+        Row: {
+          alert_kind: string
+          company_id: string
+          created_at: string
+          id: string
+          message: string | null
+          notification_id: string | null
+          recipient_user_id: string
+          sent_at: string | null
+          source_id: string
+          source_table: string
+          target_date: string
+          title: string
+          tool_id: string
+        }
+        Insert: {
+          alert_kind: string
+          company_id: string
+          created_at?: string
+          id?: string
+          message?: string | null
+          notification_id?: string | null
+          recipient_user_id: string
+          sent_at?: string | null
+          source_id: string
+          source_table: string
+          target_date: string
+          title: string
+          tool_id: string
+        }
+        Update: {
+          alert_kind?: string
+          company_id?: string
+          created_at?: string
+          id?: string
+          message?: string | null
+          notification_id?: string | null
+          recipient_user_id?: string
+          sent_at?: string | null
+          source_id?: string
+          source_table?: string
+          target_date?: string
+          title?: string
+          tool_id?: string
+        }
+        Relationships: []
+      }
+      fsc_companies: {
+        Row: {
+          cap: string | null
+          cf_partita_iva: string | null
+          citta: string | null
+          created_at: string
+          email: string | null
+          id: string
+          indirizzo: string | null
+          provincia: string | null
+          ragione_sociale: string
+          recapito_telefonico: string | null
+          sito_internet: string | null
+          tool_id: string
+          updated_at: string
+        }
+        Insert: {
+          cap?: string | null
+          cf_partita_iva?: string | null
+          citta?: string | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          indirizzo?: string | null
+          provincia?: string | null
+          ragione_sociale: string
+          recapito_telefonico?: string | null
+          sito_internet?: string | null
+          tool_id: string
+          updated_at?: string
+        }
+        Update: {
+          cap?: string | null
+          cf_partita_iva?: string | null
+          citta?: string | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          indirizzo?: string | null
+          provincia?: string | null
+          ragione_sociale?: string
+          recapito_telefonico?: string | null
+          sito_internet?: string | null
+          tool_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      fsc_company_members: {
+        Row: {
+          can_edit: boolean
+          company_id: string
+          created_at: string
+          member_type: Database["public"]["Enums"]["fsc_member_type"]
+          user_id: string
+        }
+        Insert: {
+          can_edit?: boolean
+          company_id: string
+          created_at?: string
+          member_type?: Database["public"]["Enums"]["fsc_member_type"]
+          user_id: string
+        }
+        Update: {
+          can_edit?: boolean
+          company_id?: string
+          created_at?: string
+          member_type?: Database["public"]["Enums"]["fsc_member_type"]
+          user_id?: string
+        }
+        Relationships: []
+      }
+      fsc_company_product_group_claims: {
+        Row: {
+          claim: Database["public"]["Enums"]["fsc_product_claim"]
+          company_product_group_id: string
+        }
+        Insert: {
+          claim: Database["public"]["Enums"]["fsc_product_claim"]
+          company_product_group_id: string
+        }
+        Update: {
+          claim?: Database["public"]["Enums"]["fsc_product_claim"]
+          company_product_group_id?: string
+        }
+        Relationships: []
+      }
+      fsc_company_product_groups: {
+        Row: {
+          activated_at: string
+          catalog_group_id: string | null
+          company_id: string
+          created_at: string
+          custom_label: string | null
+          id: string
+          is_active: boolean
+          species_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          activated_at?: string
+          catalog_group_id?: string | null
+          company_id: string
+          created_at?: string
+          custom_label?: string | null
+          id?: string
+          is_active?: boolean
+          species_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          activated_at?: string
+          catalog_group_id?: string | null
+          company_id?: string
+          created_at?: string
+          custom_label?: string | null
+          id?: string
+          is_active?: boolean
+          species_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      fsc_document_alerts: {
+        Row: {
+          alert_type: string
+          created_at: string
+          document_id: string
+          id: string
+          recipient_user_id: string | null
+          sent_at: string | null
+        }
+        Insert: {
+          alert_type?: string
+          created_at?: string
+          document_id: string
+          id?: string
+          recipient_user_id?: string | null
+          sent_at?: string | null
+        }
+        Update: {
+          alert_type?: string
+          created_at?: string
+          document_id?: string
+          id?: string
+          recipient_user_id?: string | null
+          sent_at?: string | null
+        }
+        Relationships: []
+      }
+      fsc_documents: {
+        Row: {
+          category: string
+          company_id: string
+          created_at: string
+          created_by: string | null
+          expires_at: string | null
+          id: string
+          mime_type: string | null
+          module: Database["public"]["Enums"]["fsc_document_module"]
+          name: string
+          parent_document_id: string | null
+          reference_year: number | null
+          reviewed_at: string | null
+          size: number | null
+          status: Database["public"]["Enums"]["fsc_document_status"]
+          storage_path: string | null
+          tool_id: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          category: string
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          expires_at?: string | null
+          id?: string
+          mime_type?: string | null
+          module: Database["public"]["Enums"]["fsc_document_module"]
+          name: string
+          parent_document_id?: string | null
+          reference_year?: number | null
+          reviewed_at?: string | null
+          size?: number | null
+          status?: Database["public"]["Enums"]["fsc_document_status"]
+          storage_path?: string | null
+          tool_id: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          category?: string
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          expires_at?: string | null
+          id?: string
+          mime_type?: string | null
+          module?: Database["public"]["Enums"]["fsc_document_module"]
+          name?: string
+          parent_document_id?: string | null
+          reference_year?: number | null
+          reviewed_at?: string | null
+          size?: number | null
+          status?: Database["public"]["Enums"]["fsc_document_status"]
+          storage_path?: string | null
+          tool_id?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: []
+      }
+      fsc_ilo_assessments: {
+        Row: {
+          company_id: string
+          compiled_doc_path: string | null
+          compiled_pdf_path: string | null
+          completed_at: string | null
+          created_at: string
+          id: string
+          reference_year: number
+          template_storage_path: string | null
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          compiled_doc_path?: string | null
+          compiled_pdf_path?: string | null
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          reference_year: number
+          template_storage_path?: string | null
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          compiled_doc_path?: string | null
+          compiled_pdf_path?: string | null
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          reference_year?: number
+          template_storage_path?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      fsc_logos: {
+        Row: {
+          approval_email_path: string | null
+          company_id: string
+          created_at: string
+          created_by: string | null
+          graphic_path: string | null
+          id: string
+          logo_type: Database["public"]["Enums"]["fsc_logo_type"]
+          notes: string | null
+          progressive_code: string
+        }
+        Insert: {
+          approval_email_path?: string | null
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          graphic_path?: string | null
+          id?: string
+          logo_type: Database["public"]["Enums"]["fsc_logo_type"]
+          notes?: string | null
+          progressive_code?: string
+        }
+        Update: {
+          approval_email_path?: string | null
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          graphic_path?: string | null
+          id?: string
+          logo_type?: Database["public"]["Enums"]["fsc_logo_type"]
+          notes?: string | null
+          progressive_code?: string
+        }
+        Relationships: []
+      }
+      fsc_product_group_addenda: {
+        Row: {
+          company_product_group_id: string
+          generated_at: string
+          id: string
+          metadata: Json
+          storage_path: string | null
+        }
+        Insert: {
+          company_product_group_id: string
+          generated_at?: string
+          id?: string
+          metadata?: Json
+          storage_path?: string | null
+        }
+        Update: {
+          company_product_group_id?: string
+          generated_at?: string
+          id?: string
+          metadata?: Json
+          storage_path?: string | null
+        }
+        Relationships: []
+      }
+      fsc_product_groups_catalog: {
+        Row: {
+          code: string | null
+          created_at: string
+          id: string
+          is_active: boolean
+          keywords: string | null
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          code?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          keywords?: string | null
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          code?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          keywords?: string | null
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      fsc_subcontractor_attachments: {
+        Row: {
+          attachment_type: Database["public"]["Enums"]["fsc_subcontractor_attachment_type"]
+          created_at: string
+          created_by: string | null
+          file_name: string | null
+          id: string
+          mime_type: string | null
+          size: number | null
+          storage_path: string
+          subcontractor_id: string
+        }
+        Insert: {
+          attachment_type: Database["public"]["Enums"]["fsc_subcontractor_attachment_type"]
+          created_at?: string
+          created_by?: string | null
+          file_name?: string | null
+          id?: string
+          mime_type?: string | null
+          size?: number | null
+          storage_path: string
+          subcontractor_id: string
+        }
+        Update: {
+          attachment_type?: Database["public"]["Enums"]["fsc_subcontractor_attachment_type"]
+          created_at?: string
+          created_by?: string | null
+          file_name?: string | null
+          id?: string
+          mime_type?: string | null
+          size?: number | null
+          storage_path?: string
+          subcontractor_id?: string
+        }
+        Relationships: []
+      }
+      fsc_subcontractors: {
+        Row: {
+          certificate_number: string | null
+          certificate_valid_until: string | null
+          coc_risk: boolean
+          company_id: string
+          control_frequency: Database["public"]["Enums"]["fsc_control_frequency"]
+          created_at: string
+          deactivated_at: string | null
+          id: string
+          is_certified: boolean
+          last_control_date: string | null
+          ragione_sociale: string
+          status: Database["public"]["Enums"]["fsc_supplier_status"]
+          updated_at: string
+          work_type: string | null
+        }
+        Insert: {
+          certificate_number?: string | null
+          certificate_valid_until?: string | null
+          coc_risk?: boolean
+          company_id: string
+          control_frequency?: Database["public"]["Enums"]["fsc_control_frequency"]
+          created_at?: string
+          deactivated_at?: string | null
+          id?: string
+          is_certified?: boolean
+          last_control_date?: string | null
+          ragione_sociale: string
+          status?: Database["public"]["Enums"]["fsc_supplier_status"]
+          updated_at?: string
+          work_type?: string | null
+        }
+        Update: {
+          certificate_number?: string | null
+          certificate_valid_until?: string | null
+          coc_risk?: boolean
+          company_id?: string
+          control_frequency?: Database["public"]["Enums"]["fsc_control_frequency"]
+          created_at?: string
+          deactivated_at?: string | null
+          id?: string
+          is_certified?: boolean
+          last_control_date?: string | null
+          ragione_sociale?: string
+          status?: Database["public"]["Enums"]["fsc_supplier_status"]
+          updated_at?: string
+          work_type?: string | null
+        }
+        Relationships: []
+      }
+      fsc_supplier_attachments: {
+        Row: {
+          attachment_type: Database["public"]["Enums"]["fsc_supplier_attachment_type"]
+          created_at: string
+          created_by: string | null
+          file_name: string | null
+          id: string
+          mime_type: string | null
+          size: number | null
+          storage_path: string
+          supplier_id: string
+        }
+        Insert: {
+          attachment_type: Database["public"]["Enums"]["fsc_supplier_attachment_type"]
+          created_at?: string
+          created_by?: string | null
+          file_name?: string | null
+          id?: string
+          mime_type?: string | null
+          size?: number | null
+          storage_path: string
+          supplier_id: string
+        }
+        Update: {
+          attachment_type?: Database["public"]["Enums"]["fsc_supplier_attachment_type"]
+          created_at?: string
+          created_by?: string | null
+          file_name?: string | null
+          id?: string
+          mime_type?: string | null
+          size?: number | null
+          storage_path?: string
+          supplier_id?: string
+        }
+        Relationships: []
+      }
+      fsc_supplier_product_claims: {
+        Row: {
+          claim: Database["public"]["Enums"]["fsc_product_claim"]
+          supplier_id: string
+        }
+        Insert: {
+          claim: Database["public"]["Enums"]["fsc_product_claim"]
+          supplier_id: string
+        }
+        Update: {
+          claim?: Database["public"]["Enums"]["fsc_product_claim"]
+          supplier_id?: string
+        }
+        Relationships: []
+      }
+      fsc_supplier_status_history: {
+        Row: {
+          changed_at: string
+          changed_by: string | null
+          id: string
+          new_status: Database["public"]["Enums"]["fsc_supplier_status"]
+          old_status: Database["public"]["Enums"]["fsc_supplier_status"] | null
+          supplier_id: string
+        }
+        Insert: {
+          changed_at?: string
+          changed_by?: string | null
+          id?: string
+          new_status: Database["public"]["Enums"]["fsc_supplier_status"]
+          old_status?: Database["public"]["Enums"]["fsc_supplier_status"] | null
+          supplier_id: string
+        }
+        Update: {
+          changed_at?: string
+          changed_by?: string | null
+          id?: string
+          new_status?: Database["public"]["Enums"]["fsc_supplier_status"]
+          old_status?: Database["public"]["Enums"]["fsc_supplier_status"] | null
+          supplier_id?: string
+        }
+        Relationships: []
+      }
+      fsc_suppliers: {
+        Row: {
+          certificate_number: string | null
+          certificate_valid_until: string | null
+          company_id: string
+          control_frequency: Database["public"]["Enums"]["fsc_control_frequency"]
+          created_at: string
+          deactivated_at: string | null
+          id: string
+          last_control_date: string | null
+          ragione_sociale: string
+          status: Database["public"]["Enums"]["fsc_supplier_status"]
+          updated_at: string
+        }
+        Insert: {
+          certificate_number?: string | null
+          certificate_valid_until?: string | null
+          company_id: string
+          control_frequency?: Database["public"]["Enums"]["fsc_control_frequency"]
+          created_at?: string
+          deactivated_at?: string | null
+          id?: string
+          last_control_date?: string | null
+          ragione_sociale: string
+          status?: Database["public"]["Enums"]["fsc_supplier_status"]
+          updated_at?: string
+        }
+        Update: {
+          certificate_number?: string | null
+          certificate_valid_until?: string | null
+          company_id?: string
+          control_frequency?: Database["public"]["Enums"]["fsc_control_frequency"]
+          created_at?: string
+          deactivated_at?: string | null
+          id?: string
+          last_control_date?: string | null
+          ragione_sociale?: string
+          status?: Database["public"]["Enums"]["fsc_supplier_status"]
+          updated_at?: string
+        }
+        Relationships: []
+      }
       eu_products: {
         Row: {
           description: string | null
@@ -662,11 +1256,24 @@ export type Database = {
         }[]
       }
       is_admin_of_tool: { Args: { _tool_id: string }; Returns: boolean }
+      fsc_ensure_company_for_user: { Args: { _tool_id: string }; Returns: string }
+      fsc_current_user_company_ids: { Args: Record<string, never>; Returns: string[] }
+      fsc_process_alert_outbox: { Args: { _tool_id: string }; Returns: number }
+      fsc_next_logo_code: { Args: { _company_id: string }; Returns: string }
     }
     Enums: {
       app_role: "standard" | "premium" | "admin"
       Corruption_Code: "AA" | "MA" | "MB" | "MM" | "TT"
       country_risk: "RA" | "RB" | "RS"
+      fsc_control_frequency: "annual" | "semiannual"
+      fsc_document_module: "gestione" | "ente"
+      fsc_document_status: "active" | "archived"
+      fsc_logo_type: "product" | "promotional"
+      fsc_member_type: "owner" | "employee" | "consultant"
+      fsc_product_claim: "fsc_100" | "fsc_mix" | "fsc_recycled"
+      fsc_subcontractor_attachment_type: "certificato" | "accordo_conto_lavoro"
+      fsc_supplier_attachment_type: "visura" | "due_diligence" | "dichiarazione"
+      fsc_supplier_status: "active" | "inactive" | "reactivated"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -797,6 +1404,15 @@ export const Constants = {
       app_role: ["standard", "premium", "admin"],
       Corruption_Code: ["AA", "MA", "MB", "MM", "TT"],
       country_risk: ["RA", "RB", "RS"],
+      fsc_control_frequency: ["annual", "semiannual"],
+      fsc_document_module: ["gestione", "ente"],
+      fsc_document_status: ["active", "archived"],
+      fsc_logo_type: ["product", "promotional"],
+      fsc_member_type: ["owner", "employee", "consultant"],
+      fsc_product_claim: ["fsc_100", "fsc_mix", "fsc_recycled"],
+      fsc_subcontractor_attachment_type: ["certificato", "accordo_conto_lavoro"],
+      fsc_supplier_attachment_type: ["visura", "due_diligence", "dichiarazione"],
+      fsc_supplier_status: ["active", "inactive", "reactivated"],
     },
   },
 } as const

@@ -19,7 +19,6 @@ import { revalidatePath } from "next/cache"
 import { createClient } from "@/utils/supabase/server"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/types/supabase"
-
 async function getSupabase() {
   return createClient()
 }

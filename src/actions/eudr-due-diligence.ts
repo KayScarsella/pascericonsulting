@@ -32,6 +32,9 @@ const DD_ANALYSIS_COOLDOWN_SEC = 90
 const DD_ANALYSIS_LOCK_STALE_MS = 20 * 60 * 1000
 /** EE getThumbURL max dimension — lower = faster PNG + PDF embed; still fine for A4. */
 const AOI_MAP_THUMB_PX = 1920
+/** Guardrail for inline AOI payloads (textarea / direct invocation). */
+const AOI_INLINE_MAX_BYTES = 1_500_000
+type NormalizedAoi = NonNullable<ReturnType<typeof normalizeAoiInput>>
 
 type EeImage = {
   getThumbURL: (params: Record<string, unknown>, cb: (url: string | null, error?: Error) => void) => void
@@ -206,9 +209,9 @@ function schedulePersistAoiMapPng(
 /**
  * Run Hansen forest loss histogram for AOI; saves AOI GeoJSON + dd_report + PNG to user-uploads (flat per session).
  */
-export async function runDueDiligenceAoiAnalysis(
+async function runDueDiligenceWithNormalized(
   sessionId: string,
-  aoi: unknown,
+  normalized: NormalizedAoi,
   cuttingDateIso?: string | null,
   pointBufferAreaHa?: number | null
 ): Promise<{
@@ -219,20 +222,6 @@ export async function runDueDiligenceAoiAnalysis(
   forest2020Tiles?: { tilesUrlTemplate: string; attribution: string }
   sentinel2YearTiles?: { years: Array<{ year: number; tilesUrlTemplate: string }>; attribution: string }
 }> {
-  if (!isEarthEngineConfigured()) {
-    return {
-      error:
-        'Earth Engine non configurato. Impostare EARTH_ENGINE_PRIVATE_KEY_JSON (o _B64) con il JSON del service account.',
-    }
-  }
-  const normalized = normalizeAoiInput(aoi)
-  if (!normalized) {
-    return {
-      error:
-        'AOI non valida: incolla GeoJSON Point/MultiPoint/Polygon/MultiPolygon, oppure Feature/FeatureCollection (WGS84).',
-    }
-  }
-
   const cuttingDateRaw = cuttingDateIso?.trim()
   if (!cuttingDateRaw || !/^\d{4}-\d{2}-\d{2}$/.test(cuttingDateRaw)) {
     return {
@@ -403,15 +392,12 @@ export async function runDueDiligenceAoiAnalysis(
         forest_2020_ha_in_aoi: assessment.forest_2020_ha_in_aoi,
         forest_2020_pct_aoi: assessment.forest_2020_pct_aoi,
         loss_on_forest_2020_post_eudr_ha: assessment.loss_on_forest_2020_post_eudr_ha,
-        loss_pixel_count_on_forest_2020_post_eudr:
-          assessment.loss_pixel_count_on_forest_2020_post_eudr,
+        loss_pixel_count_on_forest_2020_post_eudr: assessment.loss_pixel_count_on_forest_2020_post_eudr,
         jrc_assessment_ok: assessment.jrc_assessment_ok,
         ...(assessment.lossyear_histogram_on_forest_2020
           ? { lossyear_histogram_on_forest_2020: assessment.lossyear_histogram_on_forest_2020 }
           : {}),
-        ...(assessment.jrc_assessment_error
-          ? { jrc_assessment_error: assessment.jrc_assessment_error }
-          : {}),
+        ...(assessment.jrc_assessment_error ? { jrc_assessment_error: assessment.jrc_assessment_error } : {}),
       },
       ...(assessment.forest_types_2020
         ? {
@@ -422,21 +408,16 @@ export async function runDueDiligenceAoiAnalysis(
               ha_planted: assessment.forest_types_2020.ha_planted,
               ha_forest_typed_total: assessment.forest_types_2020.ha_forest_typed_total,
               ok: assessment.forest_types_2020.ok,
-              ...(assessment.forest_types_2020.error
-                ? { error: assessment.forest_types_2020.error }
-                : {}),
+              ...(assessment.forest_types_2020.error ? { error: assessment.forest_types_2020.error } : {}),
             },
           }
         : {}),
     }
 
     const ddSnapshot = buildDdLastRunSnapshot(completedMeta)
-    const reportPayload = buildDdReportPayload(
-      completedMeta,
-      ddSnapshot,
-      Boolean(lossTiles?.dualClassMode),
-      { hasSnapshot: false }
-    )
+    const reportPayload = buildDdReportPayload(completedMeta, ddSnapshot, Boolean(lossTiles?.dualClassMode), {
+      hasSnapshot: false,
+    })
 
     await supabase.storage.from('user-uploads').upload(reportPath, JSON.stringify(reportPayload), {
       contentType: 'application/json',
@@ -470,14 +451,8 @@ export async function runDueDiligenceAoiAnalysis(
           ...prevWithoutLock,
           dd_last_run: ddSnapshot,
           ...(ddSnapshot.triggers_non_accettabile
-            ? {
-                aoi_gate_triggered: true,
-                aoi_gate_reasons: ddSnapshot.reasons,
-              }
-            : {
-                aoi_gate_triggered: false,
-                aoi_gate_reasons: [],
-              }),
+            ? { aoi_gate_triggered: true, aoi_gate_reasons: ddSnapshot.reasons }
+            : { aoi_gate_triggered: false, aoi_gate_reasons: [] }),
         } as Json,
       })
       .eq('id', sessionId)
@@ -507,6 +482,110 @@ export async function runDueDiligenceAoiAnalysis(
     await clearDdAnalysisLock(supabase, sessionId)
     return { runId, error: err instanceof Error ? err.message : String(err) }
   }
+}
+
+export async function runDueDiligenceAoiAnalysis(
+  sessionId: string,
+  aoi: unknown,
+  cuttingDateIso?: string | null,
+  pointBufferAreaHa?: number | null
+): Promise<{
+  runId?: string
+  error?: string
+  metadata?: RunMetadata
+  lossTiles?: { tilesUrlTemplate: string; attribution: string; dualClassMode?: boolean }
+  forest2020Tiles?: { tilesUrlTemplate: string; attribution: string }
+  sentinel2YearTiles?: { years: Array<{ year: number; tilesUrlTemplate: string }>; attribution: string }
+}> {
+  if (!isEarthEngineConfigured()) {
+    return {
+      error:
+        'Earth Engine non configurato. Impostare EARTH_ENGINE_PRIVATE_KEY_JSON (o _B64) con il JSON del service account.',
+    }
+  }
+  try {
+    const inlineBytes = Buffer.byteLength(JSON.stringify(aoi ?? null), 'utf8')
+    if (inlineBytes > AOI_INLINE_MAX_BYTES) {
+      return {
+        error:
+          'AOI troppo grande per essere inviata in richiesta. Carica il file GeoJSON con il pulsante di upload invece di incollare il JSON.',
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  const normalized = normalizeAoiInput(aoi)
+  if (!normalized) {
+    return {
+      error:
+        'AOI non valida: incolla GeoJSON Point/MultiPoint/Polygon/MultiPolygon, oppure Feature/FeatureCollection (WGS84).',
+    }
+  }
+  return await runDueDiligenceWithNormalized(sessionId, normalized, cuttingDateIso, pointBufferAreaHa)
+}
+
+export async function runDueDiligenceAoiAnalysisFromStorage(
+  sessionId: string,
+  aoiStoragePath: string,
+  cuttingDateIso?: string | null,
+  pointBufferAreaHa?: number | null
+): Promise<{
+  runId?: string
+  error?: string
+  metadata?: RunMetadata
+  lossTiles?: { tilesUrlTemplate: string; attribution: string; dualClassMode?: boolean }
+  forest2020Tiles?: { tilesUrlTemplate: string; attribution: string }
+  sentinel2YearTiles?: { years: Array<{ year: number; tilesUrlTemplate: string }>; attribution: string }
+}> {
+  if (!isEarthEngineConfigured()) {
+    return {
+      error:
+        'Earth Engine non configurato. Impostare EARTH_ENGINE_PRIVATE_KEY_JSON (o _B64) con il JSON del service account.',
+    }
+  }
+
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { error: 'Non autenticato' }
+
+  try {
+    await validateSessionAccess(supabase, EUDR_TOOL_ID, sessionId)
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Accesso negato' }
+  }
+
+  const expectedPrefix = `${user.id}/eudr-due-diligence/${sessionId}/`
+  if (!aoiStoragePath || !aoiStoragePath.startsWith(expectedPrefix)) {
+    return { error: 'Percorso AOI non valido' }
+  }
+
+  const { data: fileData, error: dlErr } = await supabase.storage.from('user-uploads').download(aoiStoragePath)
+  if (dlErr || !fileData) return { error: dlErr?.message ?? 'Download AOI fallito' }
+
+  const text = await fileData.text()
+  const bytes = Buffer.byteLength(text, 'utf8')
+  if (bytes > 10 * 1024 * 1024) {
+    return { error: 'AOI troppo grande: massimo 10MB' }
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return { error: 'AOI non valida: JSON non parsabile' }
+  }
+
+  const normalized = normalizeAoiInput(parsed)
+  if (!normalized) {
+    return {
+      error:
+        'AOI non valida: caricare GeoJSON Point/MultiPoint/Polygon/MultiPolygon, oppure Feature/FeatureCollection (WGS84).',
+    }
+  }
+
+  return await runDueDiligenceWithNormalized(sessionId, normalized, cuttingDateIso, pointBufferAreaHa)
 }
 
 export async function getDueDiligenceArtifactUrl(

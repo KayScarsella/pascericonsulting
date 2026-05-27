@@ -24,7 +24,6 @@ import {
 import { uploadDocumentWithProgress } from "@/lib/documents-upload-client"
 import { validateDocumentFileMetadata } from "@/lib/documents-upload"
 import { Database } from "@/types/supabase"
-
 // Tipo derivato direttamente dal DB
 export type DocItem = Database['public']['Tables']['documents']['Row']
 

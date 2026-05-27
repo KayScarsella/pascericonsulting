@@ -7,7 +7,11 @@
 
 import dynamic from 'next/dynamic'
 import { useRef, useState } from 'react'
-import { runDueDiligenceAoiAnalysis, getDueDiligenceArtifactUrl } from '@/actions/eudr-due-diligence'
+import {
+  runDueDiligenceAoiAnalysis,
+  runDueDiligenceAoiAnalysisFromStorage,
+  getDueDiligenceArtifactUrl,
+} from '@/actions/eudr-due-diligence'
 import { LossYearChart } from '@/features/eudr-due-diligence/map/LossYearChart'
 import type { RunMetadata } from '@/features/eudr-due-diligence/types/due-diligence-run'
 import { MapPin, Loader2 } from 'lucide-react'
@@ -20,6 +24,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { createClient } from '@/utils/supabase/client'
+import {
+  buildEudrDueDiligenceAoiUploadPath,
+  uploadToUserUploadsBucket,
+  USER_UPLOADS_MAX_FILE_SIZE,
+} from '@/lib/user-uploads-client'
 
 const DueDiligenceMap = dynamic(
   () => import('@/features/eudr-due-diligence/map/DueDiligenceMap').then((m) => m.DueDiligenceMap),
@@ -90,6 +100,7 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
   const [sentinel2Attribution, setSentinel2Attribution] = useState<string | undefined>(undefined)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [pendingAoi, setPendingAoi] = useState<unknown>(null)
+  const [pendingAoiStoragePath, setPendingAoiStoragePath] = useState<string | null>(null)
   const [pendingAoiHasPoint, setPendingAoiHasPoint] = useState(false)
   const [pointBufferAreaHa, setPointBufferAreaHa] = useState('')
   const lastRunIdRef = useRef<string | null>(null)
@@ -144,24 +155,112 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
     }
   }
 
+  async function runAnalysisFromStorage(storagePath: string) {
+    setError(null)
+    if (!cuttingDate.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(cuttingDate.trim())) {
+      setError("Inserire la data di taglio (obbligatoria) in formato YYYY-MM-DD prima di eseguire l'analisi.")
+      return
+    }
+    setLoading(true)
+    try {
+      const cuttingIso = cuttingDate.trim()
+      const trimmedArea = pointBufferAreaHa.trim()
+      const parsedArea = trimmedArea ? Number(trimmedArea) : null
+      const pointBufferArea =
+        pendingAoiHasPoint && parsedArea != null && Number.isFinite(parsedArea) ? parsedArea : null
+
+      const res = await runDueDiligenceAoiAnalysisFromStorage(sessionId, storagePath, cuttingIso, pointBufferArea)
+      if (res.error && !res.metadata) {
+        setError(res.error)
+        return
+      }
+      if (res.metadata?.status === 'completed' && res.metadata.artifact_paths?.aoi_geojson) {
+        lastRunIdRef.current = res.runId ?? res.metadata.run_id
+        setMetadata(res.metadata)
+        const urlRes = await getDueDiligenceArtifactUrl(sessionId, res.metadata.artifact_paths.aoi_geojson)
+        if (urlRes.signedUrl) setMapUrl(urlRes.signedUrl)
+      }
+      if (res.lossTiles?.tilesUrlTemplate) {
+        setLossTilesUrlTemplate(res.lossTiles.tilesUrlTemplate)
+        setLossAttribution(res.lossTiles.attribution)
+        setLossDualClassMode(Boolean(res.lossTiles.dualClassMode))
+      }
+      if (res.forest2020Tiles?.tilesUrlTemplate) {
+        setForest2020TilesUrl(res.forest2020Tiles.tilesUrlTemplate)
+        setForest2020Attribution(res.forest2020Tiles.attribution)
+      } else {
+        setForest2020TilesUrl(null)
+      }
+      if (res.sentinel2YearTiles?.years?.length) {
+        setSentinel2Years(res.sentinel2YearTiles.years)
+        setSentinel2Attribution(res.sentinel2YearTiles.attribution)
+      } else {
+        setSentinel2Years([])
+      }
+      if (res.error) setError(res.error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   function onFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+    setError(null)
+    if (!cuttingDate.trim()) {
+      setError('Inserire prima la data di taglio (obbligatoria), poi caricare di nuovo il file.')
+      e.target.value = ''
+      return
+    }
+    if (file.size > USER_UPLOADS_MAX_FILE_SIZE) {
+      setError(
+        `File troppo grande: massimo ${Math.round(USER_UPLOADS_MAX_FILE_SIZE / 1024 / 1024)}MB. ` +
+          'Semplifica il GeoJSON (meno vertici) o esporta una geometria più leggera.'
+      )
+      e.target.value = ''
+      return
+    }
+
     const reader = new FileReader()
-    reader.onload = () => {
+    reader.onload = async () => {
       const text = String(reader.result || '')
       setAoiText(text)
       try {
-        if (!cuttingDate.trim()) {
-          setError('Inserire prima la data di taglio (obbligatoria), poi caricare di nuovo il file.')
+        const aoi = JSON.parse(text)
+
+        setLoading(true)
+        const supabase = createClient()
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+        if (!user) {
+          setError('Non autenticato')
           return
         }
-        const aoi = JSON.parse(text)
+
+        const storagePath = buildEudrDueDiligenceAoiUploadPath({
+          userId: user.id,
+          sessionId,
+          fileName: file.name,
+        })
+        const uploadRes = await uploadToUserUploadsBucket({
+          storagePath,
+          file,
+          upsert: true,
+        })
+        if (uploadRes.error) {
+          setError(uploadRes.error)
+          return
+        }
+
+        setPendingAoiStoragePath(storagePath)
         setPendingAoi(aoi)
         setPendingAoiHasPoint(hasPointLikeGeometry(aoi))
         setConfirmOpen(true)
       } catch {
         setError('File non valido: servono GeoJSON/JSON con Point/MultiPoint/Polygon/MultiPolygon (WGS84).')
+      } finally {
+        setLoading(false)
       }
     }
     reader.readAsText(file)
@@ -193,8 +292,13 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
       }
     }
     setConfirmOpen(false)
-    if (pendingAoi != null) await runAnalysis(pendingAoi)
+    if (pendingAoiStoragePath) {
+      await runAnalysisFromStorage(pendingAoiStoragePath)
+    } else if (pendingAoi != null) {
+      await runAnalysis(pendingAoi)
+    }
     setPendingAoi(null)
+    setPendingAoiStoragePath(null)
     setPendingAoiHasPoint(false)
   }
 
