@@ -136,7 +136,7 @@ export async function sendPendingInviteActionLinkViaResend(input: {
   /** Multi-use portal link (not the Supabase /verify URL). */
   portalUrl: string
   toolName: string
-}): Promise<{ ok: true } | { ok: false; error: string }> {
+}): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const tool = input.toolName.trim() || 'Pasceri Consulting'
   const subject = `Invito alla piattaforma ${tool}`
   const html = `
