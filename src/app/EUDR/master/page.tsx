@@ -2,7 +2,7 @@ import { getToolAccess } from "@/lib/tool-auth"
 import { EUDR_TOOL_ID } from "@/lib/constants"
 import { redirect } from "next/navigation"
 import Link from "next/link"
-import { Settings, Users, Database, Leaf, Globe, Bell } from "lucide-react"
+import { Settings, Users, Database, Leaf, Globe, Bell, Mail } from "lucide-react"
 
 export default async function MasterPage() {
   const { role } = await getToolAccess(EUDR_TOOL_ID)
@@ -22,6 +22,16 @@ export default async function MasterPage() {
       </div>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        <Link href="/EUDR/master/email-supervision" className="bg-white p-6 rounded-lg border border-slate-200 hover:border-[#967635] transition-colors cursor-pointer group block">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-2 bg-amber-50 rounded group-hover:bg-[#967635] transition-colors">
+              <Mail className="w-6 h-6 text-[#967635] group-hover:text-white" />
+            </div>
+            <h3 className="font-semibold text-lg">Supervisione email</h3>
+          </div>
+          <p className="text-slate-500 text-sm">Stato invito (serve reinvio?), email Resend, aperture link porta e click «Continua e accedi».</p>
+        </Link>
+
         <Link href="/EUDR/master/users" className="bg-white p-6 rounded-lg border border-slate-200 hover:border-[#967635] transition-colors cursor-pointer group block">
           <div className="flex items-center gap-3 mb-4">
             <div className="p-2 bg-amber-50 rounded group-hover:bg-[#967635] transition-colors">

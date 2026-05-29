@@ -55,6 +55,10 @@ export async function GET(request: Request) {
       }
       return response
     }
+    console.warn("[auth/callback] exchangeCodeForSession failed", {
+      message: error.message,
+      next,
+    })
     await supabase.auth.signOut()
   }
 
@@ -63,5 +67,6 @@ export async function GET(request: Request) {
       ? '/auth/recupero-non-valido'
       : '/auth/invito-non-valido'
 
-  return NextResponse.redirect(`${origin}${failPath}`)
+  const failQuery = code ? '?from=pkce_exchange_failed' : ''
+  return NextResponse.redirect(`${origin}${failPath}${failQuery}`)
 }

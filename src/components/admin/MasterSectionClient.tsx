@@ -64,13 +64,15 @@ import { NotificationDetailDialog } from '@/components/notifications/Notificatio
 import type { NotificationDisplayItem } from '@/components/notifications/notification-types'
 import { AUTH_EMAIL_OTP_EXPIRATION_HINT, PENDING_INVITE_BULK_RESEND_MAX } from '@/lib/constants'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { EmailSupervisionSection } from '@/components/admin/EmailSupervisionSection'
+import type { EmailSupervisionRow } from '@/actions/email-supervision'
 
 type SpeciesRow = Database['public']['Tables']['species']['Row']
 type CountryRow = Database['public']['Tables']['country']['Row']
 type NotificationRow = Database['public']['Tables']['notifications']['Row']
 type ProfileRow = Database['public']['Tables']['profiles']['Row']
 
-export const MASTER_SECTIONS = ['users', 'species', 'countries', 'notifications'] as const
+export const MASTER_SECTIONS = ['users', 'email-supervision', 'species', 'countries', 'notifications'] as const
 export type MasterSection = (typeof MASTER_SECTIONS)[number]
 
 const ROLE_LABELS: Record<string, string> = {
@@ -139,6 +141,10 @@ export interface MasterSectionClientProps {
   speciesData?: SpeciesRow[] | null
   countriesData?: CountryRow[] | null
   notificationsData?: NotificationRow[] | null
+  emailSupervisionData?: EmailSupervisionRow[] | null
+  resendConfigured?: boolean
+  needsResendTotalCount?: number
+  emailSupervisionTotalUserCount?: number
   /** Current page (1-based). Used with totalPages and basePath for server-side pagination. */
   page?: number
   /** Total number of pages. */
@@ -154,6 +160,10 @@ export function MasterSectionClient({
   speciesData,
   countriesData,
   notificationsData,
+  emailSupervisionData,
+  resendConfigured = false,
+  needsResendTotalCount = 0,
+  emailSupervisionTotalUserCount = 0,
   page = 1,
   totalPages: totalPagesProp = 1,
   basePath,
@@ -273,6 +283,21 @@ export function MasterSectionClient({
     })
   }, [section, toolId])
 
+  if (section === 'email-supervision') {
+    return (
+      <EmailSupervisionSection
+        data={emailSupervisionData ?? []}
+        page={page}
+        totalPages={totalPagesProp}
+        basePath={basePath ?? ''}
+        resendConfigured={resendConfigured}
+        toolId={toolId}
+        needsResendTotalCount={needsResendTotalCount}
+        totalUserCount={emailSupervisionTotalUserCount}
+      />
+    )
+  }
+
   if (section === 'users') {
     const inviteWarnStorageKey = `pasceri_invite_warn:${toolId}`
 
@@ -298,13 +323,7 @@ export function MasterSectionClient({
       let description: string | undefined
       if (delivery === 'pending_emailed') {
         description =
-          'L’utente dovrebbe ricevere una nuova email con il link di invito (controllare anche spam).'
-      } else if (delivery === 'supabase_invite_sent') {
-        description =
-          'Supabase invia l’email di invito per i nuovi account; per utenti già registrati senza onboarding il link può arrivare via Resend se configurato.'
-      } else if (!res.warning && (m === 'Invito inviato.' || m.startsWith('Tool assegnato'))) {
-        description =
-          'Per i nuovi inviti Supabase invia l’email; per utenti già registrati senza onboarding il link può arrivare da Resend (vedi avviso in pagina se presente).'
+          'Link porta valido 7 giorni; magic link Supabase (~24 h) solo dopo «Continua e accedi». Controllare spam. In Supervisione email inviti puoi vedere aperture e se serve un reinvio.'
       }
       toast.success(m || 'Operazione completata.', description ? { description } : undefined)
       return true
@@ -580,9 +599,12 @@ export function MasterSectionClient({
               <DialogTitle>Invita utente</DialogTitle>
             </DialogHeader>
             <p className="text-xs leading-relaxed text-slate-600">
-              Se l&apos;utente dice che il link è scaduto: verifica l&apos;email, poi usa di nuovo
-              &quot;Invia invito&quot; (o il reinvio dalla tabella per chi è ancora in onboarding). Chi non
-              ha completato la registrazione non può usare il recupero password dal login.
+              Il link nell&apos;email resta valido <strong>7 giorni</strong> (pagina porta). Dopo «Continua e
+              accedi» il magic link Supabase scade di solito in <strong>~24 ore</strong>: in quel caso
+              l&apos;utente può ripremere «Continua» sulla stessa pagina senza reinvio. Reinvia solo se in{' '}
+              <strong>Supervisione email inviti</strong> lo stato è «serve reinvio» (ticket scaduto, email
+              rimbalzata, nessun link attivo). Chi non ha completato la registrazione non può usare recupero
+              password dal login.
             </p>
             <div className="grid gap-4 py-2">
               <div className="grid gap-2">
@@ -670,7 +692,7 @@ export function MasterSectionClient({
                     }
                   }}
                   disabled={updating === `resend-${row.user_id}`}
-                  title="Reinvia link onboarding"
+                  title="Reinvia link onboarding (invalida i link delle email precedenti)"
                 >
                   {updating === `resend-${row.user_id}` ? (
                     <Loader2 className="h-4 w-4 animate-spin" />

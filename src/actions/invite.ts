@@ -4,6 +4,8 @@ import {
   notifyUserOfToolAccess,
   sendPendingInviteActionLinkViaResend,
 } from '@/lib/tool-access-notify'
+import { createOnboardingPortalLinkForUser } from '@/actions/onboarding-entry'
+import { attachResendEmailToActiveTicket } from '@/lib/onboarding-invite-ticket'
 import { resolveAuthUserIdByEmail } from '@/lib/resolve-auth-user-by-email'
 import { requireToolAdmin } from '@/lib/tool-auth'
 import { siteUrlForAuth } from '@/lib/site-url-for-auth'
@@ -14,21 +16,18 @@ export type AppInviteRole = 'standard' | 'premium' | 'admin'
 
 export type InviteUserIntent = 'default' | 'resend_pending_onboarding'
 
-/** Esito invio email link pending (reinvio admin); utile per toast mirati. */
+/** Esito invio email invito onboarding (sempre Resend + link porta). */
 export type InviteEmailDelivery =
   | 'pending_emailed'
   | 'pending_email_failed'
   | 'pending_email_missing_env'
-  | 'supabase_invite_sent'
   | 'none'
 
 export type InviteUserToToolResult = {
   success: boolean
   error?: string
   message?: string
-  /** Set when access was saved but optional email delivery failed (tool notify or pending invite link). */
   warning?: string
-  /** Popolato quando si gestisce un link pending via Resend. */
   inviteEmailDelivery?: InviteEmailDelivery
 }
 
@@ -40,40 +39,57 @@ type InviteTemplateData = {
 
 const INVITE_LOG = '[inviteUserToTool]'
 
-async function generatePendingInviteActionLink(
+const RESEND_REQUIRED_ERROR =
+  'Gli inviti onboarding richiedono RESEND_API_KEY e FROM_EMAIL sul server (email Resend con link porta /auth/onboarding-entry). Non si usa più la mail di invito Supabase.'
+
+async function resolveOrCreateInvitedUser(
   adminClient: ReturnType<typeof createServiceRoleClient>,
   trimmed: string,
-  site: string,
   templateData: InviteTemplateData
-): Promise<{ actionLink: string } | { error: string }> {
-  const { data: linkGen, error: genLinkError } = await adminClient.auth.admin.generateLink({
-    // For already-registered (pending) users, Supabase does not allow generating an "invite" link.
-    // A magic link sets a valid session and can continue to /auth/callback -> /onboarding.
-    type: 'magiclink',
+): Promise<
+  | { ok: true; userId: string; inviteKind: 'new_invite' | 'existing_pending' | 'existing_onboarded' }
+  | { ok: false; error: string }
+> {
+  const { data: created, error: createError } = await adminClient.auth.admin.createUser({
     email: trimmed,
-    options: {
-      redirectTo: `${site}/auth/callback`,
-      data: templateData,
-    },
+    email_confirm: true,
+    user_metadata: templateData as unknown as Record<string, unknown>,
   })
-  if (genLinkError) {
-    return {
-      error: `Generazione link invito fallita: ${genLinkError.message}`,
-    }
+
+  if (!createError && created.user?.id) {
+    return { ok: true, userId: created.user.id, inviteKind: 'new_invite' }
   }
-  const actionLink = linkGen?.properties?.action_link
-  if (!actionLink) {
-    return {
-      error: 'La risposta Auth non contiene il link di invito (action_link).',
-    }
+
+  const alreadyRegistered = createError?.message.toLowerCase().includes('already been registered')
+  if (!alreadyRegistered) {
+    return { ok: false, error: createError?.message ?? 'Creazione utente fallita.' }
   }
-  return { actionLink }
+
+  const resolved = await resolveAuthUserIdByEmail(adminClient, trimmed)
+  if ('error' in resolved) {
+    return { ok: false, error: resolved.error }
+  }
+
+  const { data: existingProfile } = await adminClient
+    .from('profiles')
+    .select('onboarding_completed')
+    .eq('id', resolved.userId)
+    .maybeSingle()
+
+  const onboardingCompleted = Boolean(
+    (existingProfile as { onboarding_completed?: boolean } | null)?.onboarding_completed
+  )
+
+  return {
+    ok: true,
+    userId: resolved.userId,
+    inviteKind: onboardingCompleted ? 'existing_onboarded' : 'existing_pending',
+  }
 }
 
 /**
- * Sends a Supabase invite email and grants access to the tool.
- * Requires SUPABASE_SERVICE_ROLE_KEY on the server.
- * In Supabase Dashboard: Authentication → disable "Allow new users to sign up" for invite-only mode.
+ * Grants tool access and sends onboarding invite email via Resend (link porta multiuso).
+ * Requires SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY, FROM_EMAIL, NEXT_PUBLIC_SITE_URL.
  */
 export async function inviteUserToToolAction(
   toolId: string,
@@ -91,6 +107,9 @@ export async function inviteUserToToolAction(
         'Configura NEXT_PUBLIC_SITE_URL con l’URL pubblico dell’app (non l’URL *.supabase.co), es. https://tuo-dominio.vercel.app',
     }
   }
+
+  const resendKey = process.env.RESEND_API_KEY?.trim()
+  const fromEmail = process.env.FROM_EMAIL?.trim()
 
   let adminClient
   try {
@@ -121,11 +140,8 @@ export async function inviteUserToToolAction(
     invited_tool_name: invitedToolName,
   }
 
-  let userId: string | null = null
-  /** New Auth invite vs existing account (pending or fully onboarded). */
-  let inviteKind: 'new_invite' | 'existing_pending' | 'existing_onboarded' = 'new_invite'
-  /** Set for `existing_pending`: must be emailed via Resend (generateLink does not send). */
-  let pendingInviteActionLink: string | null = null
+  let userId: string
+  let inviteKind: 'new_invite' | 'existing_pending' | 'existing_onboarded'
 
   if (options?.intent === 'resend_pending_onboarding') {
     const resolved = await resolveAuthUserIdByEmail(adminClient, trimmed)
@@ -140,10 +156,7 @@ export async function inviteUserToToolAction(
       .eq('id', userId)
       .maybeSingle()
 
-    const onboardingCompleted = Boolean(
-      (existingProfile as { onboarding_completed?: boolean } | null)?.onboarding_completed
-    )
-    if (onboardingCompleted) {
+    if (Boolean((existingProfile as { onboarding_completed?: boolean } | null)?.onboarding_completed)) {
       return {
         success: false,
         error: 'Onboarding già completato: non serve reinvio del link di invito.',
@@ -151,61 +164,19 @@ export async function inviteUserToToolAction(
     }
 
     inviteKind = 'existing_pending'
-    const linkResult = await generatePendingInviteActionLink(adminClient, trimmed, site, templateData)
-    if ('error' in linkResult) {
-      return { success: false, error: linkResult.error }
-    }
-    pendingInviteActionLink = linkResult.actionLink
   } else {
-    const { data, error } = await adminClient.auth.admin.inviteUserByEmail(trimmed, {
-      redirectTo: `${site}/auth/callback`,
-      data: templateData,
-    })
-
-    userId = data.user?.id ?? null
-
-    if (error) {
-      const alreadyRegistered = error.message.toLowerCase().includes('already been registered')
-      if (!alreadyRegistered) {
-        return {
-          success: false,
-          error: error.message,
-        }
-      }
-
-      const resolved = await resolveAuthUserIdByEmail(adminClient, trimmed)
-      if ('error' in resolved) {
-        return { success: false, error: resolved.error }
-      }
-      userId = resolved.userId
-
-      const { data: existingProfile } = await adminClient
-        .from('profiles')
-        .select('onboarding_completed')
-        .eq('id', userId)
-        .maybeSingle()
-
-      const onboardingCompleted = Boolean(
-        (existingProfile as { onboarding_completed?: boolean } | null)?.onboarding_completed
-      )
-      if (onboardingCompleted) {
-        inviteKind = 'existing_onboarded'
-      } else {
-        inviteKind = 'existing_pending'
-        const linkResult = await generatePendingInviteActionLink(adminClient, trimmed, site, templateData)
-        if ('error' in linkResult) {
-          return {
-            success: false,
-            error: `Utente pending trovato ma ${linkResult.error}`,
-          }
-        }
-        pendingInviteActionLink = linkResult.actionLink
-      }
+    const resolved = await resolveOrCreateInvitedUser(adminClient, trimmed, templateData)
+    if (!resolved.ok) {
+      return { success: false, error: resolved.error }
     }
+    userId = resolved.userId
+    inviteKind = resolved.inviteKind
   }
 
-  if (!userId) {
-    return { success: false, error: 'Invito senza utente: controlla i log Auth in Supabase.' }
+  const needsOnboardingEmail = inviteKind !== 'existing_onboarded'
+
+  if (needsOnboardingEmail && (!resendKey || !fromEmail)) {
+    return { success: false, error: RESEND_REQUIRED_ERROR }
   }
 
   const { data: existingAccess } = await adminClient
@@ -216,14 +187,12 @@ export async function inviteUserToToolAction(
     .maybeSingle()
 
   const existingRole = existingAccess?.role as AppInviteRole | undefined
-  /** Pending user + fresh generateLink: must still send email even if tool_access role unchanged. */
-  const mustSendPendingLink =
-    inviteKind === 'existing_pending' && pendingInviteActionLink !== null
   const forcePendingResend = options?.intent === 'resend_pending_onboarding'
-  if (existingRole === role && !mustSendPendingLink && !forcePendingResend) {
+  if (existingRole === role && !needsOnboardingEmail && !forcePendingResend) {
     return {
       success: true,
       message: "L'utente ha gia' accesso a questo tool con lo stesso ruolo.",
+      inviteEmailDelivery: 'none',
     }
   }
 
@@ -245,8 +214,6 @@ export async function inviteUserToToolAction(
     }
   }
 
-  // Pending / new users: keep a profile shell so admins can see onboarding state.
-  // Onboarded existing users: never reset onboarding_completed or invited_at.
   if (inviteKind !== 'existing_onboarded') {
     const { error: profileError } = await adminClient.from('profiles').upsert(
       {
@@ -268,12 +235,11 @@ export async function inviteUserToToolAction(
 
   let message: string
   if (inviteKind === 'new_invite') {
-    message = 'Invito inviato.'
+    message = 'Invito inviato via email (link porta onboarding).'
   } else if (inviteKind === 'existing_pending') {
-    message =
-      hadSameRoleBeforeUpsert && pendingInviteActionLink
-        ? 'Nuovo link di invito inviato (controllare la casella email).'
-        : 'Tool assegnato; email con link di accesso inviata (se Resend è configurato).'
+    message = hadSameRoleBeforeUpsert
+      ? 'Nuovo link di invito inviato (controllare la casella email).'
+      : 'Tool assegnato; email con link di accesso inviata.'
   } else if (existingRole !== undefined && existingRole !== role) {
     message = 'Ruolo aggiornato per questo tool.'
   } else {
@@ -283,54 +249,43 @@ export async function inviteUserToToolAction(
   const warnings: string[] = []
   let inviteEmailDelivery: InviteEmailDelivery = 'none'
 
-  if (pendingInviteActionLink) {
-    const resendKey = process.env.RESEND_API_KEY?.trim()
-    const fromEmail = process.env.FROM_EMAIL?.trim()
-    if (!resendKey || !fromEmail) {
-      const w =
-        'Accesso salvato ma il link di invito non è stato inviato: configurare RESEND_API_KEY e FROM_EMAIL sul server. Chiedi all’utente di contattare un amministratore per un nuovo invito (o completa la configurazione email e reinvia).'
-      warnings.push(w)
-      inviteEmailDelivery = 'pending_email_missing_env'
-      console.warn(INVITE_LOG, 'pending invite link not emailed (missing Resend env)', {
-        email: trimmed,
-        toolId,
-      })
-    } else {
-      const sent = await sendPendingInviteActionLinkViaResend({
-        apiKey: resendKey,
-        from: fromEmail,
-        to: trimmed,
-        actionLink: pendingInviteActionLink,
-        toolName: invitedToolName,
-      })
-      if (!sent.ok) {
-        const w = `Accesso salvato ma l’email con il link di invito non è stata inviata: ${sent.error}`
-        warnings.push(w)
-        inviteEmailDelivery = 'pending_email_failed'
-        console.warn(INVITE_LOG, 'pending invite Resend failed', {
-          email: trimmed,
-          toolId,
-          error: sent.error,
-        })
-      } else {
-        inviteEmailDelivery = 'pending_emailed'
+  if (needsOnboardingEmail) {
+    const portal = await createOnboardingPortalLinkForUser({ userId, toolId })
+    if ('error' in portal) {
+      return {
+        success: false,
+        error: `Accesso salvato ma link di invito non generato: ${portal.error}`,
       }
     }
-  } else if (inviteKind === 'new_invite' && options?.intent !== 'resend_pending_onboarding') {
-    inviteEmailDelivery = 'supabase_invite_sent'
+
+    const sent = await sendPendingInviteActionLinkViaResend({
+      apiKey: resendKey!,
+      from: fromEmail!,
+      to: trimmed,
+      portalUrl: portal.portalUrl,
+      toolName: invitedToolName,
+    })
+
+    if (!sent.ok) {
+      console.warn(INVITE_LOG, 'portal invite Resend failed', {
+        email: trimmed,
+        toolId,
+        error: sent.error,
+      })
+      return {
+        success: false,
+        error: `Accesso salvato ma l’email di invito non è stata inviata: ${sent.error}`,
+        inviteEmailDelivery: 'pending_email_failed',
+      }
+    }
+
+    await attachResendEmailToActiveTicket(adminClient, userId, sent.id)
+    inviteEmailDelivery = 'pending_emailed'
   }
 
-  if (options?.intent === 'resend_pending_onboarding') {
-    if (inviteEmailDelivery === 'pending_emailed') {
-      message =
-        'Reinvio completato: nuova email con link di invito inviata. Chiedi all’utente di controllare la posta (anche spam).'
-    } else if (inviteEmailDelivery === 'pending_email_missing_env') {
-      message =
-        'Link di invito rigenerato sul server, ma nessuna email è partita: configura RESEND_API_KEY e FROM_EMAIL, poi reinvia.'
-    } else if (inviteEmailDelivery === 'pending_email_failed') {
-      message =
-        'Link di invito rigenerato ma l’invio email è fallito: controlla l’avviso sotto e riprova.'
-    }
+  if (options?.intent === 'resend_pending_onboarding' && inviteEmailDelivery === 'pending_emailed') {
+    message =
+      'Reinvio completato: nuova email inviata. L’utente deve aprire il link e premere «Continua e accedi».'
   }
 
   if (inviteKind === 'existing_onboarded') {
@@ -361,7 +316,6 @@ export async function inviteUserToToolAction(
 
 /**
  * Re-sends onboarding invite link for a user who already has tool access but has not completed onboarding.
- * Uses the same email pipeline as inviteUserToToolAction (generateLink + Resend for pending accounts).
  */
 export async function resendPendingOnboardingInviteAction(
   toolId: string,

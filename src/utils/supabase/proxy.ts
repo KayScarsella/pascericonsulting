@@ -74,6 +74,7 @@ export async function updateSession(request: NextRequest) {
       "/auth/invito-non-valido",
       "/auth/recupero-non-valido",
       "/auth/forgot-password",
+      "/auth/onboarding-entry",
       "/onboarding",
       "/login",
     ];

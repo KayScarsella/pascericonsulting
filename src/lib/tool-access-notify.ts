@@ -28,7 +28,7 @@ async function sendResendHttp(args: {
   to: string
   subject: string
   html: string
-}): Promise<{ ok: true } | { ok: false; error: string }> {
+}): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   try {
     const resp = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -50,7 +50,7 @@ async function sendResendHttp(args: {
     }
     const id = String(payload?.id ?? '')
     if (!id) return { ok: false, error: 'Resend: risposta senza id' }
-    return { ok: true }
+    return { ok: true, id }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'Errore di rete verso Resend' }
   }
@@ -126,14 +126,15 @@ export async function sendToolAccessNotifyViaResend(
 }
 
 /**
- * Delivers the Supabase `generateLink` invite `action_link` via Resend.
- * GoTrue does not send this link itself when using custom / programmatic flows.
+ * Onboarding invite via Resend. Uses a multi-use portal URL (/auth/onboarding-entry);
+ * the one-time Supabase session link is created only when the user clicks «Continua».
  */
 export async function sendPendingInviteActionLinkViaResend(input: {
   apiKey: string
   from: string
   to: string
-  actionLink: string
+  /** Multi-use portal link (not the Supabase /verify URL). */
+  portalUrl: string
   toolName: string
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const tool = input.toolName.trim() || 'Pasceri Consulting'
@@ -156,12 +157,14 @@ export async function sendPendingInviteActionLinkViaResend(input: {
         </p>
 
         <p style="margin:0 0 18px;font-family:Arial,sans-serif;color:#374151;line-height:1.6;">
-          Per iniziare a utilizzare la piattaforma e accedere alle funzionalità di tracciabilità e dovuta diligenza, La invitiamo a completare la registrazione facendo clic sul pulsante qui sotto.
+          Per iniziare a utilizzare la piattaforma, apra il link qui sotto e poi prema il pulsante
+          <strong>«Continua e accedi»</strong> nella pagina che si apre (due passaggi: protegge da
+          antivirus che aprono i link in automatico).
         </p>
 
         <p style="margin:0 0 22px;">
-          <a href="${escapeHtml(input.actionLink)}" style="display:inline-block;padding:12px 18px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;font-family:Arial,sans-serif;font-weight:600;">
-            Registrati e attiva il tuo account
+          <a href="${escapeHtml(input.portalUrl)}" style="display:inline-block;padding:12px 18px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;font-family:Arial,sans-serif;font-weight:600;">
+            Apri la pagina di registrazione
           </a>
         </p>
 
@@ -184,8 +187,9 @@ export async function sendPendingInviteActionLinkViaResend(input: {
         </p>
 
         <p style="margin:16px 0 0;font-size:12px;color:#64748b;line-height:1.6;">
-          Se il pulsante non funziona, copi questo indirizzo nel browser:<br />
-          ${escapeHtml(input.actionLink)}
+          Se il pulsante non funziona, copi questo indirizzo nel browser (può essere riaperto più volte fino
+          al completamento della registrazione; usi solo l&apos;ultima email ricevuta):<br />
+          ${escapeHtml(input.portalUrl)}
         </p>
       </div>
     `

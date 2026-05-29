@@ -1,9 +1,10 @@
 import Link from 'next/link'
 import { Mail, ShieldAlert, UserRound } from 'lucide-react'
 import { AuthBrandedShell } from '@/components/auth/AuthBrandedShell'
+import { AuthCallbackDebugHint } from '@/components/auth/AuthCallbackDebugHint'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { AUTH_EMAIL_OTP_EXPIRATION_HINT } from '@/lib/constants'
 
 export default function InvitoNonValidoPage() {
   return (
@@ -25,13 +26,23 @@ export default function InvitoNonValidoPage() {
         <CardContent className="space-y-4 text-sm text-slate-700">
           <p className="font-medium text-slate-800">Passi consigliati</p>
           <ul className="list-inside list-disc space-y-2 leading-relaxed">
-            <li>Non riutilizzare link vecchi dalle email precedenti.</li>
+            <li>
+              Usa <strong>solo l&apos;ultima email</strong> ricevuta (reinvio con link aggiornato); i link
+              precedenti non funzionano più.
+            </li>
+            <li>
+              Con Gmail o posta aziendale, alcuni sistemi aprono il link in automatico e lo rendono
+              monouso: prova a <strong>copiare il link</strong> dalla mail e incollarlo nel browser, oppure
+              clicca entro pochi minuti dalla ricezione.
+            </li>
             <li>Controlla spam e posta indesiderata per un invito recente.</li>
             <li>
               Scrivi all&apos;<strong>amministratore del tool</strong> e chiedi un <strong>nuovo invito</strong>{' '}
               sullo stesso indirizzo email.
             </li>
           </ul>
+          <p className="text-xs text-slate-500">{AUTH_EMAIL_OTP_EXPIRATION_HINT}</p>
+          <AuthCallbackDebugHint />
           <div className="flex flex-col gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-3 text-xs text-slate-600">
             <span className="flex items-center gap-2 font-medium text-slate-700">
               <UserRound className="h-4 w-4 shrink-0" aria-hidden />
@@ -39,8 +50,8 @@ export default function InvitoNonValidoPage() {
             </span>
             <span className="flex items-start gap-2">
               <Mail className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
-              Dal pannello utenti: &quot;Invita utente&quot; o l&apos;icona email sulla riga per reinvio
-              onboarding in sospeso.
+              Da Master → Supervisione email inviti (colonna «Stato invito») o Gestione utenti: reinvio
+              quando il link porta è scaduto o l&apos;email non è stata consegnata.
             </span>
           </div>
         </CardContent>

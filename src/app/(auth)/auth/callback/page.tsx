@@ -6,6 +6,11 @@ import { Loader2 } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
 import { AuthBrandedShell } from '@/components/auth/AuthBrandedShell'
 import { Card, CardContent } from '@/components/ui/card'
+import {
+  isInviteCallbackOtpType,
+  persistAuthCallbackDebug,
+  type InviteCallbackOtpType,
+} from '@/lib/auth-callback-debug'
 
 export default function AuthCallbackPage() {
   const router = useRouter()
@@ -14,7 +19,10 @@ export default function AuthCallbackPage() {
 
   useEffect(() => {
     async function completeAuth() {
-      async function failAndResetSession(fallbackMessage: string, errReason: 'invite' | 'recovery' = 'invite') {
+      async function failAndResetSession(
+        fallbackMessage: string,
+        errReason: 'invite' | 'recovery' = 'invite'
+      ) {
         setMessage(fallbackMessage)
         await supabase.auth.signOut()
         const target =
@@ -25,18 +33,33 @@ export default function AuthCallbackPage() {
       const url = new URL(window.location.href)
       const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''))
       const code = url.searchParams.get('code')
-      const recoveryType = url.searchParams.get('type') ?? hash.get('type')
+      const linkType = url.searchParams.get('type') ?? hash.get('type')
       const tokenHash = url.searchParams.get('token_hash')
       const authError = url.searchParams.get('error') ?? hash.get('error')
       const authErrorDescription =
         url.searchParams.get('error_description') ?? hash.get('error_description')
-      const nextPath = recoveryType === 'recovery' ? '/auth/reset-password' : '/onboarding'
+      const accessToken = hash.get('access_token') ?? url.searchParams.get('access_token')
+      const refreshToken = hash.get('refresh_token') ?? url.searchParams.get('refresh_token')
+      const nextPath = linkType === 'recovery' ? '/auth/reset-password' : '/onboarding'
+
+      const recordDebug = (extra?: { authError?: string | null; authErrorDescription?: string | null }) => {
+        persistAuthCallbackDebug({
+          at: new Date().toISOString(),
+          hasCode: Boolean(code),
+          hasTokenHash: Boolean(tokenHash),
+          linkType,
+          hasAccessToken: Boolean(accessToken && refreshToken),
+          authError: extra?.authError ?? authError,
+          authErrorDescription: extra?.authErrorDescription ?? authErrorDescription,
+        })
+      }
 
       if (authError) {
         const text = authErrorDescription
           ? decodeURIComponent(authErrorDescription.replace(/\+/g, ' '))
           : 'Link non valido o scaduto. Richiedi una nuova email.'
-        await failAndResetSession(text, recoveryType === 'recovery' ? 'recovery' : 'invite')
+        recordDebug()
+        await failAndResetSession(text, linkType === 'recovery' ? 'recovery' : 'invite')
         return
       }
 
@@ -48,13 +71,35 @@ export default function AuthCallbackPage() {
         return
       }
 
-      // Handle email links that carry token_hash + type in query params.
-      if (tokenHash && recoveryType === 'recovery') {
+      // Invite / magiclink / signup: token_hash in query (some Supabase redirects skip implicit hash).
+      if (tokenHash && isInviteCallbackOtpType(linkType)) {
+        const { error } = await supabase.auth.verifyOtp({
+          type: linkType as InviteCallbackOtpType,
+          token_hash: tokenHash,
+        })
+        if (error) {
+          recordDebug({
+            authError: error.name,
+            authErrorDescription: error.message,
+          })
+          await failAndResetSession('Link non valido o scaduto. Richiedi un nuovo invito.')
+          return
+        }
+        router.replace(nextPath)
+        return
+      }
+
+      // Password recovery on this page (legacy links); prefer /auth/recovery-callback for new flows.
+      if (tokenHash && linkType === 'recovery') {
         const { error } = await supabase.auth.verifyOtp({
           type: 'recovery',
           token_hash: tokenHash,
         })
         if (error) {
+          recordDebug({
+            authError: error.name,
+            authErrorDescription: error.message,
+          })
           await failAndResetSession('Link non valido o scaduto. Richiedi una nuova email.', 'recovery')
           return
         }
@@ -62,12 +107,9 @@ export default function AuthCallbackPage() {
         return
       }
 
-      // Handle implicit invite links carrying tokens in URL hash.
-      // Some providers/templates can return tokens in query params instead.
-      const accessToken = hash.get('access_token') ?? url.searchParams.get('access_token')
-      const refreshToken = hash.get('refresh_token') ?? url.searchParams.get('refresh_token')
-
+      // Implicit flow: tokens in URL hash (or query).
       if (!accessToken || !refreshToken) {
+        recordDebug()
         await failAndResetSession('Link non valido o scaduto. Richiedi un nuovo invito.')
         return
       }
@@ -78,6 +120,10 @@ export default function AuthCallbackPage() {
       })
 
       if (error) {
+        recordDebug({
+          authError: error.name,
+          authErrorDescription: error.message,
+        })
         await failAndResetSession('Sessione non valida. Richiedi un nuovo invito.')
         return
       }

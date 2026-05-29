@@ -16,7 +16,8 @@ Questo file serve a rendere le prossime domande “complete” e sempre contestu
 
 ## Sicurezza Auth / Supabase (operatore)
 - Dashboard progetto: abilitare **Leaked password protection** (Auth → password security).
-- Durata link email invito/recupero: **Email OTP expiration** (Auth → Email); allineare al copy in `src/lib/constants.ts` (`AUTH_EMAIL_OTP_EXPIRATION_HINT`).
+- Inviti onboarding: **solo Resend** (`RESEND_API_KEY`, `FROM_EMAIL`) + link porta `/auth/onboarding-entry` (vedi `INVITE_REQUIRES_RESEND_HINT` in `src/lib/constants.ts`).
+- Recupero password: **Email OTP expiration** (Auth → Email); vedi `AUTH_EMAIL_OTP_EXPIRATION_HINT`.
 
 ## Indice tecnico completo
 Vedi `PROJECT_INDEX.md`.

@@ -4,6 +4,7 @@ import { redirect, notFound } from 'next/navigation'
 import { getToolUsersForAdminPaginated } from '@/actions/users'
 import { listSpeciesPaginated, listCountriesPaginated } from '@/actions/master-data'
 import { listNotificationsPaginated } from '@/actions/notifications'
+import { getEmailSupervisionForTool } from '@/actions/email-supervision'
 import { MasterSectionClient } from '@/components/admin/MasterSectionClient'
 import type { MasterSection } from '@/components/admin/MasterSectionClient'
 import Link from 'next/link'
@@ -11,7 +12,13 @@ import { ChevronLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { parsePageParam, parseSearchParam, parseSortDirParam } from '@/lib/table-query'
 
-const VALID_SECTIONS: readonly MasterSection[] = ['users', 'species', 'countries', 'notifications']
+const VALID_SECTIONS: readonly MasterSection[] = [
+  'users',
+  'email-supervision',
+  'species',
+  'countries',
+  'notifications',
+]
 const PAGE_SIZE = 25
 const SPECIES_SORT_FIELDS = ['scientific_name', 'common_name', 'cites'] as const
 const COUNTRY_SORT_FIELDS = [
@@ -56,6 +63,7 @@ export default async function MasterSectionPage({
   let speciesRes: Awaited<ReturnType<typeof listSpeciesPaginated>> | null = null
   let countriesRes: Awaited<ReturnType<typeof listCountriesPaginated>> | null = null
   let notificationsRes: Awaited<ReturnType<typeof listNotificationsPaginated>> | null = null
+  let emailSupervisionRes: Awaited<ReturnType<typeof getEmailSupervisionForTool>> | null = null
 
   if (section === 'users') {
     usersRes = await getToolUsersForAdminPaginated(EUDR_TOOL_ID, page, PAGE_SIZE, { q })
@@ -77,13 +85,16 @@ export default async function MasterSectionPage({
       sort: isOneOf(sort, NOTIFICATION_SORT_FIELDS) ? sort : undefined,
       dir,
     })
+  } else if (section === 'email-supervision') {
+    emailSupervisionRes = await getEmailSupervisionForTool(EUDR_TOOL_ID, page, PAGE_SIZE, { q })
   }
 
   const error =
     usersRes?.error ??
     speciesRes?.error ??
     countriesRes?.error ??
-    notificationsRes?.error
+    notificationsRes?.error ??
+    emailSupervisionRes?.error
   if (error) {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">
@@ -97,6 +108,7 @@ export default async function MasterSectionPage({
     speciesRes?.totalCount ??
     countriesRes?.totalCount ??
     notificationsRes?.totalCount ??
+    emailSupervisionRes?.totalCount ??
     0
   const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1
   const basePath = `/EUDR/master/${section}`
@@ -115,6 +127,12 @@ export default async function MasterSectionPage({
         speciesData={section === 'species' ? (speciesRes?.data ?? null) : undefined}
         countriesData={section === 'countries' ? (countriesRes?.data ?? null) : undefined}
         notificationsData={section === 'notifications' ? (notificationsRes?.data ?? null) : undefined}
+        emailSupervisionData={
+          section === 'email-supervision' ? (emailSupervisionRes?.data ?? null) : undefined
+        }
+        resendConfigured={emailSupervisionRes?.resendConfigured ?? false}
+        needsResendTotalCount={emailSupervisionRes?.needsResendTotalCount ?? 0}
+        emailSupervisionTotalUserCount={emailSupervisionRes?.totalCount ?? 0}
         page={page}
         totalPages={totalPages}
         basePath={basePath}
