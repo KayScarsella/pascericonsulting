@@ -17,6 +17,11 @@ import { resolveTimberWorkflowStatesBatch } from "@/lib/timber-workflow-state"
 import { normalizeTimberSearchTab } from "@/lib/timber-search-routing"
 import { createClient } from "@/utils/supabase/server"
 import { logRoutePerf } from "@/lib/perf-debug"
+import {
+  buildAnalisiSearchOrClause,
+  buildVerificaSearchOrClause,
+  resolveOwnerUserIdsForSearch,
+} from "@/lib/session-search"
 
 const NOME_COMMERCIALE_QUESTION_ID = "8e2d4d57-161c-4f37-8089-04ab947389e1"
 
@@ -82,15 +87,8 @@ export default async function SearchPage({
       analisiQuery.in("final_outcome", [...ANALISI_FINALE_NEGATIVE_OUTCOMES])
     }
     if (q) {
-      const n = Number.parseInt(q, 10)
-      const numericClause = Number.isFinite(n) ? `,evaluation_code.eq.${n}` : ""
-      analisiQuery.or(
-        [
-          `metadata->>nome_operazione.ilike.%${q}%`,
-          `metadata->>operation_name.ilike.%${q}%`,
-          `profiles.full_name.ilike.%${q}%`,
-        ].join(",") + numericClause
-      )
+      const ownerUserIds = isAdmin ? await resolveOwnerUserIdsForSearch(supabase, q) : []
+      analisiQuery.or(buildAnalisiSearchOrClause({ q, ownerUserIds }))
     }
 
     queryCount += 1
@@ -165,13 +163,9 @@ export default async function SearchPage({
       verifListQuery.eq("status", "completed")
     }
     if (vq) {
-      const n = Number.parseInt(vq, 10)
-      const numericClause = Number.isFinite(n) ? `,evaluation_code.eq.${n}` : ""
+      const ownerUserIds = isAdmin ? await resolveOwnerUserIdsForSearch(supabase, vq) : []
       verifListQuery.or(
-        [
-          `metadata->>nome_commerciale.ilike.%${vq}%`,
-          `profiles.full_name.ilike.%${vq}%`,
-        ].join(",") + numericClause
+        buildVerificaSearchOrClause({ q: vq, ownerUserIds, includeEvaluationCode: true })
       )
     }
 

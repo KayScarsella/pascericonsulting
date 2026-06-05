@@ -15,6 +15,11 @@ import {
 import { resolveEudrWorkflowStatesBatch } from "@/lib/eudr-workflow-state"
 import { normalizeEudrSearchTab } from "@/lib/eudr-search-routing"
 import { logRoutePerf } from "@/lib/perf-debug"
+import {
+  buildAnalisiSearchOrClause,
+  buildVerificaSearchOrClause,
+  resolveOwnerUserIdsForSearch,
+} from "@/lib/session-search"
 
 type SearchParams = { [key: string]: string | string[] | undefined }
 
@@ -75,15 +80,8 @@ export async function EudrSearchData({
       analisiQuery.in("final_outcome", [...ANALISI_FINALE_NEGATIVE_OUTCOMES])
     }
     if (q) {
-      const n = Number.parseInt(q, 10)
-      const numericClause = Number.isFinite(n) ? `,evaluation_code.eq.${n}` : ""
-      analisiQuery.or(
-        [
-          `metadata->>nome_operazione.ilike.%${q}%`,
-          `metadata->>operation_name.ilike.%${q}%`,
-          `profiles.full_name.ilike.%${q}%`,
-        ].join(",") + numericClause
-      )
+      const ownerUserIds = isAdmin ? await resolveOwnerUserIdsForSearch(supabase, q) : []
+      analisiQuery.or(buildAnalisiSearchOrClause({ q, ownerUserIds }))
     }
 
     queryCount += 1
@@ -162,12 +160,8 @@ export async function EudrSearchData({
       verifListQuery.eq("status", "completed")
     }
     if (vq) {
-      verifListQuery.or(
-        [
-          `metadata->>nome_commerciale.ilike.%${vq}%`,
-          `profiles.full_name.ilike.%${vq}%`,
-        ].join(",")
-      )
+      const ownerUserIds = isAdmin ? await resolveOwnerUserIdsForSearch(supabase, vq) : []
+      verifListQuery.or(buildVerificaSearchOrClause({ q: vq, ownerUserIds }))
     }
 
     queryCount += 2
