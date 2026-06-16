@@ -1,13 +1,20 @@
-import { getToolAccess } from '@/lib/tool-auth'
+import { FscDocumentsView } from '@/components/cloud-fsc/documents/FscDocumentsView'
 import { CLOUD_FSC_TOOL_ID } from '@/lib/constants'
-import { FscModulePlaceholder } from '@/components/cloud-fsc/FscModulePlaceholder'
+import { getToolAccess } from '@/lib/tool-auth'
 
-export default async function DocumentiEntePage() {
+export default async function DocumentiEntePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ category?: string; year?: string }>
+}) {
   await getToolAccess(CLOUD_FSC_TOOL_ID)
+  const params = await searchParams
+
   return (
-    <FscModulePlaceholder
-      title="Documenti di interscambio con l'ente"
-      description="Visura, M210, fatturato, certificato, contratto e documenti di sistema."
+    <FscDocumentsView
+      module="ente"
+      initialCategory={params.category}
+      initialYear={params.year}
     />
   )
 }

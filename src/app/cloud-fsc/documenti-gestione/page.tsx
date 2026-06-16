@@ -1,13 +1,14 @@
-import { getToolAccess } from '@/lib/tool-auth'
+import { FscDocumentsView } from '@/components/cloud-fsc/documents/FscDocumentsView'
 import { CLOUD_FSC_TOOL_ID } from '@/lib/constants'
-import { FscModulePlaceholder } from '@/components/cloud-fsc/FscModulePlaceholder'
+import { getToolAccess } from '@/lib/tool-auth'
 
-export default async function DocumentiGestionePage() {
+export default async function DocumentiGestionePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ category?: string }>
+}) {
   await getToolAccess(CLOUD_FSC_TOOL_ID)
-  return (
-    <FscModulePlaceholder
-      title="Documenti di gestione"
-      description="Manuale FSC, politica, procedure e allegati (esplora risorse)."
-    />
-  )
+  const params = await searchParams
+
+  return <FscDocumentsView module="gestione" initialCategory={params.category} />
 }

@@ -1,11 +1,11 @@
-import { getCurrentFscCompany } from '@/actions/fsc/company'
+import { getFscCompanyContext } from '@/actions/fsc/company'
 import { CLOUD_FSC_TOOL_ID } from '@/lib/constants'
 import { getToolAccess } from '@/lib/tool-auth'
 import { ToolNotificationsFeed } from '@/components/notifications/ToolNotificationsFeed'
 
 export default async function CloudFscHomePage() {
   await getToolAccess(CLOUD_FSC_TOOL_ID)
-  const companyCtx = await getCurrentFscCompany()
+  const companyCtx = await getFscCompanyContext()
 
   return (
     <div className="space-y-6">
@@ -19,9 +19,14 @@ export default async function CloudFscHomePage() {
             Impresa: {companyCtx.data.company.ragione_sociale}
           </p>
         )}
+        {companyCtx.needsSetup && (
+          <p className="text-sm text-amber-700">
+            Completa la configurazione dell&apos;impresa per accedere ai moduli.
+          </p>
+        )}
       </div>
 
-      <ToolNotificationsFeed toolId={CLOUD_FSC_TOOL_ID} />
+      {!companyCtx.needsSetup && <ToolNotificationsFeed toolId={CLOUD_FSC_TOOL_ID} />}
     </div>
   )
 }

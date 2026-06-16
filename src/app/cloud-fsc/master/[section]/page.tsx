@@ -3,13 +3,20 @@ import { CLOUD_FSC_TOOL_ID } from '@/lib/constants'
 import { redirect, notFound } from 'next/navigation'
 import { getToolUsersForAdminPaginated } from '@/actions/users'
 import { getEmailSupervisionForTool } from '@/actions/email-supervision'
+import { listFscCompaniesForAdmin } from '@/actions/fsc/company'
+import {
+  getFscMembershipsForUsers,
+  listFscMembersByCompanyForAdmin,
+} from '@/actions/fsc/members'
+import { listFscProductGroupsCatalogAdmin } from '@/actions/fsc/product-groups'
 import { MasterSectionClient, type MasterSection } from '@/components/admin/MasterSectionClient'
+import { FscMasterProductGroupsSection } from '@/components/cloud-fsc/master/FscMasterProductGroupsSection'
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { parsePageParam, parseSearchParam } from '@/lib/table-query'
 
-const VALID_SECTIONS: readonly MasterSection[] = ['users', 'email-supervision']
+const VALID_SECTIONS = ['users', 'email-supervision', 'companies', 'product-groups'] as const
 const PAGE_SIZE = 25
 
 export default async function CloudFscMasterSectionPage({
@@ -20,7 +27,7 @@ export default async function CloudFscMasterSectionPage({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
   const { section } = await params
-  if (!VALID_SECTIONS.includes(section as MasterSection)) {
+  if (!VALID_SECTIONS.includes(section as (typeof VALID_SECTIONS)[number])) {
     notFound()
   }
 
@@ -34,14 +41,31 @@ export default async function CloudFscMasterSectionPage({
 
   let usersRes: Awaited<ReturnType<typeof getToolUsersForAdminPaginated>> | null = null
   let emailSupervisionRes: Awaited<ReturnType<typeof getEmailSupervisionForTool>> | null = null
+  let fscCompaniesRes: Awaited<ReturnType<typeof listFscCompaniesForAdmin>> | null = null
+  let fscMembershipsByUser: Awaited<ReturnType<typeof getFscMembershipsForUsers>> = {}
+  let fscMembersByCompany: Awaited<ReturnType<typeof listFscMembersByCompanyForAdmin>> = {}
+  let productGroupsCatalogRes: Awaited<ReturnType<typeof listFscProductGroupsCatalogAdmin>> | null =
+    null
 
   if (section === 'users') {
     usersRes = await getToolUsersForAdminPaginated(CLOUD_FSC_TOOL_ID, page, PAGE_SIZE, { q })
+    const userIds = (usersRes?.data ?? []).map((u) => u.user_id)
+    fscMembershipsByUser = await getFscMembershipsForUsers(userIds)
+    fscCompaniesRes = await listFscCompaniesForAdmin()
   } else if (section === 'email-supervision') {
     emailSupervisionRes = await getEmailSupervisionForTool(CLOUD_FSC_TOOL_ID, page, PAGE_SIZE, { q })
+  } else if (section === 'companies') {
+    fscCompaniesRes = await listFscCompaniesForAdmin()
+    fscMembersByCompany = await listFscMembersByCompanyForAdmin()
+  } else if (section === 'product-groups') {
+    productGroupsCatalogRes = await listFscProductGroupsCatalogAdmin()
   }
 
-  const error = usersRes?.error ?? emailSupervisionRes?.error
+  const error =
+    usersRes?.error ??
+    emailSupervisionRes?.error ??
+    fscCompaniesRes?.error ??
+    productGroupsCatalogRes?.error
   if (error) {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">
@@ -52,6 +76,22 @@ export default async function CloudFscMasterSectionPage({
 
   const totalCount = usersRes?.totalCount ?? emailSupervisionRes?.totalCount ?? 0
   const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1
+
+  if (section === 'product-groups') {
+    return (
+      <div className="space-y-6">
+        <Button variant="ghost" size="sm" asChild>
+          <Link href="/cloud-fsc/master" className="gap-1">
+            <ChevronLeft className="h-4 w-4" /> Master
+          </Link>
+        </Button>
+        <FscMasterProductGroupsSection
+          official={productGroupsCatalogRes?.data?.official ?? []}
+          unofficial={productGroupsCatalogRes?.data?.unofficial ?? []}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -74,6 +114,9 @@ export default async function CloudFscMasterSectionPage({
         page={page}
         totalPages={totalPages}
         basePath={basePath}
+        fscCompanies={fscCompaniesRes?.data}
+        fscMembershipsByUser={fscMembershipsByUser}
+        fscMembersByCompany={fscMembersByCompany}
       />
     </div>
   )

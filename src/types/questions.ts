@@ -26,8 +26,11 @@ export type QuestionType =
 // Interfaccia per il JSON "config"
 export interface QuestionConfig {
   placeholder?: string;
-  // Per select semplice
-  options?: { label: string; value: string }[]; 
+  // Per select semplice o multi (is_multi)
+  options?: { label: string; value: string }[];
+  is_multi?: boolean;
+  multiline?: boolean;
+  export_key?: string;
   // Per async_select (caricamento da DB)
   source_table?: keyof Database['public']['Tables']; // Limita alle tabelle esistenti
   source_label_col?: string;

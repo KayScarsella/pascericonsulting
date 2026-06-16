@@ -2,7 +2,7 @@ import { getToolAccess } from '@/lib/tool-auth'
 import { CLOUD_FSC_TOOL_ID } from '@/lib/constants'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { Settings, Users, Mail } from 'lucide-react'
+import { Settings, Users, Mail, Building2, Database } from 'lucide-react'
 
 export default async function CloudFscMasterPage() {
   const { role } = await getToolAccess(CLOUD_FSC_TOOL_ID)
@@ -18,7 +18,7 @@ export default async function CloudFscMasterPage() {
         <Settings className="h-10 w-10 text-[#967635]" aria-hidden />
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
         <Link
           href="/cloud-fsc/master/users"
           className="block cursor-pointer rounded-lg border border-slate-200 bg-white p-6 transition-colors hover:border-[#967635] group"
@@ -33,6 +33,19 @@ export default async function CloudFscMasterPage() {
         </Link>
 
         <Link
+          href="/cloud-fsc/master/companies"
+          className="block cursor-pointer rounded-lg border border-slate-200 bg-white p-6 transition-colors hover:border-[#967635] group"
+        >
+          <div className="mb-4 flex items-center gap-3">
+            <div className="rounded bg-amber-50 p-2 transition-colors group-hover:bg-[#967635]">
+              <Building2 className="h-6 w-6 text-[#967635] group-hover:text-white" />
+            </div>
+            <h3 className="text-lg font-semibold">Imprese FSC</h3>
+          </div>
+          <p className="text-sm text-slate-500">Elenco aziende e membri del team per impresa.</p>
+        </Link>
+
+        <Link
           href="/cloud-fsc/master/email-supervision"
           className="block cursor-pointer rounded-lg border border-slate-200 bg-white p-6 transition-colors hover:border-[#967635] group"
         >
@@ -43,6 +56,21 @@ export default async function CloudFscMasterPage() {
             <h3 className="text-lg font-semibold">Supervisione email</h3>
           </div>
           <p className="text-sm text-slate-500">Stato Resend e contatori link invito per utente.</p>
+        </Link>
+
+        <Link
+          href="/cloud-fsc/master/product-groups"
+          className="block cursor-pointer rounded-lg border border-slate-200 bg-white p-6 transition-colors hover:border-[#967635] group"
+        >
+          <div className="mb-4 flex items-center gap-3">
+            <div className="rounded bg-amber-50 p-2 transition-colors group-hover:bg-[#967635]">
+              <Database className="h-6 w-6 text-[#967635] group-hover:text-white" />
+            </div>
+            <h3 className="text-lg font-semibold">Gruppi prodotto FSC</h3>
+          </div>
+          <p className="text-sm text-slate-500">
+            Catalogo globale gruppi ufficiali e non ufficiali.
+          </p>
         </Link>
       </div>
     </div>

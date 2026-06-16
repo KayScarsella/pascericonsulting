@@ -9,7 +9,7 @@ import { Check, CheckCircle2, Circle, ChevronsUpDown, Loader2, Plus, Trash2 } fr
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { QuestionConfig, QuestionType, AnswerValue } from "@/types/questions"
-import { fetchDynamicOptionsByIds, fetchDynamicOptionsPaged } from "@/actions/questions"
+import { AsyncSelect } from "@/components/shared/AsyncSelect"
 import { toast } from "sonner" 
 import { SupplierManager } from "./SupplierManager"
 import { normalizeQuestionType, isYearValuesQuestionType } from "@/lib/question-type-utils"
@@ -95,6 +95,126 @@ function DebouncedInput({
   )
 }
 
+function DebouncedTextarea({
+  value,
+  onChange,
+  placeholder,
+  readOnly,
+  className,
+}: {
+  value: string | number
+  onChange: (value: string) => void
+  placeholder?: string
+  readOnly?: boolean
+  className?: string
+}) {
+  const [localValue, setLocalValue] = useState(value)
+  const onChangeRef = useRef(onChange)
+
+  useEffect(() => { onChangeRef.current = onChange }, [onChange])
+  useEffect(() => { setLocalValue(value) }, [value])
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      if (localValue !== value) {
+        onChangeRef.current(String(localValue))
+      }
+    }, 400)
+    return () => clearTimeout(handler)
+  }, [localValue, value])
+
+  return (
+    <textarea
+      placeholder={placeholder}
+      value={localValue}
+      onChange={(e) => setLocalValue(e.target.value)}
+      className={cn(
+        "flex min-h-[100px] w-full rounded-md border border-input bg-white px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#967635]",
+        readOnly && "bg-slate-50 text-slate-600",
+        className
+      )}
+      disabled={readOnly}
+    />
+  )
+}
+
+interface StaticMultiSelectProps {
+  options: { label: string; value: string }[]
+  value: AnswerValue
+  onChange: (val: string) => void
+  placeholder?: string
+  readOnly?: boolean
+}
+
+function StaticMultiSelect({ options, value, onChange, placeholder, readOnly }: StaticMultiSelectProps) {
+  const [open, setOpen] = useState(false)
+  const safeValueString = value === null || value === undefined || Array.isArray(value)
+    ? ''
+    : String(value)
+  const selectedValues = safeValueString
+    ? safeValueString.split(',').map((v) => v.trim()).filter(Boolean)
+    : []
+
+  const selectedLabels = selectedValues.map(
+    (v) => options.find((o) => o.value === v)?.label || v
+  )
+  const displayLabel = selectedLabels.length > 0
+    ? selectedLabels.join(', ')
+    : (placeholder || 'Seleziona...')
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className={cn("w-full justify-between overflow-hidden bg-white hover:bg-slate-50", readOnly && "opacity-80 bg-slate-50")}
+          disabled={readOnly}
+        >
+          <span className="truncate flex-1 text-left mr-2 font-normal text-slate-700">
+            {displayLabel}
+          </span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[300px] md:w-[400px] p-0">
+        <Command>
+          <CommandInput placeholder="Cerca..." />
+          <CommandList>
+            <CommandEmpty>Nessun risultato.</CommandEmpty>
+            <CommandGroup>
+              {options.map((option) => {
+                const isSelected = selectedValues.includes(option.value)
+                return (
+                  <CommandItem
+                    key={option.value}
+                    value={option.label}
+                    onSelect={() => {
+                      const newVals = isSelected
+                        ? selectedValues.filter((v) => v !== option.value)
+                        : [...selectedValues, option.value]
+                      onChange(newVals.join(','))
+                    }}
+                  >
+                    <div className={cn(
+                      "mr-2 flex h-4 w-4 items-center justify-center rounded-sm border",
+                      isSelected ? "bg-[#967635] border-[#967635] text-white" : "border-slate-300 opacity-50 [&_svg]:invisible"
+                    )}>
+                      <Check className="h-3 w-3" />
+                    </div>
+                    <span className="break-words line-clamp-2">{option.label}</span>
+                  </CommandItem>
+                )
+              })}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 export function DynamicInput({ type, config, value, onChange, onExtraChange, readOnly, toolId}: DynamicInputProps) {
   const normalizedType = normalizeQuestionType(type)
 
@@ -111,6 +231,17 @@ export function DynamicInput({ type, config, value, onChange, onExtraChange, rea
   
   if (normalizedType === 'text' || normalizedType === 'number') {
     const stringValue = (value === null || value === undefined || Array.isArray(value)) ? '' : value.toString()
+    if (normalizedType === 'text' && config.multiline === true) {
+      return (
+        <DebouncedTextarea
+          placeholder={config.placeholder}
+          value={stringValue}
+          onChange={onChange}
+          className={cn(readOnly && 'bg-slate-50 text-slate-600')}
+          readOnly={readOnly}
+        />
+      )
+    }
     return (
       <DebouncedInput
         type={normalizedType === 'number' ? 'number' : 'text'} 
@@ -182,6 +313,18 @@ export function DynamicInput({ type, config, value, onChange, onExtraChange, rea
     const stringValue = (value === null || value === undefined || Array.isArray(value)) ? undefined : value.toString()
     const options = config.options as { label: string; value: string }[] | undefined
 
+    if (config.is_multi === true && options?.length) {
+      return (
+        <StaticMultiSelect
+          options={options}
+          value={value}
+          onChange={onChange}
+          placeholder={config.placeholder}
+          readOnly={readOnly}
+        />
+      )
+    }
+
     return (
       <Select 
         value={stringValue} 
@@ -201,10 +344,17 @@ export function DynamicInput({ type, config, value, onChange, onExtraChange, rea
   }
 
   if (normalizedType === 'async_select') {
+    const asyncValue =
+      value === null || value === undefined
+        ? null
+        : Array.isArray(value)
+          ? value.join(',')
+          : String(value)
+
     return (
       <AsyncSelect
         config={config}
-        value={value}
+        value={asyncValue}
         onChange={onChange}
         onExtraChange={onExtraChange}
         readOnly={readOnly}
@@ -352,265 +502,4 @@ function RepeaterInput({ config, value, onChange, readOnly, toolId }: RepeaterIn
     )
 }
 
-// ----------------------------------------------------
-// ASYNC SELECT
-// ----------------------------------------------------
-interface AsyncSelectProps {
-    config: QuestionConfig & { source_extra_cols?: string[], is_multi?: boolean, max_selections?: number } 
-    value: AnswerValue 
-    onChange: (val: string) => void 
-    onExtraChange?: (extraData: Record<string, unknown> | null) => void 
-    readOnly?: boolean
-    toolId?: string
-}
-
-function AsyncSelect({ config, value, onChange, onExtraChange, readOnly, toolId }: AsyncSelectProps) {
-    const [open, setOpen] = useState(false)
-    const [options, setOptions] = useState<{label: string, value: string, extra?: Record<string, unknown>}[]>([])
-    const [loading, setLoading] = useState(false)
-    const [loadingMore, setLoadingMore] = useState(false)
-    const [query, setQuery] = useState('')
-    const [cursor, setCursor] = useState<number | null>(0)
-    const [hasMore, setHasMore] = useState(true)
-    
-    const hydratedRef = useRef(false) 
-    const queryDebounceRef = useRef<number | null>(null)
-    const isMulti = config.is_multi === true
-    const maxSelections = config.max_selections 
-
-    const safeValueString = value === null || value === undefined || Array.isArray(value) ? '' : String(value)
-    const selectedValues = useMemo(
-      () => (isMulti ? (safeValueString ? safeValueString.split(',') : []) : (safeValueString ? [safeValueString] : [])),
-      [isMulti, safeValueString]
-    )
-    const selectedValuesKey = useMemo(() => selectedValues.join(','), [selectedValues])
-
-    const dedupeAppend = useCallback((prev: typeof options, next: typeof options) => {
-      if (next.length === 0) return prev
-      const seen = new Set(prev.map((o) => o.value))
-      const merged = [...prev]
-      for (const opt of next) {
-        if (!seen.has(opt.value)) {
-          merged.push(opt)
-          seen.add(opt.value)
-        }
-      }
-      return merged
-    }, [])
-
-    const loadPage = useCallback(async (args: { reset: boolean; cursorOverride?: number | null }) => {
-      if (!config.source_table) return
-      const nextCursor = args.cursorOverride ?? 0
-      if (nextCursor == null) return
-
-      const isReset = args.reset
-      if (isReset) {
-        setLoading(true)
-      } else {
-        setLoadingMore(true)
-      }
-      try {
-        const res = await fetchDynamicOptionsPaged({
-          table: config.source_table!,
-          labelCol: config.source_label_col || 'name',
-          valueCol: config.source_value_col || 'id',
-          extraCols: config.source_extra_cols,
-          search: query.trim() || undefined,
-          cursor: nextCursor,
-          pageSize: 60,
-          toolId,
-        })
-        setOptions((prev) => (isReset ? res.items : dedupeAppend(prev, res.items)))
-        setCursor(res.nextCursor)
-        setHasMore(res.nextCursor != null)
-      } catch (error) {
-        console.error("Errore caricamento opzioni:", error)
-      } finally {
-        setLoading(false)
-        setLoadingMore(false)
-      }
-    }, [
-      config.source_table,
-      config.source_label_col,
-      config.source_value_col,
-      config.source_extra_cols,
-      query,
-      dedupeAppend,
-    ])
-
-    useEffect(() => {
-        const hasSavedValue = safeValueString !== ''
-        if (!open && !hasSavedValue) return
-        if (!config.source_table) return
-        // Always reset paging when opened, so large tables can be fully browsed.
-        setOptions([])
-        setCursor(0)
-        setHasMore(true)
-        hydratedRef.current = false
-        void loadPage({ reset: true, cursorOverride: 0 })
-    }, [open, safeValueString, config.source_table, config.source_label_col, config.source_value_col, config.source_extra_cols, loadPage]) 
-
-    useEffect(() => {
-        if (options.length > 0 && selectedValues.length > 0 && !hydratedRef.current && !isMulti) {
-            const selectedOpt = options.find(o => o.value === selectedValues[0])
-            if (selectedOpt && selectedOpt.extra && onExtraChange) {
-                onExtraChange(selectedOpt.extra)
-            }
-            hydratedRef.current = true
-        }
-    }, [options, selectedValues, onExtraChange, isMulti])
-
-    useEffect(() => {
-      // Ensure pre-populated values always show labels (even if not in the first loaded page).
-      if (!config.source_table) return
-      if (selectedValues.length === 0) return
-
-      const missing = selectedValues.filter((id) => !options.some((o) => o.value === id))
-      if (missing.length === 0) return
-
-      let mounted = true
-      ;(async () => {
-        try {
-          const resolved = await fetchDynamicOptionsByIds({
-            table: config.source_table!,
-            labelCol: config.source_label_col || 'name',
-            valueCol: config.source_value_col || 'id',
-            extraCols: config.source_extra_cols,
-            ids: missing,
-            toolId,
-          })
-          if (!mounted || resolved.length === 0) return
-          // Prepend resolved items so the current selection can immediately display.
-          setOptions((prev) => dedupeAppend(resolved, prev))
-        } catch {
-          // ignore
-        }
-      })()
-      return () => {
-        mounted = false
-      }
-    }, [
-      config.source_table,
-      config.source_label_col,
-      config.source_value_col,
-      config.source_extra_cols,
-      // selectedValues depends on safeValueString; include both for stability.
-      safeValueString,
-      selectedValues,
-      selectedValuesKey,
-      options,
-      toolId,
-      dedupeAppend,
-    ])
-
-    useEffect(() => {
-      if (!open) return
-      // Debounce search so we don't hammer the server while typing.
-      if (queryDebounceRef.current) window.clearTimeout(queryDebounceRef.current)
-      queryDebounceRef.current = window.setTimeout(() => {
-        setOptions([])
-        setCursor(0)
-        setHasMore(true)
-        void loadPage({ reset: true, cursorOverride: 0 })
-      }, 250)
-      return () => {
-        if (queryDebounceRef.current) window.clearTimeout(queryDebounceRef.current)
-      }
-    }, [query, open, loadPage])
-
-    const selectedLabels = selectedValues.map(v => options.find(o => o.value === v)?.label || v)
-    const displayLabel = selectedLabels.length > 0 ? selectedLabels.join(', ') : (config.placeholder || "Cerca...")
-
-    return (
-        <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-            <Button 
-                variant="outline" 
-                role="combobox" 
-                aria-expanded={open} 
-                className={cn("w-full justify-between overflow-hidden bg-white hover:bg-slate-50", readOnly && "opacity-80 bg-slate-50")}
-                disabled={readOnly} 
-            >
-                <span className="truncate flex-1 text-left mr-2 font-normal text-slate-700">
-                    {loading && selectedValues.length > 0 ? "Caricamento nome..." : displayLabel}
-                </span>
-                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-            </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-[300px] md:w-[400px] p-0">
-            <Command>
-            <CommandInput
-              placeholder="Cerca..."
-              value={query}
-              onValueChange={(v) => setQuery(v)}
-            />
-            <CommandList
-              onScroll={(e) => {
-                const el = e.currentTarget
-                const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 40
-                if (!nearBottom) return
-                if (loading || loadingMore) return
-                if (!hasMore) return
-                void loadPage({ reset: false, cursorOverride: cursor })
-              }}
-            >
-                {loading && <div className="py-6 text-center text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin inline mr-2"/>Caricamento...</div>}
-                {!loading && options.length === 0 && <CommandEmpty>Nessun risultato.</CommandEmpty>}
-                <CommandGroup>
-                {options.map((option) => {
-                    const isSelected = selectedValues.includes(option.value)
-                    return (
-                        <CommandItem
-                            key={option.value}
-                            value={option.label}
-                            onSelect={() => {
-                                if (isMulti) {
-                                    if (!isSelected && maxSelections && selectedValues.length >= maxSelections) {
-                                        toast.warning(`Puoi selezionare al massimo ${maxSelections} paesi per questa specie.`);
-                                        return;
-                                    }
-
-                                    const newVals = isSelected 
-                                        ? selectedValues.filter(v => v !== option.value) 
-                                        : [...selectedValues, option.value]
-                                    onChange(newVals.join(','))
-                                } else {
-                                    onChange(option.value)
-                                    if (onExtraChange) onExtraChange(option.extra || null)
-                                    setOpen(false)
-                                }
-                            }}
-                        >
-                            {isMulti ? (
-                                <div className={cn(
-                                    "mr-2 flex h-4 w-4 items-center justify-center rounded-sm border",
-                                    isSelected ? "bg-[#967635] border-[#967635] text-white" : "border-slate-300 opacity-50 [&_svg]:invisible"
-                                )}>
-                                    <Check className={cn("h-3 w-3")} />
-                                </div>
-                            ) : (
-                                <Check className={cn("mr-2 h-4 w-4 text-[#967635]", isSelected ? "opacity-100" : "opacity-0")} />
-                            )}
-                            
-                            <span className="break-words line-clamp-2">{option.label}</span>
-                        </CommandItem>
-                    )
-                })}
-                </CommandGroup>
-                {!loading && options.length > 0 && hasMore && (
-                  <div className="py-3 text-center text-xs text-slate-500">
-                    {loadingMore ? (
-                      <span className="inline-flex items-center gap-2">
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Caricamento altri risultati…
-                      </span>
-                    ) : (
-                      'Scorri per caricare altri risultati…'
-                    )}
-                  </div>
-                )}
-            </CommandList>
-            </Command>
-        </PopoverContent>
-        </Popover>
-    )
-}
+// NOTE: AsyncSelect lives in @/components/shared/AsyncSelect (used by Timber/EUDR/FSC).

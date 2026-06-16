@@ -450,10 +450,15 @@ export type Database = {
           company_id: string
           compiled_doc_path: string | null
           compiled_pdf_path: string | null
+          compiled_word_uploaded_at: string | null
           completed_at: string | null
           created_at: string
+          duplicated_from_year: number | null
+          form_data: Json
           id: string
           reference_year: number
+          schema_version: string
+          session_id: string | null
           template_storage_path: string | null
           updated_at: string
         }
@@ -461,10 +466,15 @@ export type Database = {
           company_id: string
           compiled_doc_path?: string | null
           compiled_pdf_path?: string | null
+          compiled_word_uploaded_at?: string | null
           completed_at?: string | null
           created_at?: string
+          duplicated_from_year?: number | null
+          form_data?: Json
           id?: string
           reference_year: number
+          schema_version?: string
+          session_id?: string | null
           template_storage_path?: string | null
           updated_at?: string
         }
@@ -472,12 +482,47 @@ export type Database = {
           company_id?: string
           compiled_doc_path?: string | null
           compiled_pdf_path?: string | null
+          compiled_word_uploaded_at?: string | null
           completed_at?: string | null
           created_at?: string
+          duplicated_from_year?: number | null
+          form_data?: Json
           id?: string
           reference_year?: number
+          schema_version?: string
+          session_id?: string | null
           template_storage_path?: string | null
           updated_at?: string
+        }
+        Relationships: []
+      }
+      fsc_ilo_template_master: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          schema_version: string
+          storage_path: string
+          uploaded_by: string | null
+          version: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          schema_version?: string
+          storage_path: string
+          uploaded_by?: string | null
+          version: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          schema_version?: string
+          storage_path?: string
+          uploaded_by?: string | null
+          version?: string
         }
         Relationships: []
       }
@@ -603,6 +648,33 @@ export type Database = {
           mime_type?: string | null
           size?: number | null
           storage_path?: string
+          subcontractor_id?: string
+        }
+        Relationships: []
+      }
+      fsc_subcontractor_status_history: {
+        Row: {
+          changed_at: string
+          changed_by: string | null
+          id: string
+          new_status: Database["public"]["Enums"]["fsc_supplier_status"]
+          old_status: Database["public"]["Enums"]["fsc_supplier_status"] | null
+          subcontractor_id: string
+        }
+        Insert: {
+          changed_at?: string
+          changed_by?: string | null
+          id?: string
+          new_status: Database["public"]["Enums"]["fsc_supplier_status"]
+          old_status?: Database["public"]["Enums"]["fsc_supplier_status"] | null
+          subcontractor_id: string
+        }
+        Update: {
+          changed_at?: string
+          changed_by?: string | null
+          id?: string
+          new_status?: Database["public"]["Enums"]["fsc_supplier_status"]
+          old_status?: Database["public"]["Enums"]["fsc_supplier_status"] | null
           subcontractor_id?: string
         }
         Relationships: []
@@ -889,6 +961,7 @@ export type Database = {
           cf_partita_iva: string | null
           citta: string | null
           email: string | null
+          fsc_active_company_id: string | null
           full_name: string | null
           id: string
           indirizzo: string | null
@@ -911,6 +984,7 @@ export type Database = {
           cf_partita_iva?: string | null
           citta?: string | null
           email?: string | null
+          fsc_active_company_id?: string | null
           full_name?: string | null
           id: string
           indirizzo?: string | null
@@ -933,6 +1007,7 @@ export type Database = {
           cf_partita_iva?: string | null
           citta?: string | null
           email?: string | null
+          fsc_active_company_id?: string | null
           full_name?: string | null
           id?: string
           indirizzo?: string | null
@@ -1257,6 +1332,35 @@ export type Database = {
       }
       is_admin_of_tool: { Args: { _tool_id: string }; Returns: boolean }
       fsc_ensure_company_for_user: { Args: { _tool_id: string }; Returns: string }
+      fsc_resolve_active_company_id: { Args: { _tool_id: string }; Returns: string }
+      fsc_set_active_company: { Args: { _company_id: string }; Returns: undefined }
+      fsc_create_company_for_user: {
+        Args: {
+          _tool_id: string
+          _ragione_sociale: string
+          _cf_partita_iva?: string | null
+          _indirizzo?: string | null
+          _cap?: string | null
+          _citta?: string | null
+          _provincia?: string | null
+          _recapito_telefonico?: string | null
+          _sito_internet?: string | null
+          _email?: string | null
+        }
+        Returns: string
+      }
+      fsc_is_company_owner: { Args: { _company_id: string }; Returns: boolean }
+      fsc_list_companies_for_admin: {
+        Args: { _tool_id: string }
+        Returns: {
+          id: string
+          ragione_sociale: string
+          cf_partita_iva: string | null
+          email: string | null
+          member_count: number
+          created_at: string
+        }[]
+      }
       fsc_current_user_company_ids: { Args: Record<string, never>; Returns: string[] }
       fsc_process_alert_outbox: { Args: { _tool_id: string }; Returns: number }
       fsc_next_logo_code: { Args: { _company_id: string }; Returns: string }

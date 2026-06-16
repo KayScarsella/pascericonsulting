@@ -10,11 +10,21 @@ import { resolveAuthUserIdByEmail } from '@/lib/resolve-auth-user-by-email'
 import { requireToolAdmin } from '@/lib/tool-auth'
 import { siteUrlForAuth } from '@/lib/site-url-for-auth'
 import { createServiceRoleClient } from '@/utils/supabase/admin'
-import { PENDING_INVITE_BULK_RESEND_MAX } from '@/lib/constants'
+import { CLOUD_FSC_TOOL_ID, PENDING_INVITE_BULK_RESEND_MAX } from '@/lib/constants'
+import { upsertFscCompanyMemberAdmin } from '@/actions/fsc/members'
+import { notifyUserOfFscCompanyAccess } from '@/lib/fsc/company-notify'
+import type { FscMemberType } from '@/types/fsc'
 
 export type AppInviteRole = 'standard' | 'premium' | 'admin'
 
 export type InviteUserIntent = 'default' | 'resend_pending_onboarding'
+
+export type InviteUserToToolOptions = {
+  intent?: InviteUserIntent
+  fscCompanyId?: string
+  fscMemberType?: FscMemberType
+  fscCanEdit?: boolean
+}
 
 /** Esito invio email invito onboarding (sempre Resend + link porta). */
 export type InviteEmailDelivery =
@@ -95,7 +105,7 @@ export async function inviteUserToToolAction(
   toolId: string,
   email: string,
   role: AppInviteRole = 'standard',
-  options?: { intent?: InviteUserIntent }
+  options?: InviteUserToToolOptions
 ): Promise<InviteUserToToolResult> {
   await requireToolAdmin(toolId)
 
@@ -188,7 +198,14 @@ export async function inviteUserToToolAction(
 
   const existingRole = existingAccess?.role as AppInviteRole | undefined
   const forcePendingResend = options?.intent === 'resend_pending_onboarding'
-  if (existingRole === role && !needsOnboardingEmail && !forcePendingResend) {
+  const wantsFscCompany =
+    toolId === CLOUD_FSC_TOOL_ID && options?.fscCompanyId && options?.fscMemberType
+  if (
+    existingRole === role &&
+    !needsOnboardingEmail &&
+    !forcePendingResend &&
+    !wantsFscCompany
+  ) {
     return {
       success: true,
       message: "L'utente ha gia' accesso a questo tool con lo stesso ruolo.",
@@ -197,6 +214,7 @@ export async function inviteUserToToolAction(
   }
 
   const hadSameRoleBeforeUpsert = existingRole === role
+  const warnings: string[] = []
 
   const { error: accessError } = await adminClient.from('tool_access').upsert(
     {
@@ -211,6 +229,24 @@ export async function inviteUserToToolAction(
     return {
       success: false,
       error: `Utente invitato ma assegnazione al tool fallita: ${accessError.message}. Aggiungi il ruolo da dashboard o correggi i dati.`,
+    }
+  }
+
+  if (
+    toolId === CLOUD_FSC_TOOL_ID &&
+    options?.fscCompanyId &&
+    options.fscMemberType
+  ) {
+    const memberResult = await upsertFscCompanyMemberAdmin({
+      companyId: options.fscCompanyId,
+      userId,
+      memberType: options.fscMemberType,
+      canEdit: options.fscCanEdit ?? true,
+    })
+    if (!memberResult.success) {
+      warnings.push(
+        `Accesso tool salvato ma assegnazione impresa FSC fallita: ${memberResult.error ?? 'errore sconosciuto'}`
+      )
     }
   }
 
@@ -246,7 +282,6 @@ export async function inviteUserToToolAction(
     message = 'Accesso al tool aggiunto. L’utente lo vedrà in dashboard.'
   }
 
-  const warnings: string[] = []
   let inviteEmailDelivery: InviteEmailDelivery = 'none'
 
   if (needsOnboardingEmail) {
@@ -301,6 +336,29 @@ export async function inviteUserToToolAction(
     })
     if (!notify.ok) {
       warnings.push(`Accesso salvato ma l’email di notifica non è stata inviata: ${notify.error}`)
+    }
+
+    if (
+      toolId === CLOUD_FSC_TOOL_ID &&
+      options?.fscCompanyId &&
+      options.fscMemberType
+    ) {
+      const { data: companyRow } = await adminClient
+        .from('fsc_companies')
+        .select('ragione_sociale')
+        .eq('id', options.fscCompanyId)
+        .maybeSingle()
+      const companyNotify = await notifyUserOfFscCompanyAccess(adminClient, {
+        appPublicUrl: site,
+        userId,
+        email: trimmed,
+        companyName: companyRow?.ragione_sociale ?? 'Impresa FSC',
+        memberType: options.fscMemberType,
+        canEdit: options.fscCanEdit ?? true,
+      })
+      if (!companyNotify.ok) {
+        warnings.push(`Impresa assegnata ma notifica azienda non inviata: ${companyNotify.error}`)
+      }
     }
   }
 

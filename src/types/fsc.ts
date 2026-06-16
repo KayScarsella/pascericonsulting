@@ -63,6 +63,62 @@ export type FscSubcontractor = {
   updated_at: string
 }
 
+export type FscSupplierAttachmentType = 'visura' | 'due_diligence' | 'dichiarazione'
+export type FscSubcontractorAttachmentType = 'certificato' | 'accordo_conto_lavoro'
+
+export type FscSupplierAttachment = {
+  id: string
+  supplier_id: string
+  attachment_type: FscSupplierAttachmentType
+  storage_path: string
+  file_name: string | null
+  mime_type: string | null
+  size: number | null
+  created_at: string
+  created_by: string | null
+}
+
+export type FscSubcontractorAttachment = {
+  id: string
+  subcontractor_id: string
+  attachment_type: FscSubcontractorAttachmentType
+  storage_path: string
+  file_name: string | null
+  mime_type: string | null
+  size: number | null
+  created_at: string
+  created_by: string | null
+}
+
+export type FscSupplierStatusHistory = {
+  id: string
+  supplier_id: string
+  old_status: FscSupplierStatus | null
+  new_status: FscSupplierStatus
+  changed_at: string
+  changed_by: string | null
+}
+
+export type FscSubcontractorStatusHistory = {
+  id: string
+  subcontractor_id: string
+  old_status: FscSupplierStatus | null
+  new_status: FscSupplierStatus
+  changed_at: string
+  changed_by: string | null
+}
+
+export type FscSupplierWithDetails = FscSupplier & {
+  claims: FscProductClaim[]
+  attachments: FscSupplierAttachment[]
+  status_history?: FscSupplierStatusHistory[]
+}
+
+export type FscSubcontractorWithDetails = FscSubcontractor & {
+  attachments: FscSubcontractorAttachment[]
+  status_history?: FscSubcontractorStatusHistory[]
+}
+
 export type FscDocument = {
   id: string
   company_id: string
@@ -92,8 +148,23 @@ export type FscIloAssessment = {
   compiled_doc_path: string | null
   compiled_pdf_path: string | null
   completed_at: string | null
+  form_data: Record<string, unknown>
+  schema_version: string
+  duplicated_from_year: number | null
+  compiled_word_uploaded_at: string | null
+  session_id: string | null
   created_at: string
   updated_at: string
+}
+
+export type FscIloTemplateMaster = {
+  id: string
+  version: string
+  storage_path: string
+  schema_version: string
+  is_active: boolean
+  uploaded_by: string | null
+  created_at: string
 }
 
 export type FscLogo = {
@@ -114,10 +185,42 @@ export type FscCompanyProductGroup = {
   catalog_group_id: string | null
   custom_label: string | null
   species_id: string | null
+  required_inputs: string | null
   is_active: boolean
   activated_at: string
   created_at: string
   updated_at: string
+}
+
+export type FscProductGroupAddendumRow = {
+  id: string
+  label: string
+  value: string
+}
+
+export type FscProductGroupAddendumMetadata = {
+  rows?: FscProductGroupAddendumRow[]
+}
+
+export type FscProductGroupAddendum = {
+  id: string
+  company_product_group_id: string
+  storage_path: string | null
+  metadata: FscProductGroupAddendumMetadata
+  generated_at: string
+}
+
+export type FscSpeciesOption = {
+  id: string
+  common_name: string | null
+  scientific_name: string | null
+}
+
+export type FscCompanyProductGroupWithDetails = FscCompanyProductGroup & {
+  catalog: FscProductGroupCatalog | null
+  species: FscSpeciesOption | null
+  claims: FscProductClaim[]
+  addenda: FscProductGroupAddendum[]
 }
 
 export type FscProductGroupCatalog = {
@@ -128,4 +231,22 @@ export type FscProductGroupCatalog = {
   is_active: boolean
   created_at: string
   updated_at: string
+}
+
+export type FscGestioneCategory =
+  | 'manuale'
+  | 'politica'
+  | 'procedure'
+  | 'allegati'
+
+export type FscEnteCategory =
+  | 'visura'
+  | 'm210'
+  | 'fatturato'
+  | 'certificato'
+  | 'contratto'
+  | 'sicurezza'
+
+export type FscGestioneDocument = FscDocument & {
+  version_count?: number
 }

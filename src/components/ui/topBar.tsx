@@ -50,10 +50,11 @@ interface ToolNavbarProps {
   toolName: string      
   basePath: string      
   items: NavItem[]      
-  userRole: string      
+  userRole: string
+  toolbarExtra?: React.ReactNode
 }
 
-export function ToolNavbar({ toolName, basePath, items, userRole }: ToolNavbarProps) {
+export function ToolNavbar({ toolName, basePath, items, userRole, toolbarExtra }: ToolNavbarProps) {
   const pathname = usePathname()
   const [isOpen, setIsOpen] = useState(false)
 
@@ -130,6 +131,7 @@ export function ToolNavbar({ toolName, basePath, items, userRole }: ToolNavbarPr
 
           {/* Mobile Button & Exit */}
           <div className="flex items-center gap-2">
+            {toolbarExtra}
             <Button asChild variant="ghost" size="sm" className="text-slate-500 hover:text-red-600 gap-2">
               <Link href="/landingPage">
                 <LogOut className="h-4 w-4" />

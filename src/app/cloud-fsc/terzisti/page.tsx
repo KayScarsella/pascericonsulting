@@ -1,13 +1,13 @@
+import { FscSubcontractorsListView } from '@/components/cloud-fsc/partners/FscSubcontractorsListView'
 import { getToolAccess } from '@/lib/tool-auth'
 import { CLOUD_FSC_TOOL_ID } from '@/lib/constants'
-import { FscModulePlaceholder } from '@/components/cloud-fsc/FscModulePlaceholder'
 
-export default async function TerzistiPage() {
+type PageProps = {
+  searchParams: Promise<{ q?: string; status?: string }>
+}
+
+export default async function TerzistiPage({ searchParams }: PageProps) {
   await getToolAccess(CLOUD_FSC_TOOL_ID)
-  return (
-    <FscModulePlaceholder
-      title="Terzisti"
-      description="Terzisti, lavorazioni, rischio e documentazione CoC."
-    />
-  )
+  const params = await searchParams
+  return <FscSubcontractorsListView searchParams={params} />
 }

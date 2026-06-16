@@ -1,13 +1,19 @@
-import { getToolAccess } from '@/lib/tool-auth'
-import { CLOUD_FSC_TOOL_ID } from '@/lib/constants'
-import { FscModulePlaceholder } from '@/components/cloud-fsc/FscModulePlaceholder'
+import { redirect } from 'next/navigation'
+import { FscIloListView } from '@/components/cloud-fsc/ilo/FscIloListView'
+import { fscIloEditPath } from '@/lib/fsc/constants'
 
-export default async function AutovalutazioneIloPage() {
-  await getToolAccess(CLOUD_FSC_TOOL_ID)
-  return (
-    <FscModulePlaceholder
-      title="Autovalutazione lavoratori (ILO)"
-      description="Modello Word, compilazione annuale e archivio PDF."
-    />
-  )
+type PageProps = {
+  searchParams: Promise<{ year?: string }>
+}
+
+export default async function AutovalutazioneIloPage({ searchParams }: PageProps) {
+  const sp = await searchParams
+  if (sp.year) {
+    const parsed = Number.parseInt(sp.year, 10)
+    if (!Number.isNaN(parsed)) {
+      redirect(fscIloEditPath(parsed))
+    }
+  }
+
+  return <FscIloListView />
 }

@@ -62,7 +62,11 @@ import { toast } from 'sonner'
 import { Edit, Eye, Plus, Trash2, Loader2, AlertCircle, Mail } from 'lucide-react'
 import { NotificationDetailDialog } from '@/components/notifications/NotificationDetailDialog'
 import type { NotificationDisplayItem } from '@/components/notifications/notification-types'
-import { AUTH_EMAIL_OTP_EXPIRATION_HINT, PENDING_INVITE_BULK_RESEND_MAX } from '@/lib/constants'
+import { AUTH_EMAIL_OTP_EXPIRATION_HINT, CLOUD_FSC_TOOL_ID, PENDING_INVITE_BULK_RESEND_MAX } from '@/lib/constants'
+import { fscMemberTypeLabel } from '@/lib/fsc/constants'
+import type { FscCompanyAdminRow } from '@/actions/fsc/company'
+import type { FscMemberType } from '@/types/fsc'
+import { FscMasterCompaniesSection } from '@/components/cloud-fsc/master/FscMasterCompaniesSection'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { EmailSupervisionSection } from '@/components/admin/EmailSupervisionSection'
 import type { EmailSupervisionRow } from '@/actions/email-supervision'
@@ -73,7 +77,7 @@ type NotificationRow = Database['public']['Tables']['notifications']['Row']
 type ProfileRow = Database['public']['Tables']['profiles']['Row']
 
 export const MASTER_SECTIONS = ['users', 'email-supervision', 'species', 'countries', 'notifications'] as const
-export type MasterSection = (typeof MASTER_SECTIONS)[number]
+export type MasterSection = (typeof MASTER_SECTIONS)[number] | 'companies'
 
 const ROLE_LABELS: Record<string, string> = {
   admin: 'Admin',
@@ -151,6 +155,21 @@ export interface MasterSectionClientProps {
   totalPages?: number
   /** Base path for pagination links (e.g. /timberRegulation/master/species). */
   basePath?: string
+  fscCompanies?: FscCompanyAdminRow[]
+  fscMembershipsByUser?: Record<
+    string,
+    { company_id: string; ragione_sociale: string; member_type: FscMemberType; can_edit: boolean }[]
+  >
+  fscMembersByCompany?: Record<
+    string,
+    {
+      user_id: string
+      full_name: string | null
+      email: string | null
+      member_type: FscMemberType
+      can_edit: boolean
+    }[]
+  >
 }
 
 export function MasterSectionClient({
@@ -167,6 +186,9 @@ export function MasterSectionClient({
   page = 1,
   totalPages: totalPagesProp = 1,
   basePath,
+  fscCompanies,
+  fscMembershipsByUser,
+  fscMembersByCompany,
 }: MasterSectionClientProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -238,6 +260,10 @@ export function MasterSectionClient({
   const [inviteOpen, setInviteOpen] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<'standard' | 'premium'>('standard')
+  const isCloudFsc = toolId === CLOUD_FSC_TOOL_ID
+  const [inviteFscCompanyId, setInviteFscCompanyId] = useState<string>('none')
+  const [inviteFscMemberType, setInviteFscMemberType] = useState<FscMemberType>('employee')
+  const [inviteFscCanEdit, setInviteFscCanEdit] = useState(true)
   const [inviteLoading, setInviteLoading] = useState(false)
   const [cleanupLoading, setCleanupLoading] = useState(false)
   const [selectionResetKey, setSelectionResetKey] = useState(0)
@@ -282,6 +308,16 @@ export function MasterSectionClient({
       }
     })
   }, [section, toolId])
+
+  if (section === 'companies') {
+    return (
+      <FscMasterCompaniesSection
+        companies={fscCompanies ?? []}
+        membersByCompany={fscMembersByCompany ?? {}}
+        basePath={basePath ?? ''}
+      />
+    )
+  }
 
   if (section === 'email-supervision') {
     return (
@@ -518,6 +554,38 @@ export function MasterSectionClient({
           )
         },
       },
+      ...(isCloudFsc
+        ? ([
+            {
+              id: 'fsc_company',
+              header: 'Impresa FSC',
+              render: (row) => {
+                const memberships = fscMembershipsByUser?.[row.user_id] ?? []
+                if (memberships.length === 0) return <span className="text-slate-400">—</span>
+                return (
+                  <span className="text-slate-600 text-sm">
+                    {memberships.map((m) => m.ragione_sociale).join(', ')}
+                  </span>
+                )
+              },
+            },
+            {
+              id: 'fsc_member_type',
+              header: 'Ruolo impresa',
+              render: (row) => {
+                const memberships = fscMembershipsByUser?.[row.user_id] ?? []
+                if (memberships.length === 0) return <span className="text-slate-400">—</span>
+                return (
+                  <span className="text-slate-600 text-sm">
+                    {memberships
+                      .map((m) => fscMemberTypeLabel(m.member_type))
+                      .join(', ')}
+                  </span>
+                )
+              },
+            },
+          ] as DataManagementColumn<ToolUserRow>[])
+        : []),
     ]
     const dismissEmailDeliveryBanner = () => {
       try {
@@ -535,12 +603,21 @@ export function MasterSectionClient({
         return
       }
       setInviteLoading(true)
-      const res = await inviteUserToToolAction(toolId, email, inviteRole)
+      const res = await inviteUserToToolAction(toolId, email, inviteRole, {
+        fscCompanyId:
+          isCloudFsc && inviteFscCompanyId !== 'none' ? inviteFscCompanyId : undefined,
+        fscMemberType:
+          isCloudFsc && inviteFscCompanyId !== 'none' ? inviteFscMemberType : undefined,
+        fscCanEdit: isCloudFsc && inviteFscCompanyId !== 'none' ? inviteFscCanEdit : undefined,
+      })
       setInviteLoading(false)
       if (notifyInviteEmailOutcome(res)) {
         setInviteOpen(false)
         setInviteEmail('')
         setInviteRole('standard')
+        setInviteFscCompanyId('none')
+        setInviteFscMemberType('employee')
+        setInviteFscCanEdit(true)
         router.refresh()
       }
     }
@@ -635,6 +712,53 @@ export function MasterSectionClient({
                   </SelectContent>
                 </Select>
               </div>
+              {isCloudFsc ? (
+                <>
+                  <div className="grid gap-2">
+                    <Label>Impresa FSC (opzionale)</Label>
+                    <Select value={inviteFscCompanyId} onValueChange={setInviteFscCompanyId}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Nessuna — utente crea al primo accesso</SelectItem>
+                        {(fscCompanies ?? []).map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.ragione_sociale}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {inviteFscCompanyId !== 'none' ? (
+                    <>
+                      <div className="grid gap-2">
+                        <Label>Ruolo in impresa</Label>
+                        <Select
+                          value={inviteFscMemberType}
+                          onValueChange={(v) => setInviteFscMemberType(v as FscMemberType)}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="owner">Titolare</SelectItem>
+                            <SelectItem value="employee">Dipendente</SelectItem>
+                            <SelectItem value="consultant">Consulente</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <label className="flex cursor-pointer items-center gap-2">
+                        <Checkbox
+                          checked={inviteFscCanEdit}
+                          onCheckedChange={(c) => setInviteFscCanEdit(Boolean(c))}
+                        />
+                        <span className="text-sm">Può modificare i dati dell&apos;impresa</span>
+                      </label>
+                    </>
+                  ) : null}
+                </>
+              ) : null}
               <p className="text-xs text-slate-500">
                 Serve <code className="rounded bg-slate-100 px-1">SUPABASE_SERVICE_ROLE_KEY</code> sul
                 server e <code className="rounded bg-slate-100 px-1">NEXT_PUBLIC_SITE_URL</code> con

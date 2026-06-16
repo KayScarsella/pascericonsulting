@@ -9,7 +9,8 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import { saveResponsesBulk, deleteResponsesBulk } from "@/actions/questions"
-import { EUDR_TOOL_ID, TIMBER_TOOL_ID } from "@/lib/constants"
+import { saveFscIloResponsesBulk, deleteFscIloResponsesBulk } from "@/actions/fsc/ilo-responses"
+import { EUDR_TOOL_ID, TIMBER_TOOL_ID, CLOUD_FSC_TOOL_ID } from "@/lib/constants"
 import {
     EUDR_Q_CITES,
     EUDR_Q_FLEGT,
@@ -78,6 +79,7 @@ interface SectionListProps {
     sessionId: string
     defaultOpen?: boolean
     defaultMode?: 'edit' | 'view'
+    saveRequiresFullCompletion?: boolean
     // 🛠️ Tipo esatto per gestire il passaggio dell'eccezione al server
     onCompleteAction?: (
         sessionId: string, 
@@ -92,6 +94,7 @@ export function SectionList({
     sessionId,
     defaultOpen = true,
     defaultMode = 'edit',
+    saveRequiresFullCompletion = false,
     onCompleteAction
 }: SectionListProps) {
 
@@ -297,8 +300,21 @@ export function SectionList({
         const toastId = toast.loading("Salvataggio in corso...");
 
         try {
-            if (idsToDelete.length > 0) await deleteResponsesBulk(toolId, sessionId, idsToDelete);
-            if (payloadToSave.length > 0) await saveResponsesBulk(toolId, sessionId, payloadToSave);
+            if (idsToDelete.length > 0) {
+                if (toolId === CLOUD_FSC_TOOL_ID) {
+                    await deleteFscIloResponsesBulk(sessionId, idsToDelete)
+                } else {
+                    await deleteResponsesBulk(toolId, sessionId, idsToDelete)
+                }
+            }
+            if (payloadToSave.length > 0) {
+                if (toolId === CLOUD_FSC_TOOL_ID) {
+                    const result = await saveFscIloResponsesBulk(sessionId, payloadToSave)
+                    if (result.error) throw new Error(result.error)
+                } else {
+                    await saveResponsesBulk(toolId, sessionId, payloadToSave)
+                }
+            }
 
             if (onCompleteAction) {
                 // 🛠️ MODIFICA: Ricerca di un'eccezione attiva da passare al backend
@@ -353,8 +369,76 @@ export function SectionList({
         return { total: visibleQs.length, answered: answeredCount };
     };
 
+    const requiredProgress = useMemo(() => {
+        if (!saveRequiresFullCompletion) return null;
+
+        const triggerGeoOnly =
+            toolId === EUDR_TOOL_ID &&
+            (isYesLikeAnswer(localAnswers[EUDR_Q_FLEGT]) || isYesLikeAnswer(localAnswers[EUDR_Q_CITES]));
+
+        let total = 0;
+        let answered = 0;
+
+        for (const q of processedForm.visibleQs) {
+            if (!editModes[q.section_id]) continue;
+
+            const configObj = q.config as Record<string, unknown> | null;
+            const isOptional = configObj?.optional === true;
+            if (isOptional) continue;
+
+            const isEudrSectionG = toolId === EUDR_TOOL_ID && q.section_id === EUDR_SECTION_G;
+            const isReliabilitySelect = isEudrSectionG && triggerGeoOnly && hasReliabilitySelectConfig(q);
+            const isNaInSectionG = isEudrSectionG && triggerGeoOnly && !isReliabilitySelect;
+            if (isNaInSectionG) continue;
+
+            total += 1;
+            const val = localAnswers[q.id];
+            const file = localFiles[q.id];
+            if (isReliabilitySelect || isQuestionAnswered(q, val, file)) {
+                answered += 1;
+            }
+        }
+
+        return { total, answered, isComplete: total > 0 && answered === total };
+    }, [
+        saveRequiresFullCompletion,
+        processedForm.visibleQs,
+        editModes,
+        toolId,
+        localAnswers,
+        localFiles,
+    ]);
+
+    const canSave = !saveRequiresFullCompletion || (requiredProgress?.isComplete ?? false);
+    const hasEditableSection = Object.values(editModes).some(Boolean);
+
     return (
         <div className="space-y-10 pb-20">
+            {saveRequiresFullCompletion && requiredProgress && requiredProgress.total > 0 && (
+                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="mb-2 flex items-center justify-between text-sm">
+                        <span className="font-medium text-slate-700">
+                            Domande obbligatorie compilate
+                        </span>
+                        <span className="text-slate-600">
+                            {requiredProgress.answered} / {requiredProgress.total}
+                        </span>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                        <div
+                            className="h-full bg-[#967635] transition-all duration-500"
+                            style={{
+                                width: `${(requiredProgress.answered / requiredProgress.total) * 100}%`,
+                            }}
+                        />
+                    </div>
+                    {!canSave && (
+                        <p className="mt-2 text-xs text-slate-500">
+                            Completa tutte le domande obbligatorie per abilitare il salvataggio.
+                        </p>
+                    )}
+                </div>
+            )}
             {sectionsForRender?.map((section) => {
                 const sectionVisibleQs = processedForm.visibleQs.filter(q => q.section_id === section.id);
                 if (sectionVisibleQs.length === 0 && !processedForm.exceptions[section.id]) return null;
@@ -509,12 +593,18 @@ export function SectionList({
             })}
 
             {/* PULSANTE SALVA E CONTINUA */}
-            <div className="pt-6 flex justify-start">
+            {hasEditableSection && (
+            <div className="pt-6 flex flex-col items-start gap-2">
                 <Button
                     type="button"
                     onClick={handleSaveAll}
-                    disabled={isSaving}
-                    className="bg-gradient-to-r from-[#967635] to-[#7a5f2a] hover:from-[#7a5f2a] hover:to-[#5c4720] text-white min-w-[220px] h-12 text-base font-semibold rounded-xl shadow-md hover:shadow-lg transition-all duration-300"
+                    disabled={isSaving || !canSave}
+                    title={
+                        !canSave
+                            ? 'Completa tutte le domande obbligatorie per salvare'
+                            : undefined
+                    }
+                    className="bg-gradient-to-r from-[#967635] to-[#7a5f2a] hover:from-[#7a5f2a] hover:to-[#5c4720] text-white min-w-[220px] h-12 text-base font-semibold rounded-xl shadow-md hover:shadow-lg transition-all duration-300 disabled:opacity-50"
                 >
                     {isSaving ? (
                         <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> Salvataggio...</>
@@ -523,6 +613,7 @@ export function SectionList({
                     )}
                 </Button>
             </div>
+            )}
         </div>
     )
 }
