@@ -8,18 +8,48 @@ import {
   type FscDocumentModuleSlug,
   type FscGestioneCategorySlug,
 } from '@/lib/fsc/constants'
-import { createFscDocumentSignedUrls } from '@/lib/fsc/documents-download'
 import {
-  buildFscDocumentStoragePath,
   validateFscDocumentFileMetadata,
 } from '@/lib/fsc/documents-upload'
+import {
+  buildFscDocumentDomainPath,
+  createFscFileService,
+  FSC_STORAGE_OWNER_TYPES,
+  FSC_STORAGE_SLOTS,
+} from '@/lib/fsc/file-service'
+import { fscResolveStoragePaths } from '@/lib/fsc/file-service/resolve'
 import { getToolAccess } from '@/lib/tool-auth'
 import type { FscDocument, FscGestioneDocument } from '@/types/fsc'
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
 
-const FSC_DOCUMENTS_BUCKET = 'fsc-documents'
 const FSC_ENTE_MIN_YEAR = 2000
+
+async function resolveDocumentStoragePath(
+  documentId: string
+): Promise<string | null> {
+  const supabase = await createClient()
+  const fileService = createFscFileService(supabase)
+  const resolved = await fileService.getPathByOwner(
+    FSC_STORAGE_OWNER_TYPES.FSC_DOCUMENT,
+    documentId,
+    FSC_STORAGE_SLOTS.PRIMARY
+  )
+  return resolved?.storagePath ?? null
+}
+
+async function deleteDocumentStorage(documentId: string, companyId: string): Promise<void> {
+  const supabase = await createClient()
+  const fileService = createFscFileService(supabase)
+  const resolved = await fileService.getPathByOwner(
+    FSC_STORAGE_OWNER_TYPES.FSC_DOCUMENT,
+    documentId,
+    FSC_STORAGE_SLOTS.PRIMARY
+  )
+  if (resolved) {
+    await fileService.deleteFile(resolved.storageObjectId, companyId)
+  }
+}
 
 type EditorContext = {
   companyId: string
@@ -137,6 +167,12 @@ async function listDocumentsForModule(
   const docs = (activeDocs ?? []) as FscDocument[]
   if (docs.length === 0) return []
 
+  const filePaths = await fscResolveStoragePaths(
+    supabase,
+    FSC_STORAGE_OWNER_TYPES.FSC_DOCUMENT,
+    docs.map((d) => d.id)
+  )
+
   const rootIds = [...new Set(docs.map(getVersionRootId))]
 
   const { data: allVersions } = await supabase
@@ -157,6 +193,7 @@ async function listDocumentsForModule(
   return docs.map((doc) => ({
     ...doc,
     version_count: versionCountByRoot.get(getVersionRootId(doc)) ?? 1,
+    has_file: filePaths.has(doc.id),
   }))
 }
 
@@ -186,7 +223,14 @@ async function listVersionsForModule(
     return []
   }
 
-  return (data ?? []) as FscDocument[]
+  const versions = (data ?? []) as FscDocument[]
+  const filePaths = await fscResolveStoragePaths(
+    supabase,
+    FSC_STORAGE_OWNER_TYPES.FSC_DOCUMENT,
+    versions.map((v) => v.id)
+  )
+
+  return versions.map((v) => ({ ...v, has_file: filePaths.has(v.id) }))
 }
 
 type PrepareUploadInputForModule = {
@@ -237,16 +281,35 @@ async function prepareUploadForModule(
 
   const version = input.version ?? 1
   const supabase = await createClient()
+  const fileService = createFscFileService(supabase)
 
   const documentId = crypto.randomUUID()
-  const storagePath = buildFscDocumentStoragePath(
-    ctx.data.companyId,
+  const { domain, entityId } = buildFscDocumentDomainPath(
     module,
     input.category,
     documentId,
-    version,
-    input.fileName
+    version
   )
+
+  const prepared = await fileService.prepareUpload({
+    companyId: ctx.data.companyId,
+    domain,
+    entityId,
+    fileName: input.fileName,
+    mimeType: input.mimeType,
+    fileSize: input.fileSize,
+    createdBy: ctx.data.userId,
+    ownerType: FSC_STORAGE_OWNER_TYPES.FSC_DOCUMENT,
+    ownerId: documentId,
+    slot: FSC_STORAGE_SLOTS.PRIMARY,
+    storageObjectId: documentId,
+  })
+
+  if (!prepared.success) {
+    return { success: false, error: prepared.error }
+  }
+
+  const storagePath = prepared.data.storagePath
 
   const { error } = await supabase.from('fsc_documents').insert({
     id: documentId,
@@ -258,7 +321,6 @@ async function prepareUploadForModule(
     reference_year: module === 'ente' ? (input.reference_year ?? null) : null,
     expires_at: input.expires_at ?? null,
     reviewed_at: input.reviewed_at ?? null,
-    storage_path: storagePath,
     version,
     parent_document_id: input.parentDocumentId ?? null,
     status: 'active',
@@ -267,6 +329,7 @@ async function prepareUploadForModule(
 
   if (error) {
     console.error('prepareUploadForModule:', error)
+    await fileService.abortUpload(prepared.data.storageObjectId, ctx.data.companyId)
     return { success: false, error: error.message }
   }
 
@@ -284,7 +347,12 @@ async function finalizeUploadForModule(
   if (editError) return { success: false, error: editError }
 
   const doc = await getFscDocument(documentId, ctx.data.companyId, module)
-  if (!doc || !doc.storage_path) {
+  if (!doc) {
+    return { success: false, error: 'Documento non trovato' }
+  }
+
+  const storagePath = await resolveDocumentStoragePath(documentId)
+  if (!storagePath) {
     return { success: false, error: 'Documento non trovato' }
   }
 
@@ -296,12 +364,14 @@ async function finalizeUploadForModule(
   if (validationError) return { success: false, error: validationError }
 
   const supabase = await createClient()
-  const { error: existsError } = await supabase.storage
-    .from(FSC_DOCUMENTS_BUCKET)
-    .createSignedUrl(doc.storage_path, 60)
+  const fileService = createFscFileService(supabase)
 
-  if (existsError) {
-    return { success: false, error: 'File non trovato in storage. Riprova l\'upload.' }
+  const finalized = await fileService.finalizeUpload(documentId, ctx.data.companyId, {
+    mimeType: meta.mimeType,
+    sizeBytes: meta.size,
+  })
+  if (!finalized.success) {
+    return { success: false, error: finalized.error }
   }
 
   const { error } = await supabase
@@ -334,9 +404,8 @@ async function abortUploadForModule(
   if (!doc) return { success: true }
 
   const supabase = await createClient()
-  if (doc.storage_path) {
-    await supabase.storage.from(FSC_DOCUMENTS_BUCKET).remove([doc.storage_path])
-  }
+  const fileService = createFscFileService(supabase)
+  await fileService.abortUpload(documentId, ctx.data.companyId)
 
   const { error } = await supabase
     .from('fsc_documents')
@@ -447,7 +516,7 @@ async function updateMetadataForModule(
   return { success: true }
 }
 
-async function archiveDocumentForModule(
+async function hardDeleteDocumentForModule(
   module: FscDocumentModuleSlug,
   documentId: string
 ): Promise<{ success: boolean; error?: string }> {
@@ -456,14 +525,18 @@ async function archiveDocumentForModule(
   const editError = assertCanEdit(ctx.data)
   if (editError) return { success: false, error: editError }
 
+  const doc = await getFscDocument(documentId, ctx.data.companyId, module)
+  if (!doc) return { success: false, error: 'Documento non trovato' }
+
+  await deleteDocumentStorage(documentId, ctx.data.companyId)
+
   const supabase = await createClient()
   const { error } = await supabase
     .from('fsc_documents')
-    .update({ status: 'archived' })
+    .delete()
     .eq('id', documentId)
     .eq('company_id', ctx.data.companyId)
     .eq('module', module)
-    .eq('status', 'active')
 
   if (error) return { success: false, error: error.message }
 
@@ -479,16 +552,24 @@ async function getDownloadUrlForModule(
   if (!ctx.success) return { success: false, error: ctx.error }
 
   const doc = await getFscDocument(documentId, ctx.data.companyId, module)
-  if (!doc?.storage_path) {
+  if (!doc) {
     return { success: false, error: 'File non disponibile' }
   }
 
   const supabase = await createClient()
-  const urls = await createFscDocumentSignedUrls(supabase, [doc.storage_path])
-  const url = urls[doc.storage_path]
-  if (!url) return { success: false, error: 'Impossibile generare link di download' }
+  const fileService = createFscFileService(supabase)
+  const resolved = await fileService.getPathByOwner(
+    FSC_STORAGE_OWNER_TYPES.FSC_DOCUMENT,
+    documentId,
+    FSC_STORAGE_SLOTS.PRIMARY
+  )
 
-  return { success: true, url }
+  if (resolved) {
+    const dl = await fileService.getDownloadUrl(resolved.storageObjectId, ctx.data.companyId)
+    if (dl.success) return { success: true, url: dl.url }
+  }
+
+  return { success: false, error: 'File non disponibile' }
 }
 
 // --- Modulo 1: Documenti di gestione ---
@@ -546,8 +627,13 @@ export async function updateFscGestioneMetadata(
   return updateMetadataForModule('gestione', documentId, fields)
 }
 
+export async function deleteFscGestioneDocument(documentId: string) {
+  return hardDeleteDocumentForModule('gestione', documentId)
+}
+
+/** @deprecated Use deleteFscGestioneDocument */
 export async function archiveFscGestioneDocument(documentId: string) {
-  return archiveDocumentForModule('gestione', documentId)
+  return deleteFscGestioneDocument(documentId)
 }
 
 export async function getFscGestioneDownloadUrl(documentId: string) {
@@ -636,8 +722,13 @@ export async function updateFscEnteMetadata(
   return updateMetadataForModule('ente', documentId, fields)
 }
 
+export async function deleteFscEnteDocument(documentId: string) {
+  return hardDeleteDocumentForModule('ente', documentId)
+}
+
+/** @deprecated Use deleteFscEnteDocument */
 export async function archiveFscEnteDocument(documentId: string) {
-  return archiveDocumentForModule('ente', documentId)
+  return deleteFscEnteDocument(documentId)
 }
 
 export async function getFscEnteDownloadUrl(documentId: string) {

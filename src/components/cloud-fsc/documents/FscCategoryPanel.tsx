@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import {
-  Archive,
+  Trash2,
   Download,
   History,
   Loader2,
@@ -43,7 +43,7 @@ export function FscCategoryPanel({
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyDoc, setHistoryDoc] = useState<FscGestioneDocument | null>(null)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
-  const [archivingId, setArchivingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const actions = useMemo(() => getFscDocumentActions(module), [module])
   const isEnte = module === 'ente'
@@ -86,20 +86,20 @@ export function FscCategoryPanel({
     }
   }
 
-  const handleArchive = async (doc: FscGestioneDocument) => {
-    if (!confirm(`Archiviare "${doc.name}"?`)) return
+  const handleDelete = async (doc: FscGestioneDocument) => {
+    if (!confirm(`Eliminare definitivamente "${doc.name}"? L'operazione non è reversibile.`)) return
 
-    setArchivingId(doc.id)
+    setDeletingId(doc.id)
     try {
-      const result = await actions.archiveDocument(doc.id)
+      const result = await actions.deleteDocument(doc.id)
       if (!result.success) {
-        toast.error(result.error ?? 'Errore archiviazione')
+        toast.error(result.error ?? 'Errore eliminazione')
         return
       }
-      toast.success('Documento archiviato')
+      toast.success('Documento eliminato')
       router.refresh()
     } finally {
-      setArchivingId(null)
+      setDeletingId(null)
     }
   }
 
@@ -185,7 +185,7 @@ export function FscCategoryPanel({
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={!doc.storage_path || downloadingId === doc.id}
+                        disabled={!doc.has_file || downloadingId === doc.id}
                         onClick={() => handleDownload(doc)}
                         title="Scarica"
                       >
@@ -230,14 +230,14 @@ export function FscCategoryPanel({
                             type="button"
                             variant="outline"
                             size="sm"
-                            disabled={archivingId === doc.id}
-                            onClick={() => handleArchive(doc)}
-                            title="Archivia"
+                            disabled={deletingId === doc.id}
+                            onClick={() => handleDelete(doc)}
+                            title="Elimina"
                           >
-                            {archivingId === doc.id ? (
+                            {deletingId === doc.id ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
-                              <Archive className="h-4 w-4" />
+                              <Trash2 className="h-4 w-4" />
                             )}
                           </Button>
                         </>

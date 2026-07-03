@@ -1,8 +1,5 @@
 'use client'
 
-import { useRouter, usePathname, useSearchParams } from 'next/navigation'
-import { useCallback, useTransition } from 'react'
-import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -11,42 +8,22 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { FSC_PRODUCT_GROUP_STATUS_OPTIONS } from '@/lib/fsc/product-groups'
+import { FscEnterToSearchInput } from '@/components/cloud-fsc/shared/FscEnterToSearchInput'
+import { useFscUrlParams } from '@/components/cloud-fsc/shared/useFscUrlParams'
 
 export function FscProductGroupsFilterBar() {
-  const router = useRouter()
-  const pathname = usePathname()
-  const searchParams = useSearchParams()
-  const [isPending, startTransition] = useTransition()
+  const { searchParams, updateParams, isPending } = useFscUrlParams()
 
   const search = searchParams.get('q') ?? ''
   const status = searchParams.get('status') ?? 'active'
 
-  const updateParams = useCallback(
-    (updates: Record<string, string | null>) => {
-      const params = new URLSearchParams(searchParams.toString())
-      for (const [key, value] of Object.entries(updates)) {
-        if (value === null || value === '' || (key === 'status' && value === 'all')) {
-          params.delete(key)
-        } else {
-          params.set(key, value)
-        }
-      }
-      startTransition(() => {
-        const qs = params.toString()
-        router.replace(qs ? `${pathname}?${qs}` : pathname)
-      })
-    },
-    [pathname, router, searchParams]
-  )
-
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-      <Input
-        placeholder="Cerca per nome, codice FSC o input…"
-        defaultValue={search}
-        className="sm:max-w-xs"
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+      <FscEnterToSearchInput
+        value={search}
+        placeholder="Cerca per nome, codice FSC o parole chiave…"
         disabled={isPending}
-        onChange={(e) => updateParams({ q: e.target.value || null })}
+        onSearch={(q) => updateParams({ q: q || null })}
       />
       <Select
         value={status}

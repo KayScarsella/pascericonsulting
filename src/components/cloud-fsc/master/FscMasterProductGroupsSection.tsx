@@ -1,7 +1,7 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -34,11 +34,14 @@ import {
 } from '@/components/ui/select'
 import type { FscProductGroupCatalog } from '@/types/fsc'
 
-type CatalogKind = 'official' | 'unofficial'
-
 type FscMasterProductGroupsSectionProps = {
-  official: FscProductGroupCatalog[]
-  unofficial: FscProductGroupCatalog[]
+  catalog: FscProductGroupCatalog[]
+  page: number
+  totalPages: number
+  totalCount: number
+  q: string
+  status: 'all' | 'active' | 'inactive'
+  basePath: string
 }
 
 type FormState = FscProductGroupCatalogInput
@@ -50,51 +53,38 @@ const emptyForm = (): FormState => ({
   is_active: true,
 })
 
-function catalogFilter(row: FscProductGroupCatalog, search: string): boolean {
-  const term = search.toLowerCase()
-  return (
-    row.name.toLowerCase().includes(term) ||
-    (row.code?.toLowerCase().includes(term) ?? false) ||
-    (row.keywords?.toLowerCase().includes(term) ?? false)
-  )
-}
+export function FscMasterProductGroupsSection({
+  catalog,
+  page,
+  totalPages,
+  totalCount,
+  q,
+  status,
+  basePath,
+}: FscMasterProductGroupsSectionProps) {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [editing, setEditing] = useState<FscProductGroupCatalog | null>(null)
+  const [form, setForm] = useState<FormState>(emptyForm())
+  const [loading, setLoading] = useState(false)
 
-function CatalogTable({
-  title,
-  kind,
-  data,
-  onEdit,
-  onDelete,
-  onCreate,
-}: {
-  title: string
-  kind: CatalogKind
-  data: FscProductGroupCatalog[]
-  onEdit: (row: FscProductGroupCatalog) => void
-  onDelete: (row: FscProductGroupCatalog) => void
-  onCreate: () => void
-}) {
-  const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'inactive'>('all')
-
-  const filteredData = useMemo(() => {
-    if (activeFilter === 'all') return data
-    if (activeFilter === 'active') return data.filter((r) => r.is_active)
-    return data.filter((r) => !r.is_active)
-  }, [activeFilter, data])
+  const pushParams = (next: Record<string, string | null | undefined>) => {
+    const sp = new URLSearchParams(searchParams.toString())
+    for (const [k, v] of Object.entries(next)) {
+      if (v == null || v === '') sp.delete(k)
+      else sp.set(k, v)
+    }
+    router.push(`${basePath}?${sp.toString()}`)
+  }
 
   const columns: DataManagementColumn<FscProductGroupCatalog>[] = [
-    ...(kind === 'official'
-      ? [
-          {
-            id: 'code',
-            header: 'Codice FSC',
-            sortKey: 'code',
-            render: (row: FscProductGroupCatalog) => (
-              <span className="font-mono text-sm">{row.code ?? '—'}</span>
-            ),
-          },
-        ]
-      : []),
+    {
+      id: 'code',
+      header: 'Codice FSC',
+      sortKey: 'code',
+      render: (row) => <span className="font-mono text-sm">{row.code}</span>,
+    },
     {
       id: 'name',
       header: 'Nome',
@@ -119,82 +109,16 @@ function CatalogTable({
     },
   ]
 
-  return (
-    <DataManagementTable
-      title={title}
-      data={filteredData}
-      columns={columns}
-      getRowId={(row) => row.id}
-      searchPlaceholder="Cerca nome, codice o keywords…"
-      searchMode="client"
-      filterPredicate={catalogFilter}
-      resultCountLabel={`${filteredData.length} voci`}
-      toolbarExtra={
-        <div className="flex flex-wrap items-center gap-2">
-          <Select
-            value={activeFilter}
-            onValueChange={(v) => setActiveFilter(v as typeof activeFilter)}
-          >
-            <SelectTrigger className="w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Tutti</SelectItem>
-              <SelectItem value="active">Solo attivi</SelectItem>
-              <SelectItem value="inactive">Solo inattivi</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button type="button" size="sm" className="bg-[#967635] hover:bg-[#7d6230]" onClick={onCreate}>
-            <Plus className="mr-1 h-4 w-4" />
-            Nuovo
-          </Button>
-        </div>
-      }
-      renderRowActions={(row) => (
-        <div className="flex justify-end gap-1">
-          <Button type="button" variant="ghost" size="sm" onClick={() => onEdit(row)}>
-            <Pencil className="mr-1 h-4 w-4" />
-            Modifica
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="text-red-600 hover:text-red-700"
-            onClick={() => onDelete(row)}
-          >
-            <Trash2 className="mr-1 h-4 w-4" />
-            Elimina
-          </Button>
-        </div>
-      )}
-    />
-  )
-}
-
-export function FscMasterProductGroupsSection({
-  official,
-  unofficial,
-}: FscMasterProductGroupsSectionProps) {
-  const router = useRouter()
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [dialogKind, setDialogKind] = useState<CatalogKind>('official')
-  const [editing, setEditing] = useState<FscProductGroupCatalog | null>(null)
-  const [form, setForm] = useState<FormState>(emptyForm())
-  const [loading, setLoading] = useState(false)
-
-  const openCreate = (kind: CatalogKind) => {
-    setDialogKind(kind)
+  const openCreate = () => {
     setEditing(null)
     setForm(emptyForm())
     setDialogOpen(true)
   }
 
-  const openEdit = (row: FscProductGroupCatalog, kind: CatalogKind) => {
-    setDialogKind(kind)
+  const openEdit = (row: FscProductGroupCatalog) => {
     setEditing(row)
     setForm({
-      code: row.code ?? '',
+      code: row.code,
       name: row.name,
       keywords: row.keywords ?? '',
       is_active: row.is_active,
@@ -218,8 +142,8 @@ export function FscMasterProductGroupsSection({
     setLoading(true)
     try {
       const result = editing
-        ? await updateFscProductGroupCatalog(editing.id, form, dialogKind === 'official')
-        : await createFscProductGroupCatalog(form, dialogKind === 'official')
+        ? await updateFscProductGroupCatalog(editing.id, form)
+        : await createFscProductGroupCatalog(form)
 
       if (!result.success) {
         toast.error(result.error ?? 'Operazione fallita')
@@ -235,54 +159,95 @@ export function FscMasterProductGroupsSection({
   }
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Catalogo gruppi prodotto FSC</h1>
         <p className="mt-1 text-slate-500">
-          Gestisci il catalogo globale: gruppi ufficiali con codice FSC e voci non ufficiali senza
-          codice.
+          Gestisci il catalogo globale: solo gruppi ufficiali con codice FSC.
         </p>
       </div>
 
-      <CatalogTable
+      <DataManagementTable
         title="Gruppi FSC ufficiali"
-        kind="official"
-        data={official}
-        onCreate={() => openCreate('official')}
-        onEdit={(row) => openEdit(row, 'official')}
-        onDelete={handleDelete}
-      />
-
-      <CatalogTable
-        title="Gruppi non ufficiali (catalogo)"
-        kind="unofficial"
-        data={unofficial}
-        onCreate={() => openCreate('unofficial')}
-        onEdit={(row) => openEdit(row, 'unofficial')}
-        onDelete={handleDelete}
+        data={catalog}
+        columns={columns}
+        getRowId={(row) => row.id}
+        searchPlaceholder="Cerca nome, codice o keywords…"
+        searchMode="server"
+        search={{
+          value: q,
+          onChange: (next) => pushParams({ q: next || null, page: '1' }),
+        }}
+        pagination={{
+          page,
+          totalPages,
+          onPageChange: (newPage) => pushParams({ page: String(newPage) }),
+        }}
+        resultCountLabel={`${totalCount} voci`}
+        toolbarExtra={
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              value={status}
+              onValueChange={(v) =>
+                pushParams({
+                  status: v === 'all' ? null : v,
+                  page: '1',
+                })
+              }
+            >
+              <SelectTrigger className="w-[140px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tutti</SelectItem>
+                <SelectItem value="active">Solo attivi</SelectItem>
+                <SelectItem value="inactive">Solo inattivi</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button type="button" size="sm" className="bg-[#967635] hover:bg-[#7d6230]" onClick={openCreate}>
+              <Plus className="mr-1 h-4 w-4" />
+              Nuovo
+            </Button>
+          </div>
+        }
+        renderRowActions={(row) => (
+          <div className="flex justify-end gap-1">
+            <Button type="button" variant="ghost" size="sm" onClick={() => openEdit(row)}>
+              <Pencil className="mr-1 h-4 w-4" />
+              Modifica
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-red-600 hover:text-red-700"
+              onClick={() => handleDelete(row)}
+            >
+              <Trash2 className="mr-1 h-4 w-4" />
+              Elimina
+            </Button>
+          </div>
+        )}
       />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {editing ? 'Modifica voce catalogo' : 'Nuova voce catalogo'} —{' '}
-              {dialogKind === 'official' ? 'ufficiale' : 'non ufficiale'}
+              {editing ? 'Modifica voce catalogo' : 'Nuova voce catalogo'}
             </DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
-            {dialogKind === 'official' && (
-              <div className="space-y-2">
-                <Label htmlFor="catalog-code">Codice FSC</Label>
-                <Input
-                  id="catalog-code"
-                  value={form.code ?? ''}
-                  onChange={(e) => setForm((p) => ({ ...p, code: e.target.value }))}
-                  placeholder="Es. W9.2"
-                  required
-                />
-              </div>
-            )}
+            <div className="space-y-2">
+              <Label htmlFor="catalog-code">Codice FSC</Label>
+              <Input
+                id="catalog-code"
+                value={form.code ?? ''}
+                onChange={(e) => setForm((p) => ({ ...p, code: e.target.value }))}
+                placeholder="Es. W9.2"
+                required
+              />
+            </div>
             <div className="space-y-2">
               <Label htmlFor="catalog-name">Nome</Label>
               <Input

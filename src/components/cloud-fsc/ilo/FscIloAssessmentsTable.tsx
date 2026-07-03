@@ -47,8 +47,8 @@ export function FscIloAssessmentsTable({
               <td className="px-4 py-3">{formatDate(a.completed_at)}</td>
               <td className="px-4 py-3 text-slate-600">
                 {[
-                  a.compiled_doc_path ? 'Word' : null,
-                  a.compiled_pdf_path ? 'PDF' : null,
+                  a.has_compiled_word ? 'Word' : null,
+                  a.has_compiled_pdf ? 'PDF' : null,
                 ]
                   .filter(Boolean)
                   .join(' + ') || '—'}

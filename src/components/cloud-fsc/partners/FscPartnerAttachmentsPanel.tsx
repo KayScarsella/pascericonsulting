@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Download, Loader2, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import {
+  abortFscPartnerAttachmentUpload,
   deleteFscPartnerAttachment,
   finalizeFscPartnerAttachmentUpload,
   getFscPartnerAttachmentDownloadUrl,
@@ -82,10 +83,19 @@ export function FscPartnerAttachmentsPanel({
 
       if (upload.error) {
         toast.error(upload.error, { id: toastId })
+        await abortFscPartnerAttachmentUpload(entity, prepared.attachmentId)
         return
       }
 
-      const finalized = await finalizeFscPartnerAttachmentUpload(entity, prepared.attachmentId)
+      const finalized = await finalizeFscPartnerAttachmentUpload(
+        entity,
+        prepared.attachmentId,
+        {
+          fileName: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          size: file.size,
+        }
+      )
       if (!finalized.success) {
         toast.error(finalized.error ?? 'Finalizzazione fallita', { id: toastId })
         return

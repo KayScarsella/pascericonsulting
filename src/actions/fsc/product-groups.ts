@@ -2,11 +2,16 @@
 
 import { requireFscPartnerContext } from '@/actions/fsc/partner-context'
 import { CLOUD_FSC_TOOL_ID } from '@/lib/constants'
-import { createFscDocumentSignedUrls } from '@/lib/fsc/documents-download'
 import { validateFscDocumentFileMetadata } from '@/lib/fsc/documents-upload'
+import { fscResolveStoragePaths } from '@/lib/fsc/file-service/resolve'
+import {
+  buildFscAddendumDomainPath,
+  createFscFileService,
+  FSC_STORAGE_OWNER_TYPES,
+  FSC_STORAGE_SLOTS,
+} from '@/lib/fsc/file-service'
 import { assertFscPartnerCanEdit } from '@/lib/fsc/partner-auth'
 import {
-  buildFscProductGroupAddendumPath,
   createEmptyAddendumMetadata,
   FSC_PRODUCT_GROUPS_PATH,
 } from '@/lib/fsc/product-groups'
@@ -23,8 +28,6 @@ import type {
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
 
-const FSC_BUCKET = 'fsc-documents'
-
 export type FscProductGroupCatalogInput = {
   code?: string | null
   name: string
@@ -34,7 +37,6 @@ export type FscProductGroupCatalogInput = {
 
 export type FscCompanyProductGroupInput = {
   catalog_group_id?: string | null
-  custom_label?: string | null
   species_id?: string | null
   required_inputs?: string | null
   claims?: FscProductClaim[]
@@ -46,8 +48,15 @@ export type FscCompanyProductGroupListFilters = {
 }
 
 export type FscProductGroupCatalogAdminResult = {
-  official: FscProductGroupCatalog[]
-  unofficial: FscProductGroupCatalog[]
+  rows: FscProductGroupCatalog[]
+  totalCount: number
+}
+
+export type FscProductGroupCatalogAdminFilters = {
+  page?: number
+  pageSize?: number
+  q?: string
+  status?: 'all' | 'active' | 'inactive'
 }
 
 export type PrepareFscProductGroupAddendumUploadInput = {
@@ -134,11 +143,19 @@ async function enrichCompanyProductGroups(
   }
 
   const addendaByGroup = new Map<string, FscProductGroupAddendum[]>()
+  const addendumIds = (addendaRes.data ?? []).map((row) => row.id)
+  const addendumFiles = await fscResolveStoragePaths(
+    supabase,
+    FSC_STORAGE_OWNER_TYPES.FSC_PRODUCT_GROUP_ADDENDUM,
+    addendumIds
+  )
+
   for (const row of addendaRes.data ?? []) {
     const list = addendaByGroup.get(row.company_product_group_id) ?? []
     list.push({
       ...row,
       metadata: (row.metadata ?? {}) as FscProductGroupAddendumMetadata,
+      has_file: addendumFiles.has(row.id),
     } as FscProductGroupAddendum)
     addendaByGroup.set(row.company_product_group_id, list)
   }
@@ -162,10 +179,11 @@ export async function searchFscProductGroupsCatalog(
   await requireFscPartnerContext()
 
   const supabase = await createClient()
-  let query = supabase
+  const query = supabase
     .from('fsc_product_groups_catalog')
     .select('*')
     .eq('is_active', true)
+    .not('code', 'is', null)
     .order('name')
 
   const { data, error } = await query
@@ -188,7 +206,7 @@ export async function searchFscProductGroupsCatalog(
   return rows
 }
 
-export async function listFscOfficialProductGroupsCatalog(): Promise<FscProductGroupCatalog[]> {
+export async function listFscProductGroupsCatalog(): Promise<FscProductGroupCatalog[]> {
   await requireFscPartnerContext()
 
   const supabase = await createClient()
@@ -200,18 +218,23 @@ export async function listFscOfficialProductGroupsCatalog(): Promise<FscProductG
     .order('code')
 
   if (error) {
-    console.error('listFscOfficialProductGroupsCatalog:', error)
+    console.error('listFscProductGroupsCatalog:', error)
     return []
   }
 
   return (data ?? []) as FscProductGroupCatalog[]
 }
 
+/** @deprecated Use listFscProductGroupsCatalog */
+export const listFscOfficialProductGroupsCatalog = listFscProductGroupsCatalog
+
 // ---------------------------------------------------------------------------
 // Catalog admin
 // ---------------------------------------------------------------------------
 
-export async function listFscProductGroupsCatalogAdmin(): Promise<{
+export async function listFscProductGroupsCatalogAdmin(
+  filters?: FscProductGroupCatalogAdminFilters
+): Promise<{
   success: boolean
   data?: FscProductGroupCatalogAdminResult
   error?: string
@@ -219,20 +242,39 @@ export async function listFscProductGroupsCatalogAdmin(): Promise<{
   try {
     await requireToolAdmin(CLOUD_FSC_TOOL_ID)
     const supabase = await createClient()
-    const { data, error } = await supabase
+
+    const page = Math.max(1, filters?.page ?? 1)
+    const pageSize = Math.max(1, Math.min(filters?.pageSize ?? 25, 100))
+    const from = (page - 1) * pageSize
+    const to = from + pageSize - 1
+
+    let query = supabase
       .from('fsc_product_groups_catalog')
-      .select('*')
+      .select('*', { count: 'exact' })
       .order('name')
+
+    if (filters?.status === 'active') {
+      query = query.eq('is_active', true)
+    } else if (filters?.status === 'inactive') {
+      query = query.eq('is_active', false)
+    }
+
+    const qRaw = filters?.q?.trim() ?? ''
+    const qSafe = qRaw.replace(/[,%()]/g, ' ').trim()
+    if (qSafe) {
+      query = query.or(
+        `name.ilike.%${qSafe}%,code.ilike.%${qSafe}%,keywords.ilike.%${qSafe}%`
+      )
+    }
+
+    const { data, error, count } = await query.range(from, to)
 
     if (error) return { success: false, error: error.message }
 
     const rows = (data ?? []) as FscProductGroupCatalog[]
     return {
       success: true,
-      data: {
-        official: rows.filter((r) => r.code != null && r.code.trim() !== ''),
-        unofficial: rows.filter((r) => r.code == null || r.code.trim() === ''),
-      },
+      data: { rows, totalCount: count ?? rows.length },
     }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : 'Errore' }
@@ -240,8 +282,7 @@ export async function listFscProductGroupsCatalogAdmin(): Promise<{
 }
 
 export async function createFscProductGroupCatalog(
-  input: FscProductGroupCatalogInput,
-  isOfficial: boolean
+  input: FscProductGroupCatalogInput
 ): Promise<{ success: boolean; data?: FscProductGroupCatalog; error?: string }> {
   try {
     await requireToolAdmin(CLOUD_FSC_TOOL_ID)
@@ -253,9 +294,9 @@ export async function createFscProductGroupCatalog(
     return { success: false, error: 'Nome obbligatorio' }
   }
 
-  const code = isOfficial ? input.code?.trim() || null : null
-  if (isOfficial && !code) {
-    return { success: false, error: 'Codice FSC obbligatorio per gruppi ufficiali' }
+  const code = input.code?.trim() || null
+  if (!code) {
+    return { success: false, error: 'Codice FSC obbligatorio' }
   }
 
   const supabase = await createClient()
@@ -280,8 +321,7 @@ export async function createFscProductGroupCatalog(
 
 export async function updateFscProductGroupCatalog(
   id: string,
-  input: FscProductGroupCatalogInput,
-  isOfficial: boolean
+  input: FscProductGroupCatalogInput
 ): Promise<{ success: boolean; data?: FscProductGroupCatalog; error?: string }> {
   try {
     await requireToolAdmin(CLOUD_FSC_TOOL_ID)
@@ -293,9 +333,9 @@ export async function updateFscProductGroupCatalog(
     return { success: false, error: 'Nome obbligatorio' }
   }
 
-  const code = isOfficial ? input.code?.trim() || null : null
-  if (isOfficial && !code) {
-    return { success: false, error: 'Codice FSC obbligatorio per gruppi ufficiali' }
+  const code = input.code?.trim() || null
+  if (!code) {
+    return { success: false, error: 'Codice FSC obbligatorio' }
   }
 
   const supabase = await createClient()
@@ -383,11 +423,13 @@ export async function listFscCompanyProductGroups(
   if (filters?.search?.trim()) {
     const term = filters.search.trim().toLowerCase()
     return enriched.filter((g) => {
-      const name = g.catalog?.name ?? g.custom_label ?? ''
+      const name = g.catalog?.name ?? ''
       const code = g.catalog?.code ?? ''
+      const keywords = g.catalog?.keywords ?? ''
       return (
         name.toLowerCase().includes(term) ||
         code.toLowerCase().includes(term) ||
+        keywords.toLowerCase().includes(term) ||
         (g.required_inputs?.toLowerCase().includes(term) ?? false)
       )
     })
@@ -427,27 +469,21 @@ export async function createFscCompanyProductGroup(
   if (editErr) return { success: false, error: editErr }
 
   const catalogId = input.catalog_group_id?.trim() || null
-  const customLabel = input.custom_label?.trim() || null
 
-  if (!catalogId && !customLabel) {
-    return { success: false, error: 'Seleziona un gruppo dal catalogo o inserisci un nome personalizzato' }
-  }
-  if (catalogId && customLabel) {
-    return { success: false, error: 'Usa catalogo oppure nome personalizzato, non entrambi' }
+  if (!catalogId) {
+    return { success: false, error: 'Seleziona un gruppo dal catalogo FSC ufficiale' }
   }
 
   const supabase = await createClient()
 
-  if (catalogId) {
-    const { data: catalog } = await supabase
-      .from('fsc_product_groups_catalog')
-      .select('id, is_active')
-      .eq('id', catalogId)
-      .maybeSingle()
+  const { data: catalog } = await supabase
+    .from('fsc_product_groups_catalog')
+    .select('id, code, is_active')
+    .eq('id', catalogId)
+    .maybeSingle()
 
-    if (!catalog?.is_active) {
-      return { success: false, error: 'Gruppo catalogo non trovato o non attivo' }
-    }
+  if (!catalog?.is_active || !catalog.code?.trim()) {
+    return { success: false, error: 'Gruppo catalogo non trovato, non attivo o non ufficiale' }
   }
 
   const { data: group, error } = await supabase
@@ -455,7 +491,6 @@ export async function createFscCompanyProductGroup(
     .insert({
       company_id: ctx.data.companyId,
       catalog_group_id: catalogId,
-      custom_label: customLabel,
       species_id: input.species_id || null,
       required_inputs: input.required_inputs?.trim() || null,
       is_active: true,
@@ -499,7 +534,7 @@ export async function updateFscCompanyProductGroup(
   const supabase = await createClient()
   const { data: existing } = await supabase
     .from('fsc_company_product_groups')
-    .select('catalog_group_id, custom_label')
+    .select('id')
     .eq('id', id)
     .eq('company_id', ctx.data.companyId)
     .maybeSingle()
@@ -565,18 +600,19 @@ export async function deleteFscCompanyProductGroup(
   if (editErr) return { success: false, error: editErr }
 
   const supabase = await createClient()
+  const fileService = createFscFileService(supabase)
 
   const { data: addenda } = await supabase
     .from('fsc_product_group_addenda')
-    .select('storage_path')
+    .select('id')
     .eq('company_product_group_id', id)
 
-  const paths = (addenda ?? [])
-    .map((a) => a.storage_path)
-    .filter((p): p is string => !!p)
-
-  if (paths.length > 0) {
-    await supabase.storage.from(FSC_BUCKET).remove(paths)
+  for (const addendum of addenda ?? []) {
+    await fileService.deleteFilesByOwner(
+      FSC_STORAGE_OWNER_TYPES.FSC_PRODUCT_GROUP_ADDENDUM,
+      addendum.id,
+      ctx.data.companyId
+    )
   }
 
   const { error } = await supabase
@@ -632,7 +668,12 @@ export async function updateFscProductGroupAddendumMetadata(
 
 export async function prepareFscProductGroupAddendumUpload(
   input: PrepareFscProductGroupAddendumUploadInput
-): Promise<{ success: boolean; storagePath?: string; error?: string }> {
+): Promise<{
+  success: boolean
+  storagePath?: string
+  storageObjectId?: string
+  error?: string
+}> {
   const ctx = await requireFscPartnerContext()
   if (!ctx.success) return { success: false, error: ctx.error }
   const editErr = assertFscPartnerCanEdit(ctx.data)
@@ -651,30 +692,69 @@ export async function prepareFscProductGroupAddendumUpload(
   )
   if (!owned) return { success: false, error: 'Gruppo non trovato' }
 
-  const storagePath = buildFscProductGroupAddendumPath(
-    ctx.data.companyId,
+  const supabase = await createClient()
+  const fileService = createFscFileService(supabase)
+  const storageObjectId = crypto.randomUUID()
+  const { domain, entityId } = buildFscAddendumDomainPath(
     input.companyProductGroupId,
-    input.addendumId,
-    input.fileName
+    input.addendumId
   )
 
-  const supabase = await createClient()
-  const { error } = await supabase
-    .from('fsc_product_group_addenda')
-    .update({ storage_path: storagePath })
-    .eq('id', input.addendumId)
-    .eq('company_product_group_id', input.companyProductGroupId)
+  const prepared = await fileService.prepareUpload({
+    companyId: ctx.data.companyId,
+    domain,
+    entityId,
+    fileName: input.fileName,
+    mimeType: input.mimeType,
+    fileSize: input.fileSize,
+    createdBy: ctx.data.userId,
+    ownerType: FSC_STORAGE_OWNER_TYPES.FSC_PRODUCT_GROUP_ADDENDUM,
+    ownerId: input.addendumId,
+    slot: FSC_STORAGE_SLOTS.PRIMARY,
+    storageObjectId,
+  })
 
-  if (error) return { success: false, error: error.message }
+  if (!prepared.success) {
+    return { success: false, error: prepared.error }
+  }
 
-  return { success: true, storagePath }
+  const storagePath = prepared.data.storagePath
+
+  return { success: true, storagePath, storageObjectId }
 }
 
-export async function finalizeFscProductGroupAddendumUpload(
-  addendumId: string
+export async function abortFscProductGroupAddendumUpload(
+  addendumId: string,
+  storageObjectId: string
 ): Promise<{ success: boolean; error?: string }> {
   const ctx = await requireFscPartnerContext()
   if (!ctx.success) return { success: false, error: ctx.error }
+
+  const supabase = await createClient()
+  const fileService = createFscFileService(supabase)
+  await fileService.abortUpload(storageObjectId, ctx.data.companyId)
+
+  return { success: true }
+}
+
+export async function finalizeFscProductGroupAddendumUpload(
+  addendumId: string,
+  storageObjectId: string,
+  meta?: { fileName: string; mimeType: string; size: number }
+): Promise<{ success: boolean; error?: string }> {
+  const ctx = await requireFscPartnerContext()
+  if (!ctx.success) return { success: false, error: ctx.error }
+
+  const supabase = await createClient()
+  const fileService = createFscFileService(supabase)
+  const finalized = await fileService.finalizeUpload(storageObjectId, ctx.data.companyId, {
+    mimeType: meta?.mimeType,
+    sizeBytes: meta?.size,
+  })
+
+  if (!finalized.success) {
+    return { success: false, error: finalized.error }
+  }
 
   revalidateProductGroups()
   return { success: true }
@@ -693,7 +773,7 @@ export async function getFscProductGroupAddendumDownloadUrl(
     .eq('id', addendumId)
     .maybeSingle()
 
-  if (!addendum?.storage_path) {
+  if (!addendum) {
     return { success: false, error: 'File addendum non disponibile' }
   }
 
@@ -703,11 +783,19 @@ export async function getFscProductGroupAddendumDownloadUrl(
   )
   if (!owned) return { success: false, error: 'Addendum non trovato' }
 
-  const urls = await createFscDocumentSignedUrls(supabase, [addendum.storage_path])
-  const url = urls[addendum.storage_path]
-  if (!url) return { success: false, error: 'Impossibile generare URL di download' }
+  const fileService = createFscFileService(supabase)
+  const resolved = await fileService.getPathByOwner(
+    FSC_STORAGE_OWNER_TYPES.FSC_PRODUCT_GROUP_ADDENDUM,
+    addendumId,
+    FSC_STORAGE_SLOTS.PRIMARY
+  )
 
-  return { success: true, url }
+  if (resolved?.storageObjectId) {
+    const dl = await fileService.getDownloadUrl(resolved.storageObjectId, ctx.data.companyId)
+    if (dl.success) return { success: true, url: dl.url }
+  }
+
+  return { success: false, error: 'File addendum non disponibile' }
 }
 
 export async function deleteFscProductGroupAddendumFile(
@@ -733,16 +821,16 @@ export async function deleteFscProductGroupAddendumFile(
   )
   if (!owned) return { success: false, error: 'Addendum non trovato' }
 
-  if (addendum.storage_path) {
-    await supabase.storage.from(FSC_BUCKET).remove([addendum.storage_path])
+  const fileService = createFscFileService(supabase)
+  const resolved = await fileService.getPathByOwner(
+    FSC_STORAGE_OWNER_TYPES.FSC_PRODUCT_GROUP_ADDENDUM,
+    addendumId,
+    FSC_STORAGE_SLOTS.PRIMARY
+  )
+
+  if (resolved?.storageObjectId) {
+    await fileService.deleteFile(resolved.storageObjectId, ctx.data.companyId)
   }
-
-  const { error } = await supabase
-    .from('fsc_product_group_addenda')
-    .update({ storage_path: null })
-    .eq('id', addendumId)
-
-  if (error) return { success: false, error: error.message }
 
   revalidateProductGroups()
   return { success: true }

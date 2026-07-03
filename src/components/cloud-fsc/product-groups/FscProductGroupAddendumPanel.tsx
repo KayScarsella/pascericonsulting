@@ -6,6 +6,7 @@ import { Download, Loader2, Plus, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   deleteFscProductGroupAddendumFile,
+  abortFscProductGroupAddendumUpload,
   finalizeFscProductGroupAddendumUpload,
   getFscProductGroupAddendumDownloadUrl,
   prepareFscProductGroupAddendumUpload,
@@ -104,10 +105,21 @@ export function FscProductGroupAddendumPanel({
 
       if (upload.error) {
         toast.error(upload.error, { id: toastId })
+        if (prepared.storageObjectId) {
+          await abortFscProductGroupAddendumUpload(addendum.id, prepared.storageObjectId)
+        }
         return
       }
 
-      const finalized = await finalizeFscProductGroupAddendumUpload(addendum.id)
+      const finalized = await finalizeFscProductGroupAddendumUpload(
+        addendum.id,
+        prepared.storageObjectId!,
+        {
+          fileName: file.name,
+          mimeType: file.type || 'application/pdf',
+          size: file.size,
+        }
+      )
       if (!finalized.success) {
         toast.error(finalized.error ?? 'Finalizzazione fallita', { id: toastId })
         return
@@ -232,7 +244,7 @@ export function FscProductGroupAddendumPanel({
           onChange={handleFileChange}
         />
 
-        {addendum.storage_path ? (
+        {addendum.has_file ? (
           <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
             <span className="truncate text-slate-700">Addendum PDF</span>
             <div className="flex shrink-0 gap-1">

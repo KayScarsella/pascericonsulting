@@ -1,8 +1,8 @@
 import {
   abortFscEnteUpload,
   abortFscGestioneUpload,
-  archiveFscEnteDocument,
-  archiveFscGestioneDocument,
+  deleteFscEnteDocument,
+  deleteFscGestioneDocument,
   finalizeFscEnteUpload,
   finalizeFscGestioneUpload,
   getFscEnteDownloadUrl,
@@ -50,7 +50,7 @@ export type FscDocumentActions = {
   finalizeUpload: (documentId: string, meta: FinalizeMeta) => Promise<ActionResult>
   abortUpload: (documentId: string) => Promise<ActionResult>
   updateMetadata: (documentId: string, fields: FscDocumentMetadataFields) => Promise<ActionResult>
-  archiveDocument: (documentId: string) => Promise<ActionResult>
+  deleteDocument: (documentId: string) => Promise<ActionResult>
   getDownloadUrl: (documentId: string) => Promise<DownloadResult>
 }
 
@@ -79,7 +79,7 @@ export function getFscDocumentActions(module: FscDocumentModuleSlug): FscDocumen
           expires_at: fields.expires_at,
           reference_year: fields.reference_year,
         }),
-      archiveDocument: archiveFscEnteDocument,
+      deleteDocument: deleteFscEnteDocument,
       getDownloadUrl: getFscEnteDownloadUrl,
     }
   }
@@ -104,7 +104,7 @@ export function getFscDocumentActions(module: FscDocumentModuleSlug): FscDocumen
         expires_at: fields.expires_at,
         reviewed_at: fields.reviewed_at,
       }),
-    archiveDocument: archiveFscGestioneDocument,
+    deleteDocument: deleteFscGestioneDocument,
     getDownloadUrl: getFscGestioneDownloadUrl,
   }
 }

@@ -27,6 +27,8 @@ export {
   abortFscGestioneUpload,
   archiveFscEnteDocument,
   archiveFscGestioneDocument,
+  deleteFscEnteDocument,
+  deleteFscGestioneDocument,
   finalizeFscEnteUpload,
   finalizeFscGestioneUpload,
   getFscEnteDownloadUrl,
@@ -56,6 +58,7 @@ export {
 } from './suppliers'
 export {
   searchFscProductGroupsCatalog,
+  listFscProductGroupsCatalog,
   listFscOfficialProductGroupsCatalog,
   listFscProductGroupsCatalogAdmin,
   createFscProductGroupCatalog,
@@ -68,6 +71,7 @@ export {
   setFscCompanyProductGroupActive,
   deleteFscCompanyProductGroup,
   updateFscProductGroupAddendumMetadata,
+  abortFscProductGroupAddendumUpload,
   prepareFscProductGroupAddendumUpload,
   finalizeFscProductGroupAddendumUpload,
   getFscProductGroupAddendumDownloadUrl,
@@ -89,14 +93,32 @@ export {
   type FscSubcontractorListFilters,
 } from './subcontractors'
 export {
+  abortFscPartnerAttachmentUpload,
   deleteFscPartnerAttachment,
   finalizeFscPartnerAttachmentUpload,
   getFscPartnerAttachmentDownloadUrl,
   prepareFscPartnerAttachmentUpload,
   type PrepareFscPartnerAttachmentInput,
 } from './partner-attachments'
-export { processFscAlerts } from './alerts'
 export {
+  abortFscLogoFileUpload,
+  clearFscLogoFile,
+  createFscLogo,
+  deleteFscLogo,
+  finalizeFscLogoFileUpload,
+  getFscLogo,
+  getFscLogoFileDownloadUrl,
+  listFscLogos,
+  prepareFscLogoFileUpload,
+  updateFscLogo,
+  type FscLogoInput,
+  type FscLogoListFilters,
+  type PrepareFscLogoFileUploadInput,
+} from './logos'
+export { processFscAlerts } from './alerts'
+export { processFscStorageReconciliation } from './storage-reconcile'
+export {
+  abortFscIloFileUpload,
   createFscIloAssessment,
   deleteFscIloAssessment,
   duplicateFscIloFromYear,

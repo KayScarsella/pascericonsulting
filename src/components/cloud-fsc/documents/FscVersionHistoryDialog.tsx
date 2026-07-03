@@ -109,7 +109,7 @@ export function FscVersionHistoryDialog({
                     <FscExpiryBadge expiresAt={v.expires_at} showDate={!!v.expires_at} />
                   </div>
                 </div>
-                {v.storage_path && (
+                {v.has_file && (
                   <Button
                     type="button"
                     variant="outline"

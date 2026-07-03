@@ -70,24 +70,24 @@ export type FscSupplierAttachment = {
   id: string
   supplier_id: string
   attachment_type: FscSupplierAttachmentType
-  storage_path: string
   file_name: string | null
   mime_type: string | null
   size: number | null
   created_at: string
   created_by: string | null
+  has_file?: boolean
 }
 
 export type FscSubcontractorAttachment = {
   id: string
   subcontractor_id: string
   attachment_type: FscSubcontractorAttachmentType
-  storage_path: string
   file_name: string | null
   mime_type: string | null
   size: number | null
   created_at: string
   created_by: string | null
+  has_file?: boolean
 }
 
 export type FscSupplierStatusHistory = {
@@ -129,7 +129,6 @@ export type FscDocument = {
   reference_year: number | null
   expires_at: string | null
   reviewed_at: string | null
-  storage_path: string | null
   mime_type: string | null
   size: number | null
   version: number
@@ -138,15 +137,13 @@ export type FscDocument = {
   created_by: string | null
   created_at: string
   updated_at: string
+  has_file?: boolean
 }
 
 export type FscIloAssessment = {
   id: string
   company_id: string
   reference_year: number
-  template_storage_path: string | null
-  compiled_doc_path: string | null
-  compiled_pdf_path: string | null
   completed_at: string | null
   form_data: Record<string, unknown>
   schema_version: string
@@ -155,6 +152,8 @@ export type FscIloAssessment = {
   session_id: string | null
   created_at: string
   updated_at: string
+  has_compiled_word?: boolean
+  has_compiled_pdf?: boolean
 }
 
 export type FscIloTemplateMaster = {
@@ -173,17 +172,16 @@ export type FscLogo = {
   logo_type: FscLogoType
   progressive_code: string
   notes: string | null
-  approval_email_path: string | null
-  graphic_path: string | null
   created_by: string | null
   created_at: string
+  approval_file_path?: string | null
+  graphic_file_path?: string | null
 }
 
 export type FscCompanyProductGroup = {
   id: string
   company_id: string
-  catalog_group_id: string | null
-  custom_label: string | null
+  catalog_group_id: string
   species_id: string | null
   required_inputs: string | null
   is_active: boolean
@@ -205,9 +203,9 @@ export type FscProductGroupAddendumMetadata = {
 export type FscProductGroupAddendum = {
   id: string
   company_product_group_id: string
-  storage_path: string | null
   metadata: FscProductGroupAddendumMetadata
   generated_at: string
+  has_file?: boolean
 }
 
 export type FscSpeciesOption = {
@@ -225,7 +223,7 @@ export type FscCompanyProductGroupWithDetails = FscCompanyProductGroup & {
 
 export type FscProductGroupCatalog = {
   id: string
-  code: string | null
+  code: string
   name: string
   keywords: string | null
   is_active: boolean
@@ -249,4 +247,5 @@ export type FscEnteCategory =
 
 export type FscGestioneDocument = FscDocument & {
   version_count?: number
+  has_file?: boolean
 }

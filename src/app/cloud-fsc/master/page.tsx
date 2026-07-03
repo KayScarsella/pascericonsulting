@@ -69,7 +69,7 @@ export default async function CloudFscMasterPage() {
             <h3 className="text-lg font-semibold">Gruppi prodotto FSC</h3>
           </div>
           <p className="text-sm text-slate-500">
-            Catalogo globale gruppi ufficiali e non ufficiali.
+            Catalogo globale gruppi ufficiali con codice FSC.
           </p>
         </Link>
       </div>

@@ -189,6 +189,9 @@ export type Database = {
           alert_kind: string
           company_id: string
           created_at: string
+          email_error: string | null
+          email_provider_id: string | null
+          email_sent_at: string | null
           id: string
           message: string | null
           notification_id: string | null
@@ -204,6 +207,9 @@ export type Database = {
           alert_kind: string
           company_id: string
           created_at?: string
+          email_error?: string | null
+          email_provider_id?: string | null
+          email_sent_at?: string | null
           id?: string
           message?: string | null
           notification_id?: string | null
@@ -219,6 +225,9 @@ export type Database = {
           alert_kind?: string
           company_id?: string
           created_at?: string
+          email_error?: string | null
+          email_provider_id?: string | null
+          email_sent_at?: string | null
           id?: string
           message?: string | null
           notification_id?: string | null
@@ -322,34 +331,34 @@ export type Database = {
       fsc_company_product_groups: {
         Row: {
           activated_at: string
-          catalog_group_id: string | null
+          catalog_group_id: string
           company_id: string
           created_at: string
-          custom_label: string | null
           id: string
           is_active: boolean
+          required_inputs: string | null
           species_id: string | null
           updated_at: string
         }
         Insert: {
           activated_at?: string
-          catalog_group_id?: string | null
+          catalog_group_id: string
           company_id: string
           created_at?: string
-          custom_label?: string | null
           id?: string
           is_active?: boolean
+          required_inputs?: string | null
           species_id?: string | null
           updated_at?: string
         }
         Update: {
           activated_at?: string
-          catalog_group_id?: string | null
+          catalog_group_id?: string
           company_id?: string
           created_at?: string
-          custom_label?: string | null
           id?: string
           is_active?: boolean
+          required_inputs?: string | null
           species_id?: string | null
           updated_at?: string
         }
@@ -382,6 +391,153 @@ export type Database = {
         }
         Relationships: []
       }
+      fsc_storage_delete_outbox: {
+        Row: {
+          attempt_count: number
+          bucket: string
+          created_at: string
+          id: string
+          last_error: string | null
+          processed_at: string | null
+          storage_object_id: string
+          storage_path: string
+        }
+        Insert: {
+          attempt_count?: number
+          bucket?: string
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          processed_at?: string | null
+          storage_object_id: string
+          storage_path: string
+        }
+        Update: {
+          attempt_count?: number
+          bucket?: string
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          processed_at?: string | null
+          storage_object_id?: string
+          storage_path?: string
+        }
+        Relationships: []
+      }
+      fsc_storage_object_links: {
+        Row: {
+          created_at: string
+          id: string
+          owner_id: string
+          owner_type: string
+          slot: string
+          storage_object_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          owner_id: string
+          owner_type: string
+          slot?: string
+          storage_object_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          owner_id?: string
+          owner_type?: string
+          slot?: string
+          storage_object_id?: string
+        }
+        Relationships: []
+      }
+      fsc_storage_objects: {
+        Row: {
+          activated_at: string | null
+          bucket: string
+          company_id: string
+          created_at: string
+          created_by: string | null
+          deleted_at: string | null
+          id: string
+          mime_type: string | null
+          original_filename: string
+          size_bytes: number | null
+          status: Database["public"]["Enums"]["fsc_storage_object_status"]
+          storage_path: string
+          upload_expires_at: string | null
+        }
+        Insert: {
+          activated_at?: string | null
+          bucket?: string
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          deleted_at?: string | null
+          id?: string
+          mime_type?: string | null
+          original_filename: string
+          size_bytes?: number | null
+          status?: Database["public"]["Enums"]["fsc_storage_object_status"]
+          storage_path: string
+          upload_expires_at?: string | null
+        }
+        Update: {
+          activated_at?: string | null
+          bucket?: string
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          deleted_at?: string | null
+          id?: string
+          mime_type?: string | null
+          original_filename?: string
+          size_bytes?: number | null
+          status?: Database["public"]["Enums"]["fsc_storage_object_status"]
+          storage_path?: string
+          upload_expires_at?: string | null
+        }
+        Relationships: []
+      }
+      fsc_storage_reconcile_queue: {
+        Row: {
+          company_id: string | null
+          created_at: string
+          grace_until: string | null
+          id: string
+          kind: string
+          last_error: string | null
+          payload: Json
+          processed_at: string | null
+          storage_object_id: string | null
+          storage_path: string | null
+        }
+        Insert: {
+          company_id?: string | null
+          created_at?: string
+          grace_until?: string | null
+          id?: string
+          kind: string
+          last_error?: string | null
+          payload?: Json
+          processed_at?: string | null
+          storage_object_id?: string | null
+          storage_path?: string | null
+        }
+        Update: {
+          company_id?: string | null
+          created_at?: string
+          grace_until?: string | null
+          id?: string
+          kind?: string
+          last_error?: string | null
+          payload?: Json
+          processed_at?: string | null
+          storage_object_id?: string | null
+          storage_path?: string | null
+        }
+        Relationships: []
+      }
       fsc_documents: {
         Row: {
           category: string
@@ -398,7 +554,6 @@ export type Database = {
           reviewed_at: string | null
           size: number | null
           status: Database["public"]["Enums"]["fsc_document_status"]
-          storage_path: string | null
           tool_id: string
           updated_at: string
           version: number
@@ -418,7 +573,6 @@ export type Database = {
           reviewed_at?: string | null
           size?: number | null
           status?: Database["public"]["Enums"]["fsc_document_status"]
-          storage_path?: string | null
           tool_id: string
           updated_at?: string
           version?: number
@@ -438,7 +592,6 @@ export type Database = {
           reviewed_at?: string | null
           size?: number | null
           status?: Database["public"]["Enums"]["fsc_document_status"]
-          storage_path?: string | null
           tool_id?: string
           updated_at?: string
           version?: number
@@ -448,8 +601,6 @@ export type Database = {
       fsc_ilo_assessments: {
         Row: {
           company_id: string
-          compiled_doc_path: string | null
-          compiled_pdf_path: string | null
           compiled_word_uploaded_at: string | null
           completed_at: string | null
           created_at: string
@@ -459,13 +610,10 @@ export type Database = {
           reference_year: number
           schema_version: string
           session_id: string | null
-          template_storage_path: string | null
           updated_at: string
         }
         Insert: {
           company_id: string
-          compiled_doc_path?: string | null
-          compiled_pdf_path?: string | null
           compiled_word_uploaded_at?: string | null
           completed_at?: string | null
           created_at?: string
@@ -475,13 +623,10 @@ export type Database = {
           reference_year: number
           schema_version?: string
           session_id?: string | null
-          template_storage_path?: string | null
           updated_at?: string
         }
         Update: {
           company_id?: string
-          compiled_doc_path?: string | null
-          compiled_pdf_path?: string | null
           compiled_word_uploaded_at?: string | null
           completed_at?: string | null
           created_at?: string
@@ -491,7 +636,6 @@ export type Database = {
           reference_year?: number
           schema_version?: string
           session_id?: string | null
-          template_storage_path?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -528,33 +672,27 @@ export type Database = {
       }
       fsc_logos: {
         Row: {
-          approval_email_path: string | null
           company_id: string
           created_at: string
           created_by: string | null
-          graphic_path: string | null
           id: string
           logo_type: Database["public"]["Enums"]["fsc_logo_type"]
           notes: string | null
           progressive_code: string
         }
         Insert: {
-          approval_email_path?: string | null
           company_id: string
           created_at?: string
           created_by?: string | null
-          graphic_path?: string | null
           id?: string
           logo_type: Database["public"]["Enums"]["fsc_logo_type"]
           notes?: string | null
           progressive_code?: string
         }
         Update: {
-          approval_email_path?: string | null
           company_id?: string
           created_at?: string
           created_by?: string | null
-          graphic_path?: string | null
           id?: string
           logo_type?: Database["public"]["Enums"]["fsc_logo_type"]
           notes?: string | null
@@ -568,27 +706,24 @@ export type Database = {
           generated_at: string
           id: string
           metadata: Json
-          storage_path: string | null
         }
         Insert: {
           company_product_group_id: string
           generated_at?: string
           id?: string
           metadata?: Json
-          storage_path?: string | null
         }
         Update: {
           company_product_group_id?: string
           generated_at?: string
           id?: string
           metadata?: Json
-          storage_path?: string | null
         }
         Relationships: []
       }
       fsc_product_groups_catalog: {
         Row: {
-          code: string | null
+          code: string
           created_at: string
           id: string
           is_active: boolean
@@ -597,7 +732,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          code?: string | null
+          code: string
           created_at?: string
           id?: string
           is_active?: boolean
@@ -606,7 +741,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          code?: string | null
+          code?: string
           created_at?: string
           id?: string
           is_active?: boolean
@@ -625,7 +760,6 @@ export type Database = {
           id: string
           mime_type: string | null
           size: number | null
-          storage_path: string
           subcontractor_id: string
         }
         Insert: {
@@ -636,7 +770,6 @@ export type Database = {
           id?: string
           mime_type?: string | null
           size?: number | null
-          storage_path: string
           subcontractor_id: string
         }
         Update: {
@@ -647,7 +780,6 @@ export type Database = {
           id?: string
           mime_type?: string | null
           size?: number | null
-          storage_path?: string
           subcontractor_id?: string
         }
         Relationships: []
@@ -739,7 +871,6 @@ export type Database = {
           id: string
           mime_type: string | null
           size: number | null
-          storage_path: string
           supplier_id: string
         }
         Insert: {
@@ -750,7 +881,6 @@ export type Database = {
           id?: string
           mime_type?: string | null
           size?: number | null
-          storage_path: string
           supplier_id: string
         }
         Update: {
@@ -761,7 +891,6 @@ export type Database = {
           id?: string
           mime_type?: string | null
           size?: number | null
-          storage_path?: string
           supplier_id?: string
         }
         Relationships: []
@@ -1363,6 +1492,8 @@ export type Database = {
       }
       fsc_current_user_company_ids: { Args: Record<string, never>; Returns: string[] }
       fsc_process_alert_outbox: { Args: { _tool_id: string }; Returns: number }
+      fsc_process_storage_reconciliation: { Args: Record<string, never>; Returns: Json }
+      fsc_expire_pending_storage_uploads: { Args: Record<string, never>; Returns: number }
       fsc_next_logo_code: { Args: { _company_id: string }; Returns: string }
     }
     Enums: {
@@ -1372,6 +1503,12 @@ export type Database = {
       fsc_control_frequency: "annual" | "semiannual"
       fsc_document_module: "gestione" | "ente"
       fsc_document_status: "active" | "archived"
+      fsc_storage_object_status:
+        | "pending_upload"
+        | "active"
+        | "delete_pending"
+        | "deleted"
+        | "broken"
       fsc_logo_type: "product" | "promotional"
       fsc_member_type: "owner" | "employee" | "consultant"
       fsc_product_claim: "fsc_100" | "fsc_mix" | "fsc_recycled"
@@ -1511,6 +1648,13 @@ export const Constants = {
       fsc_control_frequency: ["annual", "semiannual"],
       fsc_document_module: ["gestione", "ente"],
       fsc_document_status: ["active", "archived"],
+      fsc_storage_object_status: [
+        "pending_upload",
+        "active",
+        "delete_pending",
+        "deleted",
+        "broken",
+      ],
       fsc_logo_type: ["product", "promotional"],
       fsc_member_type: ["owner", "employee", "consultant"],
       fsc_product_claim: ["fsc_100", "fsc_mix", "fsc_recycled"],

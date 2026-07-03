@@ -37,6 +37,9 @@ export default async function CloudFscMasterSectionPage({
   const sp = await searchParams
   const page = parsePageParam(sp.page, 1)
   const q = parseSearchParam(sp.q)
+  const statusParam = typeof sp.status === 'string' ? sp.status : 'all'
+  const status =
+    statusParam === 'active' || statusParam === 'inactive' ? statusParam : 'all'
   const basePath = `/cloud-fsc/master/${section}`
 
   let usersRes: Awaited<ReturnType<typeof getToolUsersForAdminPaginated>> | null = null
@@ -58,7 +61,12 @@ export default async function CloudFscMasterSectionPage({
     fscCompaniesRes = await listFscCompaniesForAdmin()
     fscMembersByCompany = await listFscMembersByCompanyForAdmin()
   } else if (section === 'product-groups') {
-    productGroupsCatalogRes = await listFscProductGroupsCatalogAdmin()
+    productGroupsCatalogRes = await listFscProductGroupsCatalogAdmin({
+      page,
+      pageSize: PAGE_SIZE,
+      q,
+      status,
+    })
   }
 
   const error =
@@ -74,7 +82,11 @@ export default async function CloudFscMasterSectionPage({
     )
   }
 
-  const totalCount = usersRes?.totalCount ?? emailSupervisionRes?.totalCount ?? 0
+  const totalCount =
+    usersRes?.totalCount ??
+    emailSupervisionRes?.totalCount ??
+    productGroupsCatalogRes?.data?.totalCount ??
+    0
   const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1
 
   if (section === 'product-groups') {
@@ -86,8 +98,13 @@ export default async function CloudFscMasterSectionPage({
           </Link>
         </Button>
         <FscMasterProductGroupsSection
-          official={productGroupsCatalogRes?.data?.official ?? []}
-          unofficial={productGroupsCatalogRes?.data?.unofficial ?? []}
+          catalog={productGroupsCatalogRes?.data?.rows ?? []}
+          page={page}
+          totalPages={totalPages}
+          totalCount={productGroupsCatalogRes?.data?.totalCount ?? 0}
+          q={q}
+          status={status}
+          basePath={basePath}
         />
       </div>
     )

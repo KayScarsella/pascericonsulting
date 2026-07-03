@@ -8,7 +8,7 @@ import { useState } from "react"
 import { 
   Menu, X, LogOut, Home, FileText, ShieldAlert, Search, 
   Database, Lock, BookOpen, UserCheck, Settings, Map,
-  ClipboardList, Image as ImageIcon, TrendingUp, Users
+  ClipboardList, Image as ImageIcon, TrendingUp, Users, User
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -31,6 +31,7 @@ const ICON_MAP = {
   ImageIcon,
   TrendingUp,
   Users,
+  User,
   Menu, // Utile se serve altrove
   LogOut
 }
@@ -52,9 +53,11 @@ interface ToolNavbarProps {
   items: NavItem[]      
   userRole: string
   toolbarExtra?: React.ReactNode
+  /** Rendered before logo / tool name (e.g. settings gear). */
+  headerLeading?: React.ReactNode
 }
 
-export function ToolNavbar({ toolName, basePath, items, userRole, toolbarExtra }: ToolNavbarProps) {
+export function ToolNavbar({ toolName, basePath, items, userRole, toolbarExtra, headerLeading }: ToolNavbarProps) {
   const pathname = usePathname()
   const [isOpen, setIsOpen] = useState(false)
 
@@ -83,6 +86,7 @@ export function ToolNavbar({ toolName, basePath, items, userRole, toolbarExtra }
           
           {/* Logo & Nome Tool */}
           <div className="flex items-center gap-2">
+            {headerLeading ? <div className="mr-1 shrink-0">{headerLeading}</div> : null}
             <div className="topbar-logo flex items-center justify-center rounded-md overflow-hidden">
               <Image src="/logo.png" alt="logo" width={96} height={32} className="h-8 w-auto" />
             </div>

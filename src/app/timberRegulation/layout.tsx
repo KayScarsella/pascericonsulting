@@ -7,6 +7,7 @@ const TIMBER_NAV_ITEMS: NavItem[] = [
   { label: 'Analisi Rischio', href: '/risk-analysis', iconName: 'ShieldAlert', minRole: 'premium' },
   { label: 'Cerca', href: '/search', iconName: 'Search', minRole: 'premium' },
   { label: 'Documentazione', href: '/documentation', iconName: 'FileText', minRole: 'standard' },
+  { label: 'Impostazioni', href: '/impostazioni', iconName: 'Settings', minRole: 'standard' },
   { label: 'Master', href: '/master', iconName: 'Database', minRole: 'admin' },
 ]
 

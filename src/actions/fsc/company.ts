@@ -150,7 +150,10 @@ export async function listUserFscCompanies(): Promise<FscCompany[]> {
 export async function createFscCompany(
   input: FscCompanyInput
 ): Promise<{ success: boolean; companyId?: string; error?: string }> {
-  await getToolAccess(CLOUD_FSC_TOOL_ID)
+  const { role } = await getToolAccess(CLOUD_FSC_TOOL_ID)
+  if (role !== 'premium' && role !== 'admin') {
+    return { success: false, error: 'Solo utenti premium possono creare un\'impresa FSC' }
+  }
 
   const supabase = await createClient()
   const { data: companyId, error } = await supabase.rpc('fsc_create_company_for_user', {

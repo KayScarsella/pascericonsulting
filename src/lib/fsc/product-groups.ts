@@ -1,6 +1,5 @@
 import { sanitizeFscDocumentFileName } from '@/lib/fsc/documents-upload'
 import type {
-  FscCompanyProductGroup,
   FscCompanyProductGroupWithDetails,
   FscProductGroupCatalog,
 } from '@/types/fsc'
@@ -16,12 +15,11 @@ export const FSC_PRODUCT_GROUP_STATUS_OPTIONS = [
 export type FscProductGroupStatusFilter = 'active' | 'inactive' | 'all'
 
 export function getFscProductGroupDisplayName(
-  group: Pick<FscCompanyProductGroup, 'custom_label'> & {
+  group: {
     catalog?: FscProductGroupCatalog | null
   }
 ): string {
   if (group.catalog?.name) return group.catalog.name
-  if (group.custom_label?.trim()) return group.custom_label.trim()
   return 'Gruppo senza nome'
 }
 

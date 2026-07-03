@@ -2,8 +2,8 @@ import { getToolAccess } from '@/lib/tool-auth'
 import { CLOUD_FSC_TOOL_ID } from '@/lib/constants'
 import { ToolNavbar, NavItem } from '@/components/ui/topBar'
 import { getFscCompanyContext } from '@/actions/fsc/company'
-import { CloudFscSetupRedirect } from '@/components/cloud-fsc/company/CloudFscSetupRedirect'
 import { FscCompanySwitcher } from '@/components/cloud-fsc/company/FscCompanySwitcher'
+import { FscNavbarSettingsButton } from '@/components/cloud-fsc/FscNavbarSettingsButton'
 
 const CLOUD_FSC_NAV_ITEMS: NavItem[] = [
   { label: 'Home', href: '', iconName: 'Home', minRole: 'standard' },
@@ -20,8 +20,12 @@ const CLOUD_FSC_NAV_ITEMS: NavItem[] = [
     iconName: 'TrendingUp',
     minRole: 'premium',
   },
-  { label: 'Impostazioni', href: '/impostazioni', iconName: 'Settings', minRole: 'standard' },
   { label: 'Master', href: '/master', iconName: 'Lock', minRole: 'admin' },
+]
+
+const ONBOARDING_NAV_ITEMS: NavItem[] = [
+  { label: 'Presentazione', href: '/presentazione', iconName: 'BookOpen', minRole: 'standard' },
+  { label: 'Configura impresa', href: '/setup', iconName: 'Settings', minRole: 'premium' },
 ]
 
 export default async function CloudFscLayout({
@@ -32,15 +36,15 @@ export default async function CloudFscLayout({
   const { role } = await getToolAccess(CLOUD_FSC_TOOL_ID)
   const companyCtx = await getFscCompanyContext()
 
-  const showSettings = Boolean(
-    companyCtx.data &&
-      (companyCtx.data.membership.member_type === 'owner' || role === 'admin')
-  )
+  const inOnboarding = Boolean(companyCtx.needsSetup && role !== 'admin')
 
-  const navItems = CLOUD_FSC_NAV_ITEMS.filter((item) => {
-    if (item.href === '/impostazioni') return showSettings
+  const navItems = (inOnboarding ? ONBOARDING_NAV_ITEMS : CLOUD_FSC_NAV_ITEMS).filter((item) => {
+    if (item.href === '/setup') return role === 'premium'
+    if (item.href === '/presentazione') return role !== 'premium'
     return true
   })
+
+  const headerLeading = inOnboarding ? undefined : <FscNavbarSettingsButton />
 
   const toolbarExtra =
     companyCtx.data && companyCtx.companies && companyCtx.companies.length > 0 ? (
@@ -52,13 +56,13 @@ export default async function CloudFscLayout({
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50">
-      <CloudFscSetupRedirect needsSetup={Boolean(companyCtx.needsSetup)} userRole={role} />
       <ToolNavbar
         toolName="CLOUD FSC"
         basePath="/cloud-fsc"
         userRole={role}
         items={navItems}
         toolbarExtra={toolbarExtra}
+        headerLeading={headerLeading}
       />
       <main className="mx-auto w-full max-w-7xl flex-1 p-4 sm:p-6 lg:p-8">{children}</main>
     </div>

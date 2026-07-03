@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
+  abortFscIloFileUpload,
   deleteFscIloAssessment,
   exportFscIloWord,
   finalizeFscIloFileUpload,
@@ -110,10 +111,23 @@ export function FscIloRowActions({ assessment, canEdit }: FscIloRowActionsProps)
 
     if (upload.error) {
       toast.error(upload.error)
+      if (prepared.storageObjectId) {
+        await abortFscIloFileUpload(year, fileKind, prepared.storageObjectId)
+      }
       return
     }
 
-    const finalized = await finalizeFscIloFileUpload(year, fileKind, prepared.storagePath)
+    const finalized = await finalizeFscIloFileUpload(
+      year,
+      fileKind,
+      prepared.storagePath,
+      prepared.storageObjectId!,
+      {
+        fileName: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        size: file.size,
+      }
+    )
     if (!finalized.success) {
       toast.error(finalized.error ?? 'Finalizzazione upload fallita')
       return
@@ -211,7 +225,7 @@ export function FscIloRowActions({ assessment, canEdit }: FscIloRowActionsProps)
               </Button>
             )}
 
-            {assessment.compiled_doc_path && (
+            {assessment.has_compiled_word && (
               <Button
                 type="button"
                 variant="ghost"
@@ -225,7 +239,7 @@ export function FscIloRowActions({ assessment, canEdit }: FscIloRowActionsProps)
               </Button>
             )}
 
-            {assessment.compiled_pdf_path && (
+            {assessment.has_compiled_pdf && (
               <Button
                 type="button"
                 variant="ghost"

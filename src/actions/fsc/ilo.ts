@@ -14,10 +14,14 @@ import { buildLegacyMigrationPayloads, hasLegacyFormData } from '@/lib/fsc/ilo/l
 import { FSC_ILO_GROUP_NAME } from '@/lib/fsc/ilo/question-ids'
 import { mergeFscIloFormData } from '@/lib/fsc/ilo/schema.v1'
 import {
-  buildFscIloCompiledDocPath,
-  buildFscIloCompiledPdfPath,
   FSC_ILO_SCHEMA_VERSION,
 } from '@/lib/fsc/ilo/storage-paths'
+import {
+  buildFscIloDomainPath,
+  createFscFileService,
+  FSC_STORAGE_OWNER_TYPES,
+  FSC_STORAGE_SLOTS,
+} from '@/lib/fsc/file-service'
 import { getFscIloStatus } from '@/lib/fsc/ilo/status'
 import {
   loadTaggedIloTemplateBuffer,
@@ -192,6 +196,7 @@ async function attachSignedUrls(
 ): Promise<FscIloAssessmentWithStatus> {
   const withSession = await ensureAssessmentSession(assessment, userId)
   const supabase = await createClient()
+  const fileService = createFscFileService(supabase)
 
   if (withSession.session_id) {
     const { data: session } = await supabase
@@ -204,23 +209,30 @@ async function attachSignedUrls(
     }
   }
 
-  const paths = [withSession.compiled_doc_path, withSession.compiled_pdf_path].filter(
-    Boolean
-  ) as string[]
+  const wordFile = await fileService.getPathByOwner(
+    FSC_STORAGE_OWNER_TYPES.FSC_ILO_ASSESSMENT,
+    withSession.id,
+    FSC_STORAGE_SLOTS.COMPILED_WORD
+  )
+  const pdfFile = await fileService.getPathByOwner(
+    FSC_STORAGE_OWNER_TYPES.FSC_ILO_ASSESSMENT,
+    withSession.id,
+    FSC_STORAGE_SLOTS.COMPILED_PDF
+  )
+
+  const paths = [wordFile?.storagePath, pdfFile?.storagePath].filter(Boolean) as string[]
   const urls = await createFscDocumentSignedUrls(supabase, paths)
   const hasResponses = await sessionHasResponses(withSession.session_id)
   const hasLegacy = hasLegacyFormData(withSession.form_data)
 
   return {
     ...withSession,
+    has_compiled_word: !!wordFile,
+    has_compiled_pdf: !!pdfFile,
     form_data: mergeFscIloFormData(withSession.form_data as Record<string, unknown>),
     status: getFscIloStatus(withSession.completed_at, hasResponses || hasLegacy),
-    compiled_doc_url: withSession.compiled_doc_path
-      ? (urls[withSession.compiled_doc_path] ?? null)
-      : null,
-    compiled_pdf_url: withSession.compiled_pdf_path
-      ? (urls[withSession.compiled_pdf_path] ?? null)
-      : null,
+    compiled_doc_url: wordFile?.storagePath ? (urls[wordFile.storagePath] ?? null) : null,
+    compiled_pdf_url: pdfFile?.storagePath ? (urls[pdfFile.storagePath] ?? null) : null,
   }
 }
 
@@ -332,23 +344,15 @@ export async function deleteFscIloAssessment(
   if (!row) return { success: true }
 
   const supabase = await createClient()
+  const fileService = createFscFileService(supabase)
+
+  await fileService.deleteFilesByOwner(
+    FSC_STORAGE_OWNER_TYPES.FSC_ILO_ASSESSMENT,
+    row.id,
+    ctx.data.companyId
+  )
+
   const sessionId = row.session_id
-
-  const storagePaths = [
-    row.compiled_doc_path,
-    row.compiled_pdf_path,
-    row.template_storage_path,
-  ].filter(Boolean) as string[]
-
-  if (storagePaths.length > 0) {
-    const { error: storageError } = await supabase.storage
-      .from(FSC_BUCKET)
-      .remove(storagePaths)
-    if (storageError) {
-      console.error('deleteFscIloAssessment storage:', storageError)
-      return { success: false, error: storageError.message }
-    }
-  }
 
   if (sessionId) {
     const { error: deleteSessionError } = await supabase
@@ -428,6 +432,14 @@ export async function duplicateFscIloFromYear(
     return { success: false, error: 'Sessione destinazione non disponibile' }
   }
 
+  const supabaseForDup = await createClient()
+  const dupFileService = createFscFileService(supabaseForDup)
+  await dupFileService.deleteFilesByOwner(
+    FSC_STORAGE_OWNER_TYPES.FSC_ILO_ASSESSMENT,
+    targetWithSession.id,
+    ctx.data.companyId
+  )
+
   const supabase = await createClient()
   const { data: targetSession } = await supabase
     .from('assessment_sessions')
@@ -453,8 +465,6 @@ export async function duplicateFscIloFromYear(
     .update({
       duplicated_from_year: sourceYear,
       completed_at: null,
-      compiled_doc_path: null,
-      compiled_pdf_path: null,
       compiled_word_uploaded_at: null,
     })
     .eq('id', targetWithSession.id)
@@ -495,6 +505,7 @@ export async function exportFscIloWord(
   if (!row.session_id) return { success: false, error: 'Sessione non disponibile' }
 
   const supabase = await createClient()
+  const fileService = createFscFileService(supabase)
   const [{ data: questions }, { data: responses }] = await Promise.all([
     supabase
       .from('questions')
@@ -521,26 +532,62 @@ export async function exportFscIloWord(
       referenceYear
     )
 
-    const storagePath = buildFscIloCompiledDocPath(ctx.data.companyId, referenceYear)
+    const storageObjectId = crypto.randomUUID()
+    const { domain, entityId } = buildFscIloDomainPath(referenceYear, row.id)
+    const fileName = 'autovalutazione_ilo.docx'
+    const outputBuffer = Buffer.from(output)
+
+    const prepared = await fileService.prepareUpload({
+      companyId: ctx.data.companyId,
+      domain,
+      entityId,
+      fileName,
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      fileSize: outputBuffer.byteLength,
+      createdBy: ctx.data.userId,
+      ownerType: FSC_STORAGE_OWNER_TYPES.FSC_ILO_ASSESSMENT,
+      ownerId: row.id,
+      slot: FSC_STORAGE_SLOTS.COMPILED_WORD,
+      storageObjectId,
+    })
+
+    if (!prepared.success) {
+      return { success: false, error: prepared.error }
+    }
+
+    const storagePath = prepared.data.storagePath
+
+    const { error: uploadError } = await supabase.storage
+      .from(FSC_BUCKET)
+      .upload(storagePath, outputBuffer, {
+        contentType:
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        upsert: true,
+      })
+
+    if (uploadError) {
+      await fileService.abortUpload(storageObjectId, ctx.data.companyId)
+      return { success: false, error: uploadError.message }
+    }
+
+    const finalized = await fileService.finalizeUpload(storageObjectId, ctx.data.companyId, {
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      sizeBytes: outputBuffer.byteLength,
+    })
+
+    if (!finalized.success) {
+      return { success: false, error: finalized.error }
+    }
+
     const { error: pathError } = await supabase
       .from('fsc_ilo_assessments')
       .update({
-        compiled_doc_path: storagePath,
         compiled_word_uploaded_at: new Date().toISOString(),
       })
       .eq('id', row.id)
       .eq('company_id', ctx.data.companyId)
 
     if (pathError) return { success: false, error: pathError.message }
-
-    const { error: uploadError } = await supabase.storage
-      .from(FSC_BUCKET)
-      .upload(storagePath, output, {
-        contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        upsert: true,
-      })
-
-    if (uploadError) return { success: false, error: uploadError.message }
 
     const urls = await createFscDocumentSignedUrls(supabase, [storagePath])
     revalidateIloPaths(referenceYear)
@@ -564,7 +611,12 @@ export type PrepareFscIloUploadInput = {
 
 export async function prepareFscIloFileUpload(
   input: PrepareFscIloUploadInput
-): Promise<{ success: boolean; storagePath?: string; error?: string }> {
+): Promise<{
+  success: boolean
+  storagePath?: string
+  storageObjectId?: string
+  error?: string
+}> {
   const ctx = await requireFscContext()
   if (!ctx.success) return { success: false, error: ctx.error }
   const editError = assertCanEdit(ctx.data)
@@ -597,35 +649,81 @@ export async function prepareFscIloFileUpload(
     if (!row) return { success: false, error: 'Autovalutazione non trovata' }
   }
 
-  const storagePath =
-    input.fileKind === 'pdf'
-      ? buildFscIloCompiledPdfPath(ctx.data.companyId, input.referenceYear, input.fileName)
-      : buildFscIloCompiledDocPath(ctx.data.companyId, input.referenceYear, input.fileName)
+  const supabase = await createClient()
+  const fileService = createFscFileService(supabase)
+  const storageObjectId = crypto.randomUUID()
+  const { domain, entityId } = buildFscIloDomainPath(input.referenceYear, row.id)
+  const slot =
+    input.fileKind === 'pdf' ? FSC_STORAGE_SLOTS.COMPILED_PDF : FSC_STORAGE_SLOTS.COMPILED_WORD
 
-  const updatePayload =
-    input.fileKind === 'pdf'
-      ? { compiled_pdf_path: storagePath }
-      : {
-          compiled_doc_path: storagePath,
-          compiled_word_uploaded_at: new Date().toISOString(),
-        }
+  const prepared = await fileService.prepareUpload({
+    companyId: ctx.data.companyId,
+    domain,
+    entityId,
+    fileName: input.fileName,
+    mimeType: input.mimeType,
+    fileSize: input.fileSize,
+    createdBy: ctx.data.userId,
+    ownerType: FSC_STORAGE_OWNER_TYPES.FSC_ILO_ASSESSMENT,
+    ownerId: row.id,
+    slot,
+    storageObjectId,
+  })
+
+  if (!prepared.success) {
+    return { success: false, error: prepared.error }
+  }
+
+  const storagePath = prepared.data.storagePath
+
+  if (input.fileKind === 'word') {
+    const { error } = await supabase
+      .from('fsc_ilo_assessments')
+      .update({ compiled_word_uploaded_at: new Date().toISOString() })
+      .eq('id', row.id)
+      .eq('company_id', ctx.data.companyId)
+
+    if (error) {
+      await fileService.abortUpload(storageObjectId, ctx.data.companyId)
+      return { success: false, error: error.message }
+    }
+  }
+
+  return { success: true, storagePath, storageObjectId }
+}
+
+export async function abortFscIloFileUpload(
+  referenceYear: number,
+  fileKind: 'word' | 'pdf',
+  storageObjectId: string
+): Promise<{ success: boolean; error?: string }> {
+  const ctx = await requireFscContext()
+  if (!ctx.success) return { success: false, error: ctx.error }
+
+  const row = await getAssessmentRow(ctx.data.companyId, referenceYear)
+  if (!row) return { success: true }
 
   const supabase = await createClient()
-  const { error } = await supabase
-    .from('fsc_ilo_assessments')
-    .update(updatePayload)
-    .eq('id', row.id)
-    .eq('company_id', ctx.data.companyId)
+  const fileService = createFscFileService(supabase)
+  await fileService.abortUpload(storageObjectId, ctx.data.companyId)
 
-  if (error) return { success: false, error: error.message }
+  if (fileKind === 'word') {
+    await supabase
+      .from('fsc_ilo_assessments')
+      .update({ compiled_word_uploaded_at: null })
+      .eq('id', row.id)
+      .eq('company_id', ctx.data.companyId)
+  }
 
-  return { success: true, storagePath }
+  return { success: true }
 }
 
 export async function finalizeFscIloFileUpload(
   referenceYear: number,
   fileKind: 'word' | 'pdf',
-  storagePath: string
+  storagePath: string,
+  storageObjectId: string,
+  meta?: { fileName: string; mimeType: string; size: number }
 ): Promise<{ success: boolean; error?: string }> {
   const ctx = await requireFscContext()
   if (!ctx.success) return { success: false, error: ctx.error }
@@ -633,15 +731,25 @@ export async function finalizeFscIloFileUpload(
   const row = await getAssessmentRow(ctx.data.companyId, referenceYear)
   if (!row) return { success: false, error: 'Autovalutazione non trovata' }
 
-  const expectedPath = fileKind === 'pdf' ? row.compiled_pdf_path : row.compiled_doc_path
-  if (expectedPath !== storagePath) {
+  const supabase = await createClient()
+  const fileService = createFscFileService(supabase)
+  const resolved = await fileService.getPathByOwner(
+    FSC_STORAGE_OWNER_TYPES.FSC_ILO_ASSESSMENT,
+    row.id,
+    fileKind === 'pdf' ? FSC_STORAGE_SLOTS.COMPILED_PDF : FSC_STORAGE_SLOTS.COMPILED_WORD
+  )
+
+  if (!resolved || resolved.storagePath !== storagePath) {
     return { success: false, error: 'Path storage non corrispondente' }
   }
 
-  const supabase = await createClient()
-  const { error } = await supabase.storage.from(FSC_BUCKET).createSignedUrl(storagePath, 60)
-  if (error) {
-    return { success: false, error: 'File non trovato in storage. Riprova l\'upload.' }
+  const finalized = await fileService.finalizeUpload(storageObjectId, ctx.data.companyId, {
+    mimeType: meta?.mimeType,
+    sizeBytes: meta?.size,
+  })
+
+  if (!finalized.success) {
+    return { success: false, error: finalized.error }
   }
 
   revalidateIloPaths(referenceYear)
@@ -702,15 +810,22 @@ export async function getFscIloCompiledDownloadUrl(
   const row = await getAssessmentRow(ctx.data.companyId, referenceYear)
   if (!row) return { success: false, error: 'Autovalutazione non trovata' }
 
-  const path = fileKind === 'pdf' ? row.compiled_pdf_path : row.compiled_doc_path
-  if (!path) return { success: false, error: 'File non disponibile' }
-
   const supabase = await createClient()
-  const urls = await createFscDocumentSignedUrls(supabase, [path])
-  const url = urls[path]
-  if (!url) return { success: false, error: 'Download non disponibile' }
+  const fileService = createFscFileService(supabase)
+  const slot =
+    fileKind === 'pdf' ? FSC_STORAGE_SLOTS.COMPILED_PDF : FSC_STORAGE_SLOTS.COMPILED_WORD
+  const resolved = await fileService.getPathByOwner(
+    FSC_STORAGE_OWNER_TYPES.FSC_ILO_ASSESSMENT,
+    row.id,
+    slot
+  )
 
-  return { success: true, url }
+  if (resolved?.storageObjectId) {
+    const dl = await fileService.getDownloadUrl(resolved.storageObjectId, ctx.data.companyId)
+    if (dl.success) return { success: true, url: dl.url }
+  }
+
+  return { success: false, error: 'File non disponibile' }
 }
 
 function validateFscIloFileMetadata(meta: {

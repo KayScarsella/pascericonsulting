@@ -6,7 +6,7 @@ import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   createFscCompanyProductGroup,
-  listFscOfficialProductGroupsCatalog,
+  listFscProductGroupsCatalog,
   searchFscProductGroupsCatalog,
   updateFscCompanyProductGroup,
   type FscCompanyProductGroupInput,
@@ -46,17 +46,14 @@ type FscProductGroupFormDialogProps = {
 }
 
 type FormState = FscCompanyProductGroupInput & {
-  mode: 'catalog' | 'custom'
   catalogSearch: string
   catalogGroupId: string
   claimsSet: Set<FscProductClaim>
 }
 
 const emptyForm = (): FormState => ({
-  mode: 'catalog',
   catalogSearch: '',
   catalogGroupId: '',
-  custom_label: '',
   species_id: null,
   required_inputs: '',
   claimsSet: new Set(),
@@ -72,21 +69,19 @@ export function FscProductGroupFormDialog({
   const isEdit = !!group
   const [loading, setLoading] = useState(false)
   const [form, setForm] = useState(emptyForm)
-  const [officialCatalog, setOfficialCatalog] = useState<FscProductGroupCatalog[]>([])
+  const [catalog, setCatalog] = useState<FscProductGroupCatalog[]>([])
   const [searchResults, setSearchResults] = useState<FscProductGroupCatalog[]>([])
   const [searching, setSearching] = useState(false)
 
   useEffect(() => {
     if (!open) return
 
-    void listFscOfficialProductGroupsCatalog().then(setOfficialCatalog)
+    void listFscProductGroupsCatalog().then(setCatalog)
 
     if (group) {
       setForm({
-        mode: group.catalog_group_id ? 'catalog' : 'custom',
         catalogSearch: '',
-        catalogGroupId: group.catalog_group_id ?? '',
-        custom_label: group.custom_label ?? '',
+        catalogGroupId: group.catalog_group_id,
         species_id: group.species_id,
         required_inputs: group.required_inputs ?? '',
         claimsSet: new Set(group.claims),
@@ -98,7 +93,7 @@ export function FscProductGroupFormDialog({
   }, [open, group])
 
   useEffect(() => {
-    if (!open || isEdit || form.mode !== 'catalog') return
+    if (!open || isEdit) return
 
     const timer = setTimeout(() => {
       setSearching(true)
@@ -108,13 +103,13 @@ export function FscProductGroupFormDialog({
     }, 300)
 
     return () => clearTimeout(timer)
-  }, [open, isEdit, form.mode, form.catalogSearch])
+  }, [open, isEdit, form.catalogSearch])
 
   const catalogOptions = useMemo(() => {
-    if (isEdit) return officialCatalog
+    if (isEdit) return catalog
     if (form.catalogSearch.trim()) return searchResults
-    return officialCatalog
-  }, [isEdit, form.catalogSearch, officialCatalog, searchResults])
+    return catalog
+  }, [isEdit, form.catalogSearch, catalog, searchResults])
 
   const toggleClaim = (claim: FscProductClaim) => {
     setForm((prev) => {
@@ -130,19 +125,14 @@ export function FscProductGroupFormDialog({
     setLoading(true)
     try {
       const input: FscCompanyProductGroupInput = {
-        catalog_group_id: form.mode === 'catalog' ? form.catalogGroupId || null : null,
-        custom_label: form.mode === 'custom' ? form.custom_label?.trim() || null : null,
+        catalog_group_id: form.catalogGroupId || null,
         species_id: form.species_id || null,
         required_inputs: form.required_inputs?.trim() || null,
         claims: [...form.claimsSet],
       }
 
-      if (!isEdit && form.mode === 'catalog' && !input.catalog_group_id) {
-        toast.error('Seleziona un gruppo dal catalogo FSC')
-        return
-      }
-      if (!isEdit && form.mode === 'custom' && !input.custom_label) {
-        toast.error('Inserisci un nome per il gruppo personalizzato')
+      if (!isEdit && !input.catalog_group_id) {
+        toast.error('Seleziona un gruppo dal catalogo FSC ufficiale')
         return
       }
 
@@ -172,36 +162,12 @@ export function FscProductGroupFormDialog({
           <DialogDescription>
             {isEdit
               ? 'Aggiorna claim, specie e input necessari.'
-              : 'Attiva un gruppo dal catalogo FSC o crea un gruppo personalizzato.'}
+              : 'Attiva un gruppo dal catalogo FSC ufficiale.'}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {!isEdit && (
-            <div className="space-y-3">
-              <Label>Tipo gruppo</Label>
-              <div className="flex gap-4">
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="radio"
-                    checked={form.mode === 'catalog'}
-                    onChange={() => setForm((p) => ({ ...p, mode: 'catalog' }))}
-                  />
-                  Da catalogo FSC
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="radio"
-                    checked={form.mode === 'custom'}
-                    onChange={() => setForm((p) => ({ ...p, mode: 'custom' }))}
-                  />
-                  Personalizzato
-                </label>
-              </div>
-            </div>
-          )}
-
-          {!isEdit && form.mode === 'catalog' && (
             <>
               <div className="space-y-2">
                 <Label htmlFor="catalog-search">Ricerca per parola chiave</Label>
@@ -213,9 +179,7 @@ export function FscProductGroupFormDialog({
                     setForm((p) => ({ ...p, catalogSearch: e.target.value, catalogGroupId: '' }))
                   }
                 />
-                {searching && (
-                  <p className="text-xs text-slate-500">Ricerca in corso…</p>
-                )}
+                {searching && <p className="text-xs text-slate-500">Ricerca in corso…</p>}
               </div>
 
               <div className="space-y-2">
@@ -235,8 +199,7 @@ export function FscProductGroupFormDialog({
                     ) : (
                       catalogOptions.map((item) => (
                         <SelectItem key={item.id} value={item.id}>
-                          {item.code ? `${item.code} — ` : ''}
-                          {item.name}
+                          {item.code} — {item.name}
                         </SelectItem>
                       ))
                     )}
@@ -246,22 +209,10 @@ export function FscProductGroupFormDialog({
             </>
           )}
 
-          {!isEdit && form.mode === 'custom' && (
-            <div className="space-y-2">
-              <Label htmlFor="custom-label">Nome gruppo personalizzato</Label>
-              <Input
-                id="custom-label"
-                value={form.custom_label ?? ''}
-                onChange={(e) => setForm((p) => ({ ...p, custom_label: e.target.value }))}
-                placeholder="Es. Prodotto speciale non in catalogo"
-              />
-            </div>
-          )}
-
           {isEdit && (
             <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
               <span className="font-medium">Gruppo: </span>
-              {group?.catalog?.name ?? group?.custom_label ?? '—'}
+              {group?.catalog?.name ?? '—'}
               {group?.catalog?.code ? ` (${group.catalog.code})` : ''}
             </div>
           )}
@@ -292,9 +243,7 @@ export function FscProductGroupFormDialog({
                 placeholder: 'Cerca specie…',
               }}
               value={form.species_id}
-              onChange={(v) =>
-                setForm((p) => ({ ...p, species_id: v ? v : null }))
-              }
+              onChange={(v) => setForm((p) => ({ ...p, species_id: v ? v : null }))}
               clearLabel="Nessuna specie"
             />
           </div>
