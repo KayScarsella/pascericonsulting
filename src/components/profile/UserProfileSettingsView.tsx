@@ -172,7 +172,7 @@ export function UserProfileSettingsView({ profile }: UserProfileSettingsViewProp
                 <Label htmlFor="full_name">Nome completo</Label>
                 <Input
                   id="full_name"
-                  value={form.full_name}
+                  value={form.full_name ?? ''}
                   onChange={(e) => updateField('full_name', e.target.value)}
                   disabled={pending}
                   required
