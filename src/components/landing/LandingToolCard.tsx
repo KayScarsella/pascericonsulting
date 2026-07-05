@@ -39,13 +39,16 @@ export function LandingToolCard({
   const isConfigured = !!targetUrl
   const isLocked = !hasAccess && isActive
   const isInDevelopment = !hasAccess && !isActive
+  const isPreview = hasAccess && !isActive
 
   return (
     <Card
       className={`group relative flex flex-col overflow-hidden border-slate-200 transition-all duration-300 ${
         hasAccess && isActive && isConfigured
           ? "hover:border-blue-400 hover:shadow-lg hover:shadow-blue-100/50"
-          : isLocked
+          : isPreview && isConfigured
+            ? "border-amber-200 bg-gradient-to-b from-white to-amber-50/30 hover:border-amber-300 hover:shadow-md"
+            : isLocked
             ? "border-amber-200 bg-gradient-to-b from-white to-amber-50/40"
             : "border-slate-100 bg-slate-50/50 opacity-80"
       }`}
@@ -56,6 +59,7 @@ export function LandingToolCard({
         isAdmin={isAdmin}
         isLocked={isLocked}
         isInDevelopment={isInDevelopment}
+        isPreview={isPreview}
       />
 
       <div className={isInDevelopment || (!hasAccess && !isActive) ? "grayscale filter" : ""}>
@@ -80,6 +84,7 @@ export function LandingToolCard({
               isAdmin={isAdmin}
               isLocked={isLocked}
               isInDevelopment={isInDevelopment}
+              isPreview={isPreview}
             />
           </div>
           <CardTitle
@@ -106,6 +111,12 @@ export function LandingToolCard({
           <div className="flex items-start gap-2 rounded-md bg-slate-100 p-2 text-xs text-slate-600">
             <Clock className="mt-0.5 h-3 w-3 shrink-0" />
             Nuovo modulo in fase di sviluppo: sarà disponibile a breve.
+          </div>
+        )}
+        {isPreview && (
+          <div className="flex items-start gap-2 rounded-md bg-amber-50 p-2 text-xs text-amber-800">
+            <Sparkles className="mt-0.5 h-3 w-3 shrink-0" />
+            Versione anteprima: accesso in base al ruolo assegnato.
           </div>
         )}
         {hasAccess && isActive && !isConfigured && (
@@ -137,12 +148,14 @@ function StatusBadge({
   isAdmin,
   isLocked,
   isInDevelopment,
+  isPreview,
 }: {
   hasAccess: boolean
   isActive: boolean
   isAdmin: boolean
   isLocked: boolean
   isInDevelopment: boolean
+  isPreview: boolean
 }) {
   if (isLocked) {
     return (
@@ -168,15 +181,21 @@ function StatusBadge({
     return null
   }
 
+  if (isPreview) {
+    return (
+      <Badge variant="secondary" className="bg-amber-100 text-amber-800 hover:bg-amber-100">
+        <span className="flex items-center gap-1">
+          <Sparkles className="h-3 w-3" /> Anteprima
+        </span>
+      </Badge>
+    )
+  }
+
   return (
     <Badge
       variant="secondary"
       className={`${
-        !isActive
-          ? "bg-slate-200 text-slate-500"
-          : isAdmin
-            ? "bg-amber-100 text-amber-700"
-            : "bg-slate-100 text-slate-600"
+        isAdmin ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"
       } hover:bg-opacity-100`}
     >
       {isAdmin ? (
@@ -260,29 +279,29 @@ function ToolAction({
     )
   }
 
-  if (isAdmin && isConfigured) {
+  if (!isActive) {
+    if (isConfigured) {
+      return (
+        <Button
+          asChild
+          className="w-full gap-2 border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
+          variant="outline"
+        >
+          <Link href={targetUrl!}>
+            Anteprima <ExternalLink className="h-4 w-4 opacity-70" />
+          </Link>
+        </Button>
+      )
+    }
+
     return (
-      <Button
-        asChild
-        className="w-full gap-2 border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
-        variant="outline"
-      >
-        <Link href={targetUrl!}>
-          Anteprima admin <ExternalLink className="h-4 w-4 opacity-70" />
-        </Link>
+      <Button disabled className="w-full gap-2" variant="outline">
+        Errore Link
       </Button>
     )
   }
 
-  return (
-    <Button
-      disabled
-      className="w-full gap-2 bg-slate-200 text-slate-500 hover:bg-slate-200"
-      variant="secondary"
-    >
-      <Lock className="h-4 w-4" /> Prossimamente
-    </Button>
-  )
+  return null
 }
 
 function Accent({
@@ -291,16 +310,19 @@ function Accent({
   isAdmin,
   isLocked,
   isInDevelopment,
+  isPreview,
 }: {
   hasAccess: boolean
   isActive: boolean
   isAdmin: boolean
   isLocked: boolean
   isInDevelopment: boolean
+  isPreview: boolean
 }) {
   let color = "bg-slate-300"
   if (isLocked) color = "bg-amber-400"
   else if (isInDevelopment) color = "bg-slate-300"
+  else if (isPreview) color = "bg-amber-400"
   else if (hasAccess && isActive) color = isAdmin ? "bg-amber-500" : "bg-blue-500"
 
   return <div className={`h-1.5 w-full ${color}`} />

@@ -1,6 +1,10 @@
 -- =============================================================================
 -- CLOUD FSC — run in Supabase SQL Editor as postgres / service role
 -- Tool id (must match src/lib/constants.ts CLOUD_FSC_TOOL_ID)
+--
+-- Preview mode: tools.is_active = false (migration 20260705100000_cloud_fsc_preview_mode).
+-- Con is_active = false il tool resta visibile in landing a tutti; chi ha riga in
+-- tool_access entra con il proprio ruolo (standard/premium/admin), non solo admin.
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -43,6 +47,7 @@ group by role;
 
 -- -----------------------------------------------------------------------------
 -- 4) Launch: enable tool for all assigned roles (run when ready for GA)
+--     Rimuove anteprima: banner in-app e badge landing spariscono automaticamente.
 -- -----------------------------------------------------------------------------
 -- update public.tools
 -- set is_active = true

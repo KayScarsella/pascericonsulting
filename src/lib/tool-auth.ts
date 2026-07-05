@@ -35,7 +35,7 @@ export const getToolAccess = cache(async (toolId: string) => {
     redirect("/onboarding")
   }
 
-  // 2. Verifica ruolo e stato tool (inactive => solo admin sulle route)
+  // 2. Verifica ruolo e stato tool (inactive = anteprima; accesso per chi ha tool_access)
   const { data: access, error } = await supabase
     .from("tool_access")
     .select(`
@@ -56,13 +56,10 @@ export const getToolAccess = cache(async (toolId: string) => {
   const isToolActive = tool?.is_active === true
   const role = access.role as ToolRole
 
-  if (!isToolActive && role !== "admin") {
-    redirect("/landingPage")
-  }
-
   return {
     role,
     userId: user.id,
+    isToolActive,
   }
 })
 

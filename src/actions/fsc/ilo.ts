@@ -733,13 +733,19 @@ export async function finalizeFscIloFileUpload(
 
   const supabase = await createClient()
   const fileService = createFscFileService(supabase)
-  const resolved = await fileService.getPathByOwner(
-    FSC_STORAGE_OWNER_TYPES.FSC_ILO_ASSESSMENT,
-    row.id,
-    fileKind === 'pdf' ? FSC_STORAGE_SLOTS.COMPILED_PDF : FSC_STORAGE_SLOTS.COMPILED_WORD
-  )
 
-  if (!resolved || resolved.storagePath !== storagePath) {
+  const { data: pendingObject } = await supabase
+    .from('fsc_storage_objects')
+    .select('id, storage_path, status')
+    .eq('id', storageObjectId)
+    .eq('company_id', ctx.data.companyId)
+    .maybeSingle()
+
+  if (
+    !pendingObject ||
+    pendingObject.status !== 'pending_upload' ||
+    pendingObject.storage_path !== storagePath
+  ) {
     return { success: false, error: 'Path storage non corrispondente' }
   }
 

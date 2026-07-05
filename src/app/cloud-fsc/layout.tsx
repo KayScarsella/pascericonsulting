@@ -4,6 +4,7 @@ import { ToolNavbar, NavItem } from '@/components/ui/topBar'
 import { getFscCompanyContext } from '@/actions/fsc/company'
 import { FscCompanySwitcher } from '@/components/cloud-fsc/company/FscCompanySwitcher'
 import { FscNavbarSettingsButton } from '@/components/cloud-fsc/FscNavbarSettingsButton'
+import { ToolPreviewBanner } from '@/components/ToolPreviewBanner'
 
 const CLOUD_FSC_NAV_ITEMS: NavItem[] = [
   { label: 'Home', href: '', iconName: 'Home', minRole: 'standard' },
@@ -33,7 +34,7 @@ export default async function CloudFscLayout({
 }: {
   children: React.ReactNode
 }) {
-  const { role } = await getToolAccess(CLOUD_FSC_TOOL_ID)
+  const { role, isToolActive } = await getToolAccess(CLOUD_FSC_TOOL_ID)
   const companyCtx = await getFscCompanyContext()
 
   const inOnboarding = Boolean(companyCtx.needsSetup && role !== 'admin')
@@ -64,6 +65,7 @@ export default async function CloudFscLayout({
         toolbarExtra={toolbarExtra}
         headerLeading={headerLeading}
       />
+      {!isToolActive && <ToolPreviewBanner toolName="CLOUD FSC" />}
       <main className="mx-auto w-full max-w-7xl flex-1 p-4 sm:p-6 lg:p-8">{children}</main>
     </div>
   )

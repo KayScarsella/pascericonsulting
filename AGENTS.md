@@ -10,6 +10,7 @@ Questo file serve a rendere le prossime domande “complete” e sempre contestu
 - **Routing/UI**: `src/app/**`
 - **Server Actions (Supabase)**: `src/actions/**`
 - **RBAC/permessi tool**: `src/lib/tool-auth.ts`
+- **Anteprima tool**: `tools.is_active = false` → catalogo visibile a tutti; ingresso solo con riga `tool_access` (ruolo standard/premium/admin). Launch GA: `is_active = true` (snippet `supabase/snippets/cloud-fsc-tool-access-and-launch.sql` §4).
 - **Supabase client + session refresh**: `src/utils/supabase/**`
 - **UI library (shadcn)**: `src/components/ui/**`
 - **Area Documenti**: `src/actions/documents.ts` + tabella `documents` + bucket `documents`

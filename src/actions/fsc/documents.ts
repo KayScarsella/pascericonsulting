@@ -351,11 +351,6 @@ async function finalizeUploadForModule(
     return { success: false, error: 'Documento non trovato' }
   }
 
-  const storagePath = await resolveDocumentStoragePath(documentId)
-  if (!storagePath) {
-    return { success: false, error: 'Documento non trovato' }
-  }
-
   const validationError = validateFscDocumentFileMetadata({
     fileName: meta.fileName,
     fileSize: meta.size,
