@@ -55,7 +55,7 @@ export async function processTimberValutazione(
   if (!user) return { error: "Non autenticato" }
 
   try {
-    await validateSessionAccess(supabase, TIMBER_TOOL_ID, sessionId)
+    const { sessionOwnerId } = await validateSessionAccess(supabase, TIMBER_TOOL_ID, sessionId)
     const hasFlegtOrCites = await hasTimberFlegtOrCitesYes(supabase, sessionId)
     const effectiveExceptionData: ValutazioneException | undefined = hasFlegtOrCites
       ? {
@@ -222,7 +222,7 @@ export async function processTimberValutazione(
         };
 
         return {
-          user_id: user.id,
+          user_id: sessionOwnerId,
           tool_id: TIMBER_TOOL_ID,
           session_type: 'analisi_finale',
           parent_session_id: sessionId,
@@ -261,14 +261,14 @@ export async function processTimberValutazione(
           const hasSanction = sanctionMap.get(meta.country) ?? false;
 
           prefillPayloads.push(
-            { user_id: user.id, tool_id: TIMBER_TOOL_ID, session_id: sess.id, question_id: Q_SPECIES, answer_text: meta.specie, updated_at: isoDate },
-            { user_id: user.id, tool_id: TIMBER_TOOL_ID, session_id: sess.id, question_id: Q_COUNTRY, answer_text: meta.country, updated_at: isoDate },
-            { user_id: user.id, tool_id: TIMBER_TOOL_ID, session_id: sess.id, question_id: Q_CONFLICTS, answer_text: hasConflicts ? 'si' : 'no', updated_at: isoDate },
-            { user_id: user.id, tool_id: TIMBER_TOOL_ID, session_id: sess.id, question_id: Q_SANCTIONS, answer_text: hasSanction ? 'si' : 'no', updated_at: isoDate }
+            { user_id: sessionOwnerId, tool_id: TIMBER_TOOL_ID, session_id: sess.id, question_id: Q_SPECIES, answer_text: meta.specie, updated_at: isoDate },
+            { user_id: sessionOwnerId, tool_id: TIMBER_TOOL_ID, session_id: sess.id, question_id: Q_COUNTRY, answer_text: meta.country, updated_at: isoDate },
+            { user_id: sessionOwnerId, tool_id: TIMBER_TOOL_ID, session_id: sess.id, question_id: Q_CONFLICTS, answer_text: hasConflicts ? 'si' : 'no', updated_at: isoDate },
+            { user_id: sessionOwnerId, tool_id: TIMBER_TOOL_ID, session_id: sess.id, question_id: Q_SANCTIONS, answer_text: hasSanction ? 'si' : 'no', updated_at: isoDate }
           );
 
           if (corruptionCode) {
-            prefillPayloads.push({ user_id: user.id, tool_id: TIMBER_TOOL_ID, session_id: sess.id, question_id: Q_CORRUPTION, answer_text: corruptionCode, updated_at: isoDate });
+            prefillPayloads.push({ user_id: sessionOwnerId, tool_id: TIMBER_TOOL_ID, session_id: sess.id, question_id: Q_CORRUPTION, answer_text: corruptionCode, updated_at: isoDate });
           }
         }
 

@@ -58,10 +58,13 @@ export default async function RiskAnalysisPage({
       const { data: { user: actionUser } } = await supabaseAction.auth.getUser()
       if (!actionUser) redirect('/login')
 
+      const { getEffectiveToolUserId } = await import('@/lib/tool-impersonation')
+      const effectiveUserId = await getEffectiveToolUserId(EUDR_TOOL_ID)
+
       const { data: newSession, error: createError } = await supabaseAction
         .from('assessment_sessions')
         .insert({
-          user_id: actionUser.id,
+          user_id: effectiveUserId,
           tool_id: EUDR_TOOL_ID,
           session_type: 'verifica',
           status: 'in_progress'

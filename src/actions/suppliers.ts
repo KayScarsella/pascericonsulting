@@ -35,12 +35,17 @@ export async function createSupplier(
     return { success: false, error: "Utente non autenticato" }
   }
 
+  const { getEffectiveToolUserId, isImpersonationAllowedTool } = await import('@/lib/tool-impersonation')
+  const ownerUserId = isImpersonationAllowedTool(toolId)
+    ? await getEffectiveToolUserId(toolId)
+    : userData.user.id
+
   const { data, error } = await supabase
     .from('suppliers')
     .insert({
       ...supplierData,
       tool_id: toolId,
-      user_id: userData.user.id
+      user_id: ownerUserId
     })
     .select()
     .single()

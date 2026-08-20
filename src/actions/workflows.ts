@@ -592,8 +592,15 @@ async function uploadMitigationFileForTool(
   const file = formData.get("file") as File
   if (!file) return { error: "File mancante" }
 
+  const { data: sessionRow } = await supabase
+    .from('assessment_sessions')
+    .select('user_id')
+    .eq('id', sessionId)
+    .maybeSingle()
+
+  const ownerId = sessionRow?.user_id ?? user.id
   const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_")
-  const storagePath = `${user.id}/mitigations/${sessionId}/${questionId}/${Date.now()}_${safeName}`
+  const storagePath = `${ownerId}/${toolId}/mitigations/${sessionId}/${questionId}/${Date.now()}_${safeName}`
 
   const { error } = await supabase.storage.from("user-uploads").upload(storagePath, file)
   if (error) return { error: error.message }

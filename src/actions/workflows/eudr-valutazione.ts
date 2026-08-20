@@ -116,7 +116,7 @@ export async function processEudrValutazione(
   if (!user) return { error: "Non autenticato" }
 
   try {
-    await validateSessionAccess(supabase, EUDR_TOOL_ID, sessionId)
+    const { sessionOwnerId } = await validateSessionAccess(supabase, EUDR_TOOL_ID, sessionId)
 
     const { data: responses, error: fetchError } = await supabase
       .from('user_responses')
@@ -268,7 +268,7 @@ export async function processEudrValutazione(
         }
 
         return {
-          user_id: user.id,
+          user_id: sessionOwnerId,
           tool_id: EUDR_TOOL_ID,
           session_type: 'analisi_finale',
           parent_session_id: sessionId,
@@ -299,7 +299,7 @@ export async function processEudrValutazione(
             if (EUDR_PREFILL_DERIVED_QUESTION_ID_SET.has(row.question_id)) continue
             if (row.answer_text == null && row.answer_json == null && row.file_path == null) continue
             prefill.push({
-              user_id: user.id,
+              user_id: sessionOwnerId,
               tool_id: EUDR_TOOL_ID,
               session_id: sess.id,
               question_id: row.question_id,
@@ -317,7 +317,7 @@ export async function processEudrValutazione(
     }
 
     if (currentPairs.length > 0) {
-      await materializeEudrFinalPrefillForParent(supabase, user.id, sessionId, 'evaluation-save')
+      await materializeEudrFinalPrefillForParent(supabase, sessionOwnerId, sessionId, 'evaluation-save')
     }
 
     const { data: rootSession } = await supabase

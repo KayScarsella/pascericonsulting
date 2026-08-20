@@ -12,8 +12,11 @@ export default async function EudrSearchPage({
 }) {
   const params = await searchParams
   const { role, userId } = await getToolAccess(EUDR_TOOL_ID)
+  const { getToolImpersonation, getEffectiveToolUserId } = await import('@/lib/tool-impersonation')
+  const impersonation = await getToolImpersonation(EUDR_TOOL_ID)
+  const effectiveUserId = await getEffectiveToolUserId(EUDR_TOOL_ID)
   const hasAccess = role === "admin" || role === "premium"
-  const isAdmin = role === "admin"
+  const isAdmin = role === "admin" && !impersonation
 
   if (!hasAccess) {
     return <LockedSearchView />
@@ -29,7 +32,11 @@ export default async function EudrSearchPage({
       </div>
 
       <Suspense fallback={<SearchTabSkeleton />}>
-        <EudrSearchData searchParams={params} isAdmin={isAdmin} userId={userId} />
+        <EudrSearchData
+          searchParams={params}
+          isAdmin={isAdmin}
+          userId={impersonation ? effectiveUserId : userId}
+        />
       </Suspense>
     </div>
   )

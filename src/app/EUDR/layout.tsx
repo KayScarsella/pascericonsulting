@@ -1,5 +1,7 @@
 import { getToolAccess } from "@/lib/tool-auth"
+import { getToolImpersonation } from "@/lib/tool-impersonation"
 import { EUDR_TOOL_ID } from "@/lib/constants"
+import { ToolImpersonationBanner } from "@/components/admin/ToolImpersonationBanner"
 // Importiamo solo NavItem per il tipo, NON le icone qui
 import { ToolNavbar, NavItem } from "@/components/ui/topBar"
 
@@ -18,6 +20,11 @@ export default async function EudrLayout({
   children: React.ReactNode
 }) {
   const { role } = await getToolAccess(EUDR_TOOL_ID)
+  const impersonation = await getToolImpersonation(EUDR_TOOL_ID)
+  const targetLabel =
+    impersonation?.targetFullName?.trim() ||
+    impersonation?.targetEmail?.trim() ||
+    'utente selezionato'
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50">
@@ -27,6 +34,9 @@ export default async function EudrLayout({
           userRole={role}
           items={EUDR_NAV_ITEMS}
        />
+       {impersonation ? (
+         <ToolImpersonationBanner toolId={EUDR_TOOL_ID} targetLabel={targetLabel} />
+       ) : null}
        <main className="flex-1 w-full max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
          {children}
        </main>

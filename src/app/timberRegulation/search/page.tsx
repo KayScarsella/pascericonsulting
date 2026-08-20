@@ -53,8 +53,12 @@ export default async function SearchPage({
   const vend = vstart + limit - 1
 
   const { role, userId } = await getToolAccess(TIMBER_TOOL_ID)
+  const { getToolImpersonation, getEffectiveToolUserId } = await import('@/lib/tool-impersonation')
+  const impersonation = await getToolImpersonation(TIMBER_TOOL_ID)
+  const effectiveUserId = await getEffectiveToolUserId(TIMBER_TOOL_ID)
   const hasAccess = role === "admin" || role === "premium"
-  const isAdmin = role === "admin"
+  const isAdmin = role === "admin" && !impersonation
+  const scopedUserId = impersonation ? effectiveUserId : userId
 
   if (!hasAccess) {
     return <LockedSearchView />
@@ -76,7 +80,7 @@ export default async function SearchPage({
       )
       .eq("tool_id", TIMBER_TOOL_ID)
       .eq("session_type", "analisi_finale")
-    if (!isAdmin) analisiQuery.eq("user_id", userId)
+    if (!isAdmin) analisiQuery.eq("user_id", scopedUserId)
     if (esito === "in_corso") {
       analisiQuery.neq("status", "completed")
     } else if (esito === "accettabile") {
@@ -146,7 +150,7 @@ export default async function SearchPage({
       .select("id", { count: "exact", head: true })
       .eq("tool_id", TIMBER_TOOL_ID)
       .eq("session_type", "verifica")
-    if (!isAdmin) verifCountQuery.eq("user_id", userId)
+    if (!isAdmin) verifCountQuery.eq("user_id", scopedUserId)
 
     const verifListQuery = supabase
       .from("assessment_sessions")
@@ -156,7 +160,7 @@ export default async function SearchPage({
       .eq("tool_id", TIMBER_TOOL_ID)
       .eq("session_type", "verifica")
 
-    if (!isAdmin) verifListQuery.eq("user_id", userId)
+    if (!isAdmin) verifListQuery.eq("user_id", scopedUserId)
     if (stato === "in_corso") {
       verifListQuery.neq("status", "completed")
     } else if (stato === "conclusa") {

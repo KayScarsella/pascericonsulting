@@ -60,8 +60,10 @@ export default async function MitigazionePage({
         .single()
 
     if (!session) return <div className="p-8 text-center text-red-600 font-bold">Sessione non trovata.</div>
-    // Solo il titolare può accedere alla pagina mitigazione (né admin né altri utenti)
-    if (session.user_id !== user.id) {
+    const { getEffectiveToolUserId } = await import('@/lib/tool-impersonation')
+    const effectiveUserId = await getEffectiveToolUserId(TIMBER_TOOL_ID)
+    // Titolare (o admin in impersonazione / supporto) può inserire mitigazioni
+    if (session.user_id !== effectiveUserId && role !== 'admin') {
         return (
             <div className="flex flex-col items-center justify-center min-h-[50vh] text-center space-y-4 p-8">
                 <Shield className="w-12 h-12 text-amber-600" />

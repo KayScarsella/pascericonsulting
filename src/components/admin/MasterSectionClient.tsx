@@ -59,10 +59,12 @@ import {
 import type { ToolUserRow } from '@/actions/users'
 import type { Database } from '@/types/supabase'
 import { toast } from 'sonner'
-import { Edit, Eye, Plus, Trash2, Loader2, AlertCircle, Mail } from 'lucide-react'
+import { Edit, Eye, Plus, Trash2, Loader2, AlertCircle, Mail, UserRound } from 'lucide-react'
 import { NotificationDetailDialog } from '@/components/notifications/NotificationDetailDialog'
 import type { NotificationDisplayItem } from '@/components/notifications/notification-types'
 import { AUTH_EMAIL_OTP_EXPIRATION_HINT, CLOUD_FSC_TOOL_ID, PENDING_INVITE_BULK_RESEND_MAX } from '@/lib/constants'
+import { isImpersonationAllowedTool } from '@/lib/tool-impersonation-shared'
+import { startToolImpersonationAction } from '@/actions/tool-impersonation'
 import { fscMemberTypeLabel } from '@/lib/fsc/constants'
 import type { FscCompanyAdminRow } from '@/actions/fsc/company'
 import type { FscMemberType } from '@/types/fsc'
@@ -261,6 +263,7 @@ export function MasterSectionClient({
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<'standard' | 'premium'>('standard')
   const isCloudFsc = toolId === CLOUD_FSC_TOOL_ID
+  const canImpersonateUsers = isImpersonationAllowedTool(toolId)
   const [inviteFscCompanyId, setInviteFscCompanyId] = useState<string>('none')
   const [inviteFscMemberType, setInviteFscMemberType] = useState<FscMemberType>('employee')
   const [inviteFscCanEdit, setInviteFscCanEdit] = useState(true)
@@ -802,6 +805,32 @@ export function MasterSectionClient({
           onSelectionChange={setSelectedUserIds}
           renderRowActions={(row) => (
             <div className="flex justify-end gap-1">
+              {canImpersonateUsers && !isUserOnboardingPending(row) ? (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-slate-600 hover:bg-slate-100"
+                  onClick={async () => {
+                    setUpdating(`impersonate-${row.user_id}`)
+                    try {
+                      const res = await startToolImpersonationAction(toolId, row.user_id)
+                      if (res?.error) toast.error(res.error)
+                    } catch {
+                      // redirect() from the server action throws; navigation continues
+                    } finally {
+                      setUpdating(null)
+                    }
+                  }}
+                  disabled={updating === `impersonate-${row.user_id}`}
+                  title="Entra come utente"
+                >
+                  {updating === `impersonate-${row.user_id}` ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <UserRound className="h-4 w-4" />
+                  )}
+                </Button>
+              ) : null}
               {isUserOnboardingPending(row) ? (
                 <Button
                   variant="ghost"

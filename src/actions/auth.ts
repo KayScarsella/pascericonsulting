@@ -187,6 +187,13 @@ export async function signOutAction() {
     console.error("Errore durante il logout:", error)
   }
 
+  try {
+    const { clearToolImpersonationCookie } = await import("@/lib/tool-impersonation")
+    await clearToolImpersonationCookie()
+  } catch {
+    // cookie clear is best-effort on logout
+  }
+
   // 2. Reindirizza alla pagina di login
   redirect("/login")
 }
