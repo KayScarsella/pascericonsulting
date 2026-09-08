@@ -314,7 +314,8 @@ export async function backfillEudrFinalPrefillForRoot(
       supabase,
       sessionOwnerId,
       rootSessionId,
-      "manual-backfill"
+      "manual-backfill",
+      { force: true }
     )
     return { ok: true }
   } catch (err: unknown) {
@@ -380,7 +381,9 @@ export async function finalizeEudrAnalisi(sessionId: string): Promise<{ redirect
       return { error: "Sessione EUDR non trovata" }
     }
 
-    await materializeEudrFinalPrefillForSession(supabase, sessionOwnerId, sessionId, "finalize")
+    await materializeEudrFinalPrefillForSession(supabase, sessionOwnerId, sessionId, "finalize", {
+      force: true,
+    })
 
     const answersMap: Record<string, string | null> = {}
     const { data: childResponses } = await supabase

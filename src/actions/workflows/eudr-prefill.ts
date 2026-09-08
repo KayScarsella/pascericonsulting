@@ -31,6 +31,11 @@ type PrefillInput = {
   derivedRows: DerivedPrefillRow[]
 }
 
+export type MaterializePrefillOptions = {
+  /** Re-run even when metadata already marks the current prefill version. */
+  force?: boolean
+}
+
 function isNonEmptyResponse(row: UserResponseRow | null | undefined): boolean {
   if (!row) return false
   if (row.answer_text != null && String(row.answer_text).trim() !== "") return true
@@ -45,11 +50,19 @@ function toNumeric(v: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+function isPrefillCurrent(metadata: SessionMetadata | null): boolean {
+  return (
+    metadata?.eudr_prefill_version === EUDR_PREFILL_VERSION &&
+    Boolean(metadata?.eudr_prefill_materialized_at)
+  )
+}
+
 export async function materializeEudrFinalPrefillForParent(
   supabase: SupabaseClient<Database>,
   userId: string,
   parentSessionId: string,
-  reason: string
+  reason: string,
+  options?: MaterializePrefillOptions
 ): Promise<void> {
   const { data: children } = await supabase
     .from("assessment_sessions")
@@ -58,16 +71,21 @@ export async function materializeEudrFinalPrefillForParent(
     .eq("session_type", "analisi_finale")
     .eq("parent_session_id", parentSessionId)
 
-  for (const child of children || []) {
-    await materializeEudrFinalPrefillForSession(supabase, userId, child.id, reason)
-  }
+  if (!children?.length) return
+
+  await Promise.all(
+    children.map((child) =>
+      materializeEudrFinalPrefillForSession(supabase, userId, child.id, reason, options)
+    )
+  )
 }
 
 export async function materializeEudrFinalPrefillForSession(
   supabase: SupabaseClient<Database>,
   userId: string,
   finalSessionId: string,
-  reason: string
+  reason: string,
+  options?: MaterializePrefillOptions
 ): Promise<{ rowsWritten: number }> {
   const { data: sessionRow } = await supabase
     .from("assessment_sessions")
@@ -80,6 +98,10 @@ export async function materializeEudrFinalPrefillForSession(
   if (!sessionRow) return { rowsWritten: 0 }
 
   const metadata = (sessionRow.metadata as SessionMetadata | null) ?? null
+  if (!options?.force && isPrefillCurrent(metadata)) {
+    return { rowsWritten: 0 }
+  }
+
   const parentSessionId = sessionRow.parent_session_id
   const countryId = metadata?.country ?? null
   const specieId = metadata?.specie ?? null

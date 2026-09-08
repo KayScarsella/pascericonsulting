@@ -5,7 +5,6 @@ import { createClient } from '@/utils/supabase/server'
 import { EUDR_TOOL_ID } from '@/lib/constants'
 import { SessionMetadata } from '@/types/session'
 import {
-  EUDR_PREFILL_DERIVED_QUESTION_ID_SET,
   EUDR_Q_FLEGT,
   EUDR_SPEC_PAESE_GRID_QUESTION_ID,
   isYesLikeAnswer,
@@ -16,7 +15,6 @@ import {
   completeSessionAsExempt,
   extractNomeCommerciale,
   mergeNomeMetadata,
-  upsertUserResponses,
 } from '@/actions/workflows/shared'
 import { materializeEudrFinalPrefillForParent } from '@/actions/workflows/eudr-prefill'
 
@@ -51,9 +49,6 @@ async function assertFlegtCountryRulesIfNeeded(
   distinctPaeseIds: string[],
   flegtRaw: unknown
 ): Promise<{ error?: string }> {
-  // #region agent log
-  fetch('http://127.0.0.1:7443/ingest/e3f27f07-b7f1-4eb5-9645-5d724b3a3d9b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6a4099'},body:JSON.stringify({sessionId:'6a4099',runId:'pre-fix',hypothesisId:'H1',location:'src/actions/workflows/eudr-valutazione.ts:assertFlegtCountryRulesIfNeeded:entry',message:'FLEGT check entry',data:{distinctPaeseIds,flegtRawType:typeof flegtRaw,flegtRaw:String(flegtRaw ?? '')},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion agent log
   if (!isYesLikeAnswer(flegtRaw) || distinctPaeseIds.length === 0) return {}
 
   const { data: rows, error } = await supabase
@@ -81,10 +76,6 @@ async function assertFlegtCountryRulesIfNeeded(
     if (eligibleNames.has(normalized)) eligible.push(name)
     else ineligible.push(name)
   }
-
-  // #region agent log
-  fetch('http://127.0.0.1:7443/ingest/e3f27f07-b7f1-4eb5-9645-5d724b3a3d9b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6a4099'},body:JSON.stringify({sessionId:'6a4099',runId:'pre-fix',hypothesisId:'H2',location:'src/actions/workflows/eudr-valutazione.ts:assertFlegtCountryRulesIfNeeded:classified',message:'FLEGT country classification',data:{rowsCount:rows?.length ?? 0,rowsPreview:(rows||[]).slice(0,10).map(r=>({id:r.id,country_name:r.country_name})),eligible,ineligible,missing},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion agent log
 
   const hasEligible = eligible.length > 0
   const hasIneligible = ineligible.length > 0 || missing.length > 0
@@ -188,9 +179,6 @@ export async function processEudrValutazione(
     const distinctPaeseIds = [...new Set(Object.values(pairDetails).map((p) => p.paese_id))]
 
     const flegtRaw = responseValueForQuestion(responses, EUDR_Q_FLEGT)
-    // #region agent log
-    fetch('http://127.0.0.1:7443/ingest/e3f27f07-b7f1-4eb5-9645-5d724b3a3d9b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6a4099'},body:JSON.stringify({sessionId:'6a4099',runId:'pre-fix',hypothesisId:'H3',location:'src/actions/workflows/eudr-valutazione.ts:processEudrValutazione:gridParsed',message:'Parsed grid + FLEGT raw',data:{sessionId,currentPairsCount:currentPairs.length,distinctPaeseIdsCount:distinctPaeseIds.length,distinctPaeseIds:distinctPaeseIds.slice(0,50),flegtRaw:String(flegtRaw ?? ''),flegtYesLike:isYesLikeAnswer(flegtRaw)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion agent log
     const flegtCheck = await assertFlegtCountryRulesIfNeeded(supabase, distinctPaeseIds, flegtRaw)
     if (flegtCheck.error) return { error: flegtCheck.error }
 
@@ -278,46 +266,14 @@ export async function processEudrValutazione(
       })
 
       await supabase.from('assessment_sessions').insert(payloads)
-
-      const { data: createdEudrSessions } = await supabase
-        .from('assessment_sessions')
-        .select('id')
-        .eq('parent_session_id', sessionId)
-        .eq('session_type', 'analisi_finale')
-        .eq('tool_id', EUDR_TOOL_ID)
-
-      const { data: parentRows } = await supabase
-        .from('user_responses')
-        .select('question_id, answer_text, answer_json, file_path')
-        .eq('session_id', sessionId)
-
-      if (createdEudrSessions?.length && parentRows?.length) {
-        const isoDate = new Date().toISOString()
-        const prefill: TablesInsert<'user_responses'>[] = []
-        for (const sess of createdEudrSessions) {
-          for (const row of parentRows) {
-            if (EUDR_PREFILL_DERIVED_QUESTION_ID_SET.has(row.question_id)) continue
-            if (row.answer_text == null && row.answer_json == null && row.file_path == null) continue
-            prefill.push({
-              user_id: sessionOwnerId,
-              tool_id: EUDR_TOOL_ID,
-              session_id: sess.id,
-              question_id: row.question_id,
-              answer_text: row.answer_text,
-              answer_json: row.answer_json as Json | null,
-              file_path: row.file_path,
-              updated_at: isoDate,
-            })
-          }
-        }
-        if (prefill.length > 0) {
-          await upsertUserResponses(supabase, prefill)
-        }
-      }
     }
 
+    // Single prefill path (parent copy + derived country/specie fields). Avoids the previous
+    // double-write that re-upserted the same rows on save and again on valutazione-finale load.
     if (currentPairs.length > 0) {
-      await materializeEudrFinalPrefillForParent(supabase, sessionOwnerId, sessionId, 'evaluation-save')
+      await materializeEudrFinalPrefillForParent(supabase, sessionOwnerId, sessionId, 'evaluation-save', {
+        force: true,
+      })
     }
 
     const { data: rootSession } = await supabase

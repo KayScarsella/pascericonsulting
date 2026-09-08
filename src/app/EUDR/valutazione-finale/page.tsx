@@ -103,6 +103,7 @@ export default async function EudrValutazioneFinalePage({
     .order("order_index", { foreignTable: "questions", ascending: true })
 
   if (isAnalisiFinale) {
+    // No-op when evaluation-save already wrote the current prefill version.
     await materializeEudrFinalPrefillForSession(supabase, user.id, sessionId, "final-page-load")
   }
 

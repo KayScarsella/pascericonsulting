@@ -122,9 +122,13 @@ export async function resolveEudrNumPaesiQuestionId(
   return resolveEudrQuestionIdByText(supabase, '%quanti%paes%')
 }
 
+let cachedEudrFaoQuestionId: string | null | undefined
+
 export async function resolveEudrFaoQuestionId(
   supabase: SupabaseClient<Database>
 ): Promise<string | null> {
+  if (cachedEudrFaoQuestionId !== undefined) return cachedEudrFaoQuestionId
+
   if (EUDR_FAO_ANNEX_QUESTION_ID) {
     const { data } = await supabase
       .from("questions")
@@ -138,7 +142,10 @@ export async function resolveEudrFaoQuestionId(
         .eq("id", data.section_id)
         .eq("tool_id", EUDR_TOOL_ID)
         .maybeSingle()
-      if (sec?.id) return data.id
+      if (sec?.id) {
+        cachedEudrFaoQuestionId = data.id
+        return data.id
+      }
     }
   }
   const { data: faoRow } = await supabase
@@ -147,12 +154,16 @@ export async function resolveEudrFaoQuestionId(
     .ilike("text", "%FAO Naturally regenerating%")
     .limit(1)
     .maybeSingle()
-  if (!faoRow?.id) return null
+  if (!faoRow?.id) {
+    cachedEudrFaoQuestionId = null
+    return null
+  }
   const { data: sec } = await supabase
     .from("sections")
     .select("id")
     .eq("id", faoRow.section_id)
     .eq("tool_id", EUDR_TOOL_ID)
     .maybeSingle()
-  return sec?.id ? faoRow.id : null
+  cachedEudrFaoQuestionId = sec?.id ? faoRow.id : null
+  return cachedEudrFaoQuestionId
 }
