@@ -98,12 +98,12 @@ export function buildDdReportPayload(
 
   ui_blocks.push({
     heading: 'Risultato numerico',
-    body: `Pixel Hansen con loss (tutti gli anni) ≈ ${meta.loss_pixel_count ?? '—'} · AOI ≈ ${meta.aoi_area_ha?.toFixed(2) ?? '—'} ha · Dataset: ${meta.dataset_id}`,
+    body: `Pixel Hansen con loss (tutti gli anni) ≈ ${meta.loss_pixel_count ?? '—'} · Area Di Interesse ≈ ${meta.aoi_area_ha?.toFixed(2) ?? '—'} ha · Dataset: ${meta.dataset_id}`,
   })
 
   if (r?.jrc_assessment_ok && r.forest_2020_ha_in_aoi != null) {
     const pct =
-      r.forest_2020_pct_aoi != null ? `${r.forest_2020_pct_aoi.toFixed(1)}% dell'AOI` : '—'
+      r.forest_2020_pct_aoi != null ? `${r.forest_2020_pct_aoi.toFixed(1)}% dell'Area Di Interesse` : '—'
     const lossHa = r.loss_on_forest_2020_post_eudr_ha != null ? `${r.loss_on_forest_2020_post_eudr_ha.toFixed(2)} ha` : '0 ha'
     const soglia =
       r.loss_on_forest_2020_post_eudr_ha != null && r.loss_on_forest_2020_post_eudr_ha >= 0.5
@@ -111,7 +111,7 @@ export function buildDdReportPayload(
         : 'sotto soglia 0,5 ha o assente → gate non attivato solo su questa evidenza.'
     ui_blocks.push({
       heading: 'JRC GFC2020 (foresta al 31/12/2020)',
-      body: `Nell'AOI ≈ ${r.forest_2020_ha_in_aoi.toFixed(2)} ha (${pct}). Loss Hansen dopo il 2020 su quella foresta ≈ ${lossHa} — ${soglia}`,
+      body: `Nell'Area Di Interesse ≈ ${r.forest_2020_ha_in_aoi.toFixed(2)} ha (${pct}). Loss Hansen dopo il 2020 su quella foresta ≈ ${lossHa} — ${soglia}`,
     })
   }
 
@@ -119,7 +119,7 @@ export function buildDdReportPayload(
   if (ft?.ok && ft.ha_forest_typed_total != null && ft.ha_forest_typed_total > 0) {
     ui_blocks.push({
       heading: 'Contesto degrado forestale (snapshot 31/12/2020)',
-      body: `JRC forest types nell'AOI: primaria ≈ ${ft.ha_primary?.toFixed(2) ?? '—'} ha, naturalmente rigenerante ≈ ${ft.ha_naturally_regenerating?.toFixed(2) ?? '—'} ha, piantata ≈ ${ft.ha_planted?.toFixed(2) ?? '—'} ha. Solo fotografia al cut-off, non evoluzione temporale automatica.`,
+      body: `JRC forest types nell'Area Di Interesse: primaria ≈ ${ft.ha_primary?.toFixed(2) ?? '—'} ha, naturalmente rigenerante ≈ ${ft.ha_naturally_regenerating?.toFixed(2) ?? '—'} ha, piantata ≈ ${ft.ha_planted?.toFixed(2) ?? '—'} ha. Solo fotografia al cut-off, non evoluzione temporale automatica.`,
     })
   } else if (ft && !ft.ok) {
     ui_blocks.push({

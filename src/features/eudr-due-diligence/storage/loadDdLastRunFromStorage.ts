@@ -43,6 +43,9 @@ function snapshotFromStoredReport(report: StoredDdReport, artifactSessionId: str
     return {
       ...report.dd_last_run,
       dd_artifact_session_id: report.dd_last_run.dd_artifact_session_id ?? artifactSessionId,
+      ...(report.dd_last_run.dd_artifact_user_id || report.user_id
+        ? { dd_artifact_user_id: report.dd_last_run.dd_artifact_user_id || report.user_id }
+        : {}),
     }
   }
 
@@ -69,6 +72,7 @@ function snapshotFromStoredReport(report: StoredDdReport, artifactSessionId: str
   return {
     run_id: runId,
     dd_artifact_session_id: report.session_id?.trim() || artifactSessionId,
+    ...(report.user_id ? { dd_artifact_user_id: report.user_id } : {}),
     completed_at: report.completed_at || new Date().toISOString(),
     dataset_id: report.dataset_id || 'UMD/hansen/global_forest_change_2024_v1_12',
     eudr_cutoff_date: EUDR_CUTOFF_DATE,
@@ -95,8 +99,18 @@ async function downloadDdReport(
     candidates.push(`${ddRunBasePath(userId, sessionId, runId)}/dd_report.json`)
   }
 
+  // Prefer service role so tool admins can recover artifacts under the session owner folder
+  // (user-uploads RLS only allows own prefix for eudr-due-diligence paths).
+  let storage = supabase
+  try {
+    const { createServiceRoleClient } = await import('@/utils/supabase/admin')
+    storage = createServiceRoleClient()
+  } catch {
+    /* keep caller client */
+  }
+
   for (const path of candidates) {
-    const { data, error } = await supabase.storage.from('user-uploads').download(path)
+    const { data, error } = await storage.storage.from('user-uploads').download(path)
     if (error || !data) continue
     try {
       return JSON.parse(await data.text()) as StoredDdReport

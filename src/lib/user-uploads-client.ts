@@ -76,10 +76,11 @@ export async function uploadToUserUploadsBucket(params: {
 export function buildEudrDueDiligenceAoiUploadPath(params: {
   userId: string
   sessionId: string
-  fileName: string
+  fileName?: string
 }): string {
-  const { userId, sessionId, fileName } = params
-  const safeName = (fileName || 'aoi.geojson').replace(/[^a-zA-Z0-9.-]/g, '_')
-  return `${userId}/eudr-due-diligence/${sessionId}/aoi-uploaded-${Date.now()}_${safeName}`
+  const { userId, sessionId } = params
+  // Stable staging path (upsert) — avoids orphan aoi-uploaded-{timestamp}_* files on every pick.
+  void params.fileName
+  return `${userId}/eudr-due-diligence/${sessionId}/aoi-upload-staging.geojson`
 }
 

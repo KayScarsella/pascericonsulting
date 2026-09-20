@@ -104,7 +104,13 @@ export default async function EudrValutazioneFinalePage({
 
   if (isAnalisiFinale) {
     // No-op when evaluation-save already wrote the current prefill version.
-    await materializeEudrFinalPrefillForSession(supabase, user.id, sessionId, "final-page-load")
+    // Always stamp responses as the session owner (not the admin/runner).
+    await materializeEudrFinalPrefillForSession(
+      supabase,
+      sessionInfo.user_id,
+      sessionId,
+      "final-page-load"
+    )
   }
 
   const { data: childResponses } = await supabase

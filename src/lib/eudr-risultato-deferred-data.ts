@@ -339,16 +339,35 @@ export async function loadEudrRisultatoDeferredData(
       .single()
 
     if (artifactSession?.user_id) {
-      const uid = artifactSession.user_id
-      const base = `${uid}/eudr-due-diligence/${artifactSessionId}`
-      const reportCandidates: { path: string; artifactPrefix: string }[] = [
-        { path: `${base}/dd_report.json`, artifactPrefix: base },
-        { path: `${base}/${effectiveDdLastRun.run_id}/dd_report.json`, artifactPrefix: `${base}/${effectiveDdLastRun.run_id}` },
-      ]
+      const artifactUserId =
+        (effectiveDdLastRun as { dd_artifact_user_id?: string }).dd_artifact_user_id?.trim() || null
+      const ownerId = artifactSession.user_id
+      // Prefer session owner (canonical), then legacy runner folder if recorded.
+      const userIdsToTry = [...new Set([ownerId, artifactUserId].filter(Boolean) as string[])]
+      const reportCandidates: { path: string; artifactPrefix: string }[] = []
+      for (const uid of userIdsToTry) {
+        const base = `${uid}/eudr-due-diligence/${artifactSessionId}`
+        reportCandidates.push(
+          { path: `${base}/dd_report.json`, artifactPrefix: base },
+          {
+            path: `${base}/${effectiveDdLastRun.run_id}/dd_report.json`,
+            artifactPrefix: `${base}/${effectiveDdLastRun.run_id}`,
+          }
+        )
+      }
+
+      let storageClient = supabase
+      try {
+        const { createServiceRoleClient } = await import("@/utils/supabase/admin")
+        storageClient = createServiceRoleClient()
+      } catch {
+        /* anon/session client — may fail across user folders due to RLS */
+      }
+
       let blob: Blob | null = null
-      let artifactPrefix = base
+      let artifactPrefix = `${ownerId}/eudr-due-diligence/${artifactSessionId}`
       for (const c of reportCandidates) {
-        const { data, error: dlErr } = await supabase.storage
+        const { data, error: dlErr } = await storageClient.storage
           .from("user-uploads")
           .download(c.path)
         if (!dlErr && data) {
@@ -367,7 +386,7 @@ export async function loadEudrRisultatoDeferredData(
                 payload.snapshot_storage_filename?.trim() || "aoi_map_render.png"
               const snapPath = `${artifactPrefix}/${snapName}`
               queryCount += 1
-              const { data: snapSigned } = await supabase.storage
+              const { data: snapSigned } = await storageClient.storage
                 .from("user-uploads")
                 .createSignedUrl(snapPath, 3600, { download: false })
               if (snapSigned?.signedUrl) payload.dd_snapshot_signed_url = snapSigned.signedUrl

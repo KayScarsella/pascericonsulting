@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import Map, { Source, Layer, NavigationControl, type MapRef } from 'react-map-gl/maplibre'
 import type { LayerProps } from 'react-map-gl/maplibre'
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -23,6 +23,66 @@ function getHighResTilesTemplate(): string | null {
 type FeatureCollection = {
   type: 'FeatureCollection'
   features: Array<{ type: string; geometry?: { type: string; coordinates: unknown } }>
+}
+
+type LonLatBounds = { minLon: number; maxLon: number; minLat: number; maxLat: number }
+
+/** Walk all coordinate arrays in a GeoJSON geometry and accumulate lon/lat bounds. */
+function walkCoords(coords: unknown, acc: LonLatBounds): void {
+  if (!Array.isArray(coords) || coords.length === 0) return
+  if (typeof coords[0] === 'number' && typeof coords[1] === 'number') {
+    const lon = coords[0] as number
+    const lat = coords[1] as number
+    if (Number.isFinite(lon) && Number.isFinite(lat) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+      acc.minLon = Math.min(acc.minLon, lon)
+      acc.maxLon = Math.max(acc.maxLon, lon)
+      acc.minLat = Math.min(acc.minLat, lat)
+      acc.maxLat = Math.max(acc.maxLat, lat)
+    }
+    return
+  }
+  for (const child of coords) walkCoords(child, acc)
+}
+
+function computeFeatureCollectionBounds(fc: FeatureCollection): LonLatBounds | null {
+  const acc: LonLatBounds = {
+    minLon: Infinity,
+    maxLon: -Infinity,
+    minLat: Infinity,
+    maxLat: -Infinity,
+  }
+  for (const feature of fc.features ?? []) {
+    const geom = feature.geometry
+    if (!geom || !('coordinates' in geom) || geom.coordinates == null) continue
+    walkCoords(geom.coordinates, acc)
+  }
+  if (acc.minLon === Infinity) return null
+  return acc
+}
+
+function fitMapToBounds(
+  mapRef: RefObject<MapRef | null>,
+  bounds: LonLatBounds,
+  setViewState: Dispatch<SetStateAction<{ longitude: number; latitude: number; zoom: number }>>,
+  duration = 0
+): void {
+  const { minLon, maxLon, minLat, maxLat } = bounds
+  const center = { longitude: (minLon + maxLon) / 2, latitude: (minLat + maxLat) / 2 }
+  setViewState((prev) => ({ ...prev, ...center, zoom: Math.max(prev.zoom, 10) }))
+  try {
+    const m = mapRef.current?.getMap() as unknown as {
+      fitBounds?: (b: [[number, number], [number, number]], o: { padding: number; duration: number }) => void
+    }
+    m?.fitBounds?.(
+      [
+        [minLon, minLat],
+        [maxLon, maxLat],
+      ],
+      { padding: 40, duration }
+    )
+  } catch {
+    /* ignore */
+  }
 }
 
 export type YearTileEntry = { year: number; tilesUrlTemplate: string }
@@ -77,6 +137,7 @@ export function DueDiligenceMap({
   const [forestOpacity, setForestOpacity] = useState(0.45)
   const [lossOpacity, setLossOpacity] = useState(0.78)
   const [selectedYear, setSelectedYear] = useState<number | null>(null)
+  const [aoiBounds, setAoiBounds] = useState<LonLatBounds | null>(null)
   const mapRef = useRef<MapRef>(null)
 
   const highResTiles = useMemo(() => getHighResTilesTemplate(), [])
@@ -98,55 +159,21 @@ export function DueDiligenceMap({
     if (!geoJsonUrl) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setGeojson(null)
+      setAoiBounds(null)
       return
     }
     fetch(geoJsonUrl)
       .then((r) => r.json())
       .then((data: FeatureCollection) => {
         setGeojson(data)
-        const geom = data.features?.[0]?.geometry
-        if (geom && 'coordinates' in geom && geom.coordinates) {
-          const flat = JSON.stringify(geom.coordinates).match(/-?\d+\.?\d*/g)
-          if (flat && flat.length >= 4) {
-            const nums = flat.map(Number)
-            let minLon = Infinity,
-              maxLon = -Infinity,
-              minLat = Infinity,
-              maxLat = -Infinity
-            for (let i = 0; i < nums.length; i += 2) {
-              const lon = nums[i],
-                lat = nums[i + 1]
-              if (lat !== undefined && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
-                minLon = Math.min(minLon, lon)
-                maxLon = Math.max(maxLon, lon)
-                minLat = Math.min(minLat, lat)
-                maxLat = Math.max(maxLat, lat)
-              }
-            }
-            if (minLon !== Infinity) {
-              // Fit bounds once the AOI is known (better than a fixed zoom).
-              // If the map isn't ready yet, fall back to a reasonable centered view.
-              const center = { longitude: (minLon + maxLon) / 2, latitude: (minLat + maxLat) / 2 }
-              setViewState((prev) => ({ ...prev, ...center, zoom: Math.max(prev.zoom, 10) }))
-              try {
-                const m = mapRef.current?.getMap() as unknown as {
-                  fitBounds?: (b: [[number, number], [number, number]], o: { padding: number; duration: number }) => void
-                }
-                m?.fitBounds?.(
-                  [
-                    [minLon, minLat],
-                    [maxLon, maxLat],
-                  ],
-                  { padding: 40, duration: 0 }
-                )
-              } catch {
-                /* ignore */
-              }
-            }
-          }
-        }
+        const bounds = computeFeatureCollectionBounds(data)
+        setAoiBounds(bounds)
+        if (bounds) fitMapToBounds(mapRef, bounds, setViewState, 0)
       })
-      .catch(() => setGeojson(null))
+      .catch(() => {
+        setGeojson(null)
+        setAoiBounds(null)
+      })
   }, [geoJsonUrl])
 
   const mapClass = useMemo(() => className ?? 'w-full h-[480px] rounded-lg border border-slate-200', [className])
@@ -164,6 +191,15 @@ export function DueDiligenceMap({
           />
           Basemap / satellite
         </label>
+        {aoiBounds && (
+          <button
+            type="button"
+            className="rounded border border-slate-300 bg-white px-2 py-1 font-medium text-slate-700 hover:bg-slate-50"
+            onClick={() => fitMapToBounds(mapRef, aoiBounds, setViewState, 400)}
+          >
+            Centra
+          </button>
+        )}
         {forest2020TilesUrlTemplate && (
           <label className="inline-flex items-center gap-1.5 cursor-pointer">
             <input

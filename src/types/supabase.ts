@@ -78,6 +78,459 @@ export type Database = {
           },
         ]
       }
+      boscolog_companies: {
+        Row: {
+          address: string | null
+          cap: string | null
+          cf: string | null
+          city: string | null
+          created_at: string
+          email: string | null
+          id: string
+          legal_rep: string | null
+          logo_path: string | null
+          name: string
+          pec: string | null
+          phone: string | null
+          province: string | null
+          rea: string | null
+          tool_id: string
+          updated_at: string
+          vat: string | null
+        }
+        Insert: {
+          address?: string | null
+          cap?: string | null
+          cf?: string | null
+          city?: string | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          legal_rep?: string | null
+          logo_path?: string | null
+          name: string
+          pec?: string | null
+          phone?: string | null
+          province?: string | null
+          rea?: string | null
+          tool_id: string
+          updated_at?: string
+          vat?: string | null
+        }
+        Update: {
+          address?: string | null
+          cap?: string | null
+          cf?: string | null
+          city?: string | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          legal_rep?: string | null
+          logo_path?: string | null
+          name?: string
+          pec?: string | null
+          phone?: string | null
+          province?: string | null
+          rea?: string | null
+          tool_id?: string
+          updated_at?: string
+          vat?: string | null
+        }
+        Relationships: []
+      }
+      boscolog_company_members: {
+        Row: {
+          can_edit: boolean
+          company_id: string
+          created_at: string
+          user_id: string
+        }
+        Insert: {
+          can_edit?: boolean
+          company_id: string
+          created_at?: string
+          user_id: string
+        }
+        Update: {
+          can_edit?: boolean
+          company_id?: string
+          created_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      boscolog_lots: {
+        Row: {
+          company_id: string
+          comune: string | null
+          created_at: string
+          custody_model: string | null
+          cutting_date: string | null
+          dds_ref: string | null
+          deforestation_free: string | null
+          geo_area_ha: number | null
+          geo_feature_count: number | null
+          geojson: Record<string, unknown> | null
+          id: string
+          localita: string | null
+          lot_date: string
+          mode: string
+          name: string
+          notes: string | null
+          origin_eu: string | null
+          product_other: string | null
+          product_type: string | null
+          province: string | null
+          quick_qty: string | null
+          quick_species: string | null
+          quick_unit: string | null
+          region: string | null
+          risk: Record<string, unknown>
+          risk_level: string | null
+          risk_score: number | null
+          state: string | null
+          supplier_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          comune?: string | null
+          created_at?: string
+          custody_model?: string | null
+          cutting_date?: string | null
+          dds_ref?: string | null
+          deforestation_free?: string | null
+          geo_area_ha?: number | null
+          geo_feature_count?: number | null
+          geojson?: Record<string, unknown> | null
+          id?: string
+          localita?: string | null
+          lot_date?: string
+          mode?: string
+          name: string
+          notes?: string | null
+          origin_eu?: string | null
+          product_other?: string | null
+          product_type?: string | null
+          province?: string | null
+          quick_qty?: string | null
+          quick_species?: string | null
+          quick_unit?: string | null
+          region?: string | null
+          risk?: Record<string, unknown>
+          risk_level?: string | null
+          risk_score?: number | null
+          state?: string | null
+          supplier_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          comune?: string | null
+          created_at?: string
+          custody_model?: string | null
+          cutting_date?: string | null
+          dds_ref?: string | null
+          deforestation_free?: string | null
+          geo_area_ha?: number | null
+          geo_feature_count?: number | null
+          geojson?: Record<string, unknown> | null
+          id?: string
+          localita?: string | null
+          lot_date?: string
+          mode?: string
+          name?: string
+          notes?: string | null
+          origin_eu?: string | null
+          product_other?: string | null
+          product_type?: string | null
+          province?: string | null
+          quick_qty?: string | null
+          quick_species?: string | null
+          quick_unit?: string | null
+          region?: string | null
+          risk?: Record<string, unknown>
+          risk_level?: string | null
+          risk_score?: number | null
+          state?: string | null
+          supplier_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      boscolog_lot_exits: {
+        Row: {
+          buyer_id: string | null
+          buyer_name: string | null
+          created_at: string
+          doc_ref: string | null
+          exit_date: string | null
+          id: string
+          lot_id: string
+          notes: string | null
+          product: string | null
+          qty: string | null
+          sort_order: number
+          species_id: string | null
+          unit: string | null
+          updated_at: string
+        }
+        Insert: {
+          buyer_id?: string | null
+          buyer_name?: string | null
+          created_at?: string
+          doc_ref?: string | null
+          exit_date?: string | null
+          id?: string
+          lot_id: string
+          notes?: string | null
+          product?: string | null
+          qty?: string | null
+          sort_order?: number
+          species_id?: string | null
+          unit?: string | null
+          updated_at?: string
+        }
+        Update: {
+          buyer_id?: string | null
+          buyer_name?: string | null
+          created_at?: string
+          doc_ref?: string | null
+          exit_date?: string | null
+          id?: string
+          lot_id?: string
+          notes?: string | null
+          product?: string | null
+          qty?: string | null
+          sort_order?: number
+          species_id?: string | null
+          unit?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      boscolog_lot_movements: {
+        Row: {
+          created_at: string
+          doc_ref: string | null
+          id: string
+          location: string | null
+          loss_pct: string | null
+          lot_id: string
+          movement_date: string | null
+          notes: string | null
+          party_id: string | null
+          party_name: string | null
+          product: string | null
+          qty_in: string | null
+          qty_out: string | null
+          sort_order: number
+          type: string
+          unit: string | null
+          updated_at: string
+          yield_pct: string | null
+        }
+        Insert: {
+          created_at?: string
+          doc_ref?: string | null
+          id?: string
+          location?: string | null
+          loss_pct?: string | null
+          lot_id: string
+          movement_date?: string | null
+          notes?: string | null
+          party_id?: string | null
+          party_name?: string | null
+          product?: string | null
+          qty_in?: string | null
+          qty_out?: string | null
+          sort_order?: number
+          type?: string
+          unit?: string | null
+          updated_at?: string
+          yield_pct?: string | null
+        }
+        Update: {
+          created_at?: string
+          doc_ref?: string | null
+          id?: string
+          location?: string | null
+          loss_pct?: string | null
+          lot_id?: string
+          movement_date?: string | null
+          notes?: string | null
+          party_id?: string | null
+          party_name?: string | null
+          product?: string | null
+          qty_in?: string | null
+          qty_out?: string | null
+          sort_order?: number
+          type?: string
+          unit?: string | null
+          updated_at?: string
+          yield_pct?: string | null
+        }
+        Relationships: []
+      }
+      boscolog_lot_parents: {
+        Row: {
+          created_at: string
+          lot_id: string
+          parent_lot_id: string
+        }
+        Insert: {
+          created_at?: string
+          lot_id: string
+          parent_lot_id: string
+        }
+        Update: {
+          created_at?: string
+          lot_id?: string
+          parent_lot_id?: string
+        }
+        Relationships: []
+      }
+      boscolog_lot_permits: {
+        Row: {
+          authority: string | null
+          created_at: string
+          expire_date: string | null
+          id: string
+          issue_date: string | null
+          lot_id: string
+          notes: string | null
+          other: string | null
+          protocol: string | null
+          sort_order: number
+          type: string
+          updated_at: string
+        }
+        Insert: {
+          authority?: string | null
+          created_at?: string
+          expire_date?: string | null
+          id?: string
+          issue_date?: string | null
+          lot_id: string
+          notes?: string | null
+          other?: string | null
+          protocol?: string | null
+          sort_order?: number
+          type?: string
+          updated_at?: string
+        }
+        Update: {
+          authority?: string | null
+          created_at?: string
+          expire_date?: string | null
+          id?: string
+          issue_date?: string | null
+          lot_id?: string
+          notes?: string | null
+          other?: string | null
+          protocol?: string | null
+          sort_order?: number
+          type?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      boscolog_lot_species: {
+        Row: {
+          assortment: string | null
+          common: string | null
+          created_at: string
+          id: string
+          log_length: string | null
+          lot_id: string
+          moisture_pct: string | null
+          notes: string | null
+          qty: string | null
+          quality_class: string | null
+          scientific: string | null
+          sort_order: number
+          unit: string | null
+          updated_at: string
+        }
+        Insert: {
+          assortment?: string | null
+          common?: string | null
+          created_at?: string
+          id?: string
+          log_length?: string | null
+          lot_id: string
+          moisture_pct?: string | null
+          notes?: string | null
+          qty?: string | null
+          quality_class?: string | null
+          scientific?: string | null
+          sort_order?: number
+          unit?: string | null
+          updated_at?: string
+        }
+        Update: {
+          assortment?: string | null
+          common?: string | null
+          created_at?: string
+          id?: string
+          log_length?: string | null
+          lot_id?: string
+          moisture_pct?: string | null
+          notes?: string | null
+          qty?: string | null
+          quality_class?: string | null
+          scientific?: string | null
+          sort_order?: number
+          unit?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      boscolog_parties: {
+        Row: {
+          address: string | null
+          bp_cert_id: string | null
+          bp_expire: string | null
+          bp_org: string | null
+          company_id: string
+          created_at: string
+          id: string
+          name: string
+          notes: string | null
+          role: string
+          updated_at: string
+          vat: string | null
+        }
+        Insert: {
+          address?: string | null
+          bp_cert_id?: string | null
+          bp_expire?: string | null
+          bp_org?: string | null
+          company_id: string
+          created_at?: string
+          id?: string
+          name: string
+          notes?: string | null
+          role: string
+          updated_at?: string
+          vat?: string | null
+        }
+        Update: {
+          address?: string | null
+          bp_cert_id?: string | null
+          bp_expire?: string | null
+          bp_org?: string | null
+          company_id?: string
+          created_at?: string
+          id?: string
+          name?: string
+          notes?: string | null
+          role?: string
+          updated_at?: string
+          vat?: string | null
+        }
+        Relationships: []
+      }
       country: {
         Row: {
           conflicts: boolean | null
@@ -1460,6 +1913,29 @@ export type Database = {
         }[]
       }
       is_admin_of_tool: { Args: { _tool_id: string }; Returns: boolean }
+      boscolog_company_tool_id: { Args: { _company_id: string }; Returns: string }
+      boscolog_is_company_member: { Args: { _company_id: string }; Returns: boolean }
+      boscolog_is_company_editor: { Args: { _company_id: string }; Returns: boolean }
+      boscolog_current_user_company_id: { Args: { _tool_id: string }; Returns: string }
+      boscolog_create_company_for_user: {
+        Args: {
+          _tool_id: string
+          _name: string
+          _vat?: string | null
+          _cf?: string | null
+          _address?: string | null
+          _city?: string | null
+          _province?: string | null
+          _cap?: string | null
+          _phone?: string | null
+          _email?: string | null
+          _pec?: string | null
+          _rea?: string | null
+          _legal_rep?: string | null
+        }
+        Returns: string
+      }
+      boscolog_lot_company_id: { Args: { _lot_id: string }; Returns: string }
       fsc_ensure_company_for_user: { Args: { _tool_id: string }; Returns: string }
       fsc_resolve_active_company_id: { Args: { _tool_id: string }; Returns: string }
       fsc_set_active_company: { Args: { _company_id: string }; Returns: undefined }

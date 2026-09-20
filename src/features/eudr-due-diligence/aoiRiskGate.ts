@@ -37,6 +37,8 @@ export type DdLastRunSnapshot = {
   advisory_notes?: string[]
   /** Sessione su cui sono stati salvati gli artifact (cartella storage) — per PDF/cleanup */
   dd_artifact_session_id?: string
+  /** User id della cartella storage `{userId}/eudr-due-diligence/...` (sempre il proprietario sessione) */
+  dd_artifact_user_id?: string
 }
 
 export const AOI_GATE_QUESTION_ID = 'aoi-hansen-gate'
@@ -197,6 +199,7 @@ export function buildDdLastRunSnapshot(meta: RunMetadata): DdLastRunSnapshot {
   return {
     run_id: meta.run_id,
     dd_artifact_session_id: meta.session_id,
+    dd_artifact_user_id: meta.user_id,
     completed_at: meta.completed_at || meta.created_at,
     dataset_id: meta.dataset_id,
     eudr_cutoff_date: meta.eudr_cutoff_date,

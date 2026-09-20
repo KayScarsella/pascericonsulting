@@ -131,12 +131,19 @@ export async function deleteRecords(ids: string[]) {
       .select('id, user_id')
       .in('id', allSessionIds);
     if (sessionsForDd?.length) {
-      const seen = new Set<string>();
+      let storageClient = supabase
+      try {
+        const { createServiceRoleClient } = await import('@/utils/supabase/admin')
+        storageClient = createServiceRoleClient()
+      } catch {
+        /* fallback: user client may fail RLS on eudr-due-diligence folders */
+      }
+      const seen = new Set<string>()
       for (const row of sessionsForDd) {
-        const key = `${row.user_id}:${row.id}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        await removePreviousDueDiligenceRuns(supabase, row.user_id, row.id);
+        const key = `${row.user_id}:${row.id}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        await removePreviousDueDiligenceRuns(storageClient, row.user_id, row.id)
       }
     }
 

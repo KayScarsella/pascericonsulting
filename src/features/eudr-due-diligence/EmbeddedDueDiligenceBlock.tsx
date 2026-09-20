@@ -11,6 +11,7 @@ import {
   runDueDiligenceAoiAnalysis,
   runDueDiligenceAoiAnalysisFromStorage,
   getDueDiligenceArtifactUrl,
+  stageDueDiligenceAoiForSession,
 } from '@/actions/eudr-due-diligence'
 import { LossYearChart } from '@/features/eudr-due-diligence/map/LossYearChart'
 import type { RunMetadata } from '@/features/eudr-due-diligence/types/due-diligence-run'
@@ -24,12 +25,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { createClient } from '@/utils/supabase/client'
-import {
-  buildEudrDueDiligenceAoiUploadPath,
-  uploadToUserUploadsBucket,
-  USER_UPLOADS_MAX_FILE_SIZE,
-} from '@/lib/user-uploads-client'
+import { USER_UPLOADS_MAX_FILE_SIZE } from '@/lib/user-uploads-client'
 
 const DueDiligenceMap = dynamic(
   () => import('@/features/eudr-due-diligence/map/DueDiligenceMap').then((m) => m.DueDiligenceMap),
@@ -71,6 +67,60 @@ function hasPointLikeGeometry(aoi: unknown): boolean {
   return false
 }
 
+/** Extract Feature[] from a single GeoJSON root (Geometry / Feature / FC / GeometryCollection). */
+function featuresFromGeoJsonRoot(root: unknown, sourceName: string): Array<Record<string, unknown>> {
+  if (!root || typeof root !== 'object') {
+    throw new Error(`File non valido (${sourceName}): JSON non riconosciuto come GeoJSON.`)
+  }
+  const o = root as Record<string, unknown>
+  if (o.type === 'FeatureCollection' && Array.isArray(o.features)) {
+    return o.features.filter((f): f is Record<string, unknown> => Boolean(f) && typeof f === 'object') as Array<
+      Record<string, unknown>
+    >
+  }
+  if (o.type === 'Feature') {
+    return [o]
+  }
+  if (o.type === 'GeometryCollection' && Array.isArray(o.geometries)) {
+    return (o.geometries as unknown[]).map((g, i) => ({
+      type: 'Feature',
+      properties: { source: sourceName, geometryIndex: i },
+      geometry: g,
+    }))
+  }
+  if (
+    typeof o.type === 'string' &&
+    ['Point', 'MultiPoint', 'LineString', 'MultiLineString', 'Polygon', 'MultiPolygon'].includes(o.type)
+  ) {
+    return [{ type: 'Feature', properties: { source: sourceName }, geometry: o }]
+  }
+  throw new Error(
+    `File non valido (${sourceName}): servono GeoJSON/JSON con Point/MultiPoint/Polygon/MultiPolygon (WGS84).`
+  )
+}
+
+function mergeGeoJsonFiles(
+  parsed: Array<{ name: string; data: unknown }>
+): { type: 'FeatureCollection'; features: Array<Record<string, unknown>> } {
+  const features: Array<Record<string, unknown>> = []
+  for (const { name, data } of parsed) {
+    features.push(...featuresFromGeoJsonRoot(data, name))
+  }
+  if (features.length === 0) {
+    throw new Error('Nessuna geometria trovata nei file selezionati.')
+  }
+  return { type: 'FeatureCollection', features }
+}
+
+function readFileAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error(`Impossibile leggere ${file.name}`))
+    reader.readAsText(file)
+  })
+}
+
 function hasLossFromCutYear(metadata: RunMetadata): boolean {
   const iso = metadata.cutting_date_iso
   if (!iso || !/^\d{4}/.test(iso)) return false
@@ -101,6 +151,7 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [pendingAoi, setPendingAoi] = useState<unknown>(null)
   const [pendingAoiStoragePath, setPendingAoiStoragePath] = useState<string | null>(null)
+  const [pendingUploadFile, setPendingUploadFile] = useState<File | null>(null)
   const [pendingAoiHasPoint, setPendingAoiHasPoint] = useState(false)
   const [pointBufferAreaHa, setPointBufferAreaHa] = useState('')
   const lastRunIdRef = useRef<string | null>(null)
@@ -203,68 +254,66 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
     }
   }
 
-  function onFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+  async function onFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const fileList = e.target.files
+    if (!fileList || fileList.length === 0) return
+    const files = Array.from(fileList)
+    e.target.value = ''
+
     setError(null)
     if (!cuttingDate.trim()) {
       setError('Inserire prima la data di taglio (obbligatoria), poi caricare di nuovo il file.')
-      e.target.value = ''
       return
     }
-    if (file.size > USER_UPLOADS_MAX_FILE_SIZE) {
+
+    const totalSize = files.reduce((sum, f) => sum + f.size, 0)
+    if (totalSize > USER_UPLOADS_MAX_FILE_SIZE) {
       setError(
-        `File troppo grande: massimo ${Math.round(USER_UPLOADS_MAX_FILE_SIZE / 1024 / 1024)}MB. ` +
-          'Semplifica il GeoJSON (meno vertici) o esporta una geometria più leggera.'
+        `File troppo grandi (totale): massimo ${Math.round(USER_UPLOADS_MAX_FILE_SIZE / 1024 / 1024)}MB. ` +
+          'Semplifica i GeoJSON (meno vertici) o esporta geometrie più leggere.'
       )
-      e.target.value = ''
       return
     }
 
-    const reader = new FileReader()
-    reader.onload = async () => {
-      const text = String(reader.result || '')
-      setAoiText(text)
-      try {
-        const aoi = JSON.parse(text)
-
-        setLoading(true)
-        const supabase = createClient()
-        const {
-          data: { user },
-        } = await supabase.auth.getUser()
-        if (!user) {
-          setError('Non autenticato')
+    setLoading(true)
+    try {
+      const parsed: Array<{ name: string; data: unknown }> = []
+      for (const file of files) {
+        const text = await readFileAsText(file)
+        try {
+          parsed.push({ name: file.name, data: JSON.parse(text) })
+        } catch {
+          setError(`File non valido (${file.name}): JSON non parsabile.`)
           return
         }
-
-        const storagePath = buildEudrDueDiligenceAoiUploadPath({
-          userId: user.id,
-          sessionId,
-          fileName: file.name,
-        })
-        const uploadRes = await uploadToUserUploadsBucket({
-          storagePath,
-          file,
-          upsert: true,
-        })
-        if (uploadRes.error) {
-          setError(uploadRes.error)
-          return
-        }
-
-        setPendingAoiStoragePath(storagePath)
-        setPendingAoi(aoi)
-        setPendingAoiHasPoint(hasPointLikeGeometry(aoi))
-        setConfirmOpen(true)
-      } catch {
-        setError('File non valido: servono GeoJSON/JSON con Point/MultiPoint/Polygon/MultiPolygon (WGS84).')
-      } finally {
-        setLoading(false)
       }
+
+      const merged = mergeGeoJsonFiles(parsed)
+      const mergedText = JSON.stringify(merged)
+      setAoiText(mergedText)
+
+      const uploadName =
+        files.length === 1 ? files[0].name : `aoi-merged-${files.length}-files.geojson`
+      const mergedFile = new File([mergedText], uploadName, {
+        type: 'application/geo+json',
+      })
+
+      // Keep in memory until confirm — upload only when the user starts the analysis
+      // (avoids orphan aoi-uploaded-* files when canceling or re-selecting).
+      setPendingUploadFile(mergedFile)
+      setPendingAoiStoragePath(null)
+      setPendingAoi(merged)
+      setPendingAoiHasPoint(hasPointLikeGeometry(merged))
+      setConfirmOpen(true)
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'File non valido: servono GeoJSON/JSON con Point/MultiPoint/Polygon/MultiPolygon (WGS84).'
+      setError(message)
+    } finally {
+      setLoading(false)
     }
-    reader.readAsText(file)
-    e.target.value = ''
   }
 
   function runFromTextarea() {
@@ -275,6 +324,8 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
     }
     try {
       const aoi = JSON.parse(aoiText)
+      setPendingUploadFile(null)
+      setPendingAoiStoragePath(null)
       setPendingAoi(aoi)
       setPendingAoiHasPoint(hasPointLikeGeometry(aoi))
       setConfirmOpen(true)
@@ -292,14 +343,29 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
       }
     }
     setConfirmOpen(false)
-    if (pendingAoiStoragePath) {
-      await runAnalysisFromStorage(pendingAoiStoragePath)
-    } else if (pendingAoi != null) {
-      await runAnalysis(pendingAoi)
+
+    try {
+      if (pendingUploadFile) {
+        setLoading(true)
+        const geoJsonText = await pendingUploadFile.text()
+        const stageRes = await stageDueDiligenceAoiForSession(sessionId, geoJsonText)
+        if (stageRes.error || !stageRes.storagePath) {
+          setError(stageRes.error ?? 'Upload AOI fallito')
+          setLoading(false)
+          return
+        }
+        await runAnalysisFromStorage(stageRes.storagePath)
+      } else if (pendingAoiStoragePath) {
+        await runAnalysisFromStorage(pendingAoiStoragePath)
+      } else if (pendingAoi != null) {
+        await runAnalysis(pendingAoi)
+      }
+    } finally {
+      setPendingAoi(null)
+      setPendingAoiStoragePath(null)
+      setPendingUploadFile(null)
+      setPendingAoiHasPoint(false)
     }
-    setPendingAoi(null)
-    setPendingAoiStoragePath(null)
-    setPendingAoiHasPoint(false)
   }
 
   return (
@@ -389,7 +455,7 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
         <div>
           <h3 className="font-bold text-[#3d2b1a] text-base">Due diligence geospaziale (AOI)</h3>
           <p className="text-xs text-[#7a5f2a]/80 mt-0.5">
-            Carica un file GeoJSON/JSON con il poligono dell&apos;area di interesse, oppure incolla il JSON.
+            Carica uno o più file GeoJSON/JSON con i poligoni dell&apos;area di interesse, oppure incolla il JSON.
             Dopo l&apos;analisi la mappa e il grafico compaiono qui senza uscire dalla pagina.
           </p>
         </div>
@@ -425,14 +491,16 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
           <input
             ref={fileInputRef}
             type="file"
+            multiple
             disabled={loading}
             accept=".geojson,.json,application/geo+json,application/json"
             className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-md file:border file:border-slate-300 file:bg-white file:px-3 file:py-2 file:text-sm file:font-medium file:text-[#3d2b1a] hover:file:bg-slate-50 disabled:opacity-50 disabled:pointer-events-none"
             onChange={onFileSelected}
           />
           <p className="text-xs text-slate-500 mt-1">
-            Una sola AOI per analisi: ogni nuova esecuzione sostituisce file e risultati precedenti per questa
-            sessione nello storage.
+            Puoi selezionare più file GeoJSON: vengono uniti in un&apos;unica Area di Interesse e analizzati
+            in una sola esecuzione. L&apos;upload su storage avviene solo all&apos;avvio dell&apos;analisi;
+            ogni nuova analisi sostituisce file e risultati precedenti per questa sessione.
           </p>
         </div>
 

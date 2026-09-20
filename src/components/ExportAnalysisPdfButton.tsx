@@ -586,9 +586,9 @@ function buildPdf(
     if (!ddPdfPayload) {
       autoTable(doc, {
         startY: y,
-        head: [['Stato allegato AOI']],
+        head: [['Stato allegato Area Di Interesse']],
         body: [[
-          'Dati AOI non disponibili per questa analisi (run non presente o artefatti non caricati).',
+          'Dati Area Di Interesse non disponibili per questa analisi (run non presente o artefatti non caricati).',
         ]],
         margin: { left: margin, right: margin },
         theme: 'grid',
@@ -601,12 +601,19 @@ function buildPdf(
     }
 
     if (ddPdfPayload) {
-      // Summary line + gate outcome
+      // Summary line + synthetic message (gate outcome moved to Dettagli)
       const gateActive = Boolean(ddPdfPayload.gate_triggers_non_accettabile)
+      const gateOutcomeLabel = gateActive ? 'NON TRASCURABILE' : 'nessun gate attivato'
+      const messaggioSinteticoBlock = ddPdfPayload.ui_blocks?.find(
+        (b) => (b.heading || '').trim().toLowerCase() === 'messaggio sintetico'
+      )
+      const messaggioSinteticoText =
+        messaggioSinteticoBlock?.body?.trim() ||
+        'Messaggio sintetico non disponibile per questo run.'
 
       const aoiSummaryRows: Array<[string, string]> = [
         ['Data di taglio', normalizePdfText(`${ddPdfPayload.cutting_date_iso} (anno ${ddPdfPayload.cutting_year})`)],
-        ['Esito gate AOI', normalizePdfText(gateActive ? 'NON TRASCURABILE' : 'nessun gate attivato')],
+        ['Messaggio sintetico', normalizePdfText(messaggioSinteticoText)],
       ]
       autoTable(doc, {
         startY: y,
@@ -626,7 +633,7 @@ function buildPdf(
 
       // KPI table
       const kpiRows: Array<[string, string]> = [
-        ['AOI (ha)', ddPdfPayload.aoi_area_ha != null ? ddPdfPayload.aoi_area_ha.toFixed(2) : '—'],
+        ['Area Di Interesse (ha)', ddPdfPayload.aoi_area_ha != null ? ddPdfPayload.aoi_area_ha.toFixed(2) : '—'],
         ['Pixel loss Hansen (tot)', ddPdfPayload.loss_pixel_count != null ? String(ddPdfPayload.loss_pixel_count) : '—'],
         ['Anno taglio', String(ddPdfPayload.cutting_year || '—')],
       ]
@@ -648,7 +655,7 @@ function buildPdf(
 
     // Immagine mappa in sezione dedicata
     if (ddPdfPayload.dd_snapshot_image_data_url) {
-      drawSectionDivider('Foto mappa AOI salvata')
+      drawSectionDivider('Foto mappa Area Di Interesse salvata')
       try {
         const maxMapW = pageW - 2 * margin
         const maxMapH = 115
@@ -671,7 +678,7 @@ function buildPdf(
         y += drawH + 4
         doc.setFontSize(7)
         doc.setTextColor(90, 90, 90)
-        doc.text('Mappa AOI (Sentinel-2/JRC/Hansen) — immagine generata e salvata su storage', margin, y)
+        doc.text('Mappa Area Di Interesse (Sentinel-2/JRC/Hansen) — immagine generata e salvata su storage', margin, y)
         doc.setTextColor(0, 0, 0)
         y += 6
       } catch {
@@ -687,7 +694,7 @@ function buildPdf(
       doc.setFontSize(8)
       doc.setTextColor(80, 80, 80)
       doc.text(
-        'Vista mappa non disponibile. Il report sotto resta valido (numeri + istogramma + note).',
+        'Vista mappa non disponibile (snapshot non ancora generato o errore Earth Engine). Rilanciare l\'analisi AOI e riesportare il PDF. I dati numerici e l\'istogramma sotto restano validi.',
         margin,
         y
       )
@@ -717,7 +724,7 @@ function buildPdf(
     if (gateActive && ddPdfPayload.gate_reasons?.length) {
       autoTable(doc, {
         startY: y,
-        head: [['Motivazioni (gate AOI)']],
+        head: [['Motivazioni (gate Area Di Interesse)']],
         body: ddPdfPayload.gate_reasons.map((r) => [normalizePdfText(r)]),
         margin: { left: margin, right: margin },
         theme: 'grid',
@@ -730,18 +737,28 @@ function buildPdf(
     }
 
     // Dettagli e note operative (tabella grigia stile office)
+    // Messaggio sintetico is shown in Sintesi; put Esito gate here instead.
     const detailRowsFromPayload: Array<[string, string]> =
-      ddPdfPayload.ui_blocks?.map(
-        (b): [string, string] => [normalizePdfText(b.heading || 'Dettaglio'), normalizePdfText(b.body)]
-      ) ?? []
+      (ddPdfPayload.ui_blocks ?? [])
+        .filter((b) => (b.heading || '').trim().toLowerCase() !== 'messaggio sintetico')
+        .map((b): [string, string] => [normalizePdfText(b.heading || 'Dettaglio'), normalizePdfText(b.body)])
     const detailRows: Array<[string, string]> =
       detailRowsFromPayload.length > 0
-        ? detailRowsFromPayload
+        ? [
+            ['Esito gate Area Di Interesse', normalizePdfText(gateOutcomeLabel)],
+            ...detailRowsFromPayload,
+          ]
         : [
-            ['Logica screening', gateActive ? 'Gate AOI attivato (esito non trascurabile).' : 'Nessun gate AOI attivato.'],
+            ['Esito gate Area Di Interesse', normalizePdfText(gateOutcomeLabel)],
+            [
+              'Logica screening',
+              gateActive
+                ? 'Gate Area Di Interesse attivato (esito non trascurabile).'
+                : 'Nessun gate Area Di Interesse attivato.',
+            ],
             [
               'Risultato numerico',
-              `Pixel Hansen con loss ~ ${ddPdfPayload.loss_pixel_count ?? '—'} · AOI ~ ${ddPdfPayload.aoi_area_ha?.toFixed(2) ?? '—'} ha`,
+              `Pixel Hansen con loss ~ ${ddPdfPayload.loss_pixel_count ?? '—'} · Area Di Interesse ~ ${ddPdfPayload.aoi_area_ha?.toFixed(2) ?? '—'} ha`,
             ],
           ]
     autoTable(doc, {
@@ -825,7 +842,7 @@ function buildPdf(
 
       // Glossario termini (nuova tabella grigia)
       const glossaryRows: Array<[string, string, string]> = [
-        ['AOI', 'Area of Interest', "La zona geografica specifica dove il legno e stato tagliato"],
+        ['Area Di Interesse', 'Area of Interest (AOI)', 'La zona geografica specifica dove il legno e stato tagliato'],
         ['Hansen', 'Global Forest Change Dataset da UMD', 'Dati satellitari mondiali che rilevano tagli forestali'],
         ['Loss', 'Forest Loss (riduzione copertura forestale)', 'Aree dove gli alberi sono stati abbattuti'],
         ['Screening', 'Verifica automatica iniziale', 'Test che controlla rapidamente se il legno e conforme'],
@@ -842,9 +859,9 @@ function buildPdf(
         headStyles: { fillColor: [180, 180, 180], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
         bodyStyles: { fontSize: 8, fillColor: TABLE_BODY_GRAY },
         columnStyles: {
-          0: { cellWidth: 22 },
-          1: { cellWidth: 76 },
-          2: { cellWidth: pageW - 2 * margin - 98 },
+          0: { cellWidth: 36 },
+          1: { cellWidth: 70 },
+          2: { cellWidth: pageW - 2 * margin - 106 },
         },
         pageBreak: 'auto',
       })

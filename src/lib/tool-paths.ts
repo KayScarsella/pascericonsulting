@@ -1,10 +1,16 @@
-import { CLOUD_FSC_TOOL_ID, EUDR_TOOL_ID, TIMBER_TOOL_ID } from "@/lib/constants"
+import {
+  BOSCOLOG_TOOL_ID,
+  CLOUD_FSC_TOOL_ID,
+  EUDR_TOOL_ID,
+  TIMBER_TOOL_ID,
+} from "@/lib/constants"
 
 /** Fallback when `tools.base_path` is null in DB (avoids landing-page config alerts). */
 export const TOOL_DEFAULT_BASE_PATHS: Record<string, string> = {
   [EUDR_TOOL_ID]: "/EUDR",
   [TIMBER_TOOL_ID]: "/timberRegulation",
   [CLOUD_FSC_TOOL_ID]: "/cloud-fsc",
+  [BOSCOLOG_TOOL_ID]: "/boscolog",
 }
 
 export function resolveToolBasePath(

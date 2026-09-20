@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient } from '@/utils/supabase/server'
+import { createServiceRoleClient } from '@/utils/supabase/admin'
 import type { Json } from '@/types/supabase'
 import { validateSessionAccess } from '@/actions/questions'
 import { EUDR_TOOL_ID } from '@/lib/constants'
@@ -164,10 +165,10 @@ async function renderAoiMapPng(
 }
 
 /**
- * Same EE recipe as the interactive tiles, but persisted asynchronously so the action can return
- * immediately with tile URLs. Patches dd_report.json only if run_id still matches (avoids races).
+ * Same EE recipe as the interactive tiles, persisted for PDF.
+ * Awaits so dd_report.json has has_snapshot=true before the client navigates to risultato.
  */
-function schedulePersistAoiMapPng(
+async function persistAoiMapPng(
   supabase: SupabaseClient,
   params: {
     reportPath: string
@@ -177,33 +178,36 @@ function schedulePersistAoiMapPng(
     cuttingDateIso: string
     sentinel2Year: number
   }
-): void {
+): Promise<boolean> {
   const { reportPath, pngPath, runId, aoiEe, cuttingDateIso, sentinel2Year } = params
-  void (async () => {
-    try {
-      const renderBuf = await renderAoiMapPng(aoiEe, cuttingDateIso, sentinel2Year)
-      if (!renderBuf) return
-      const { error: renderUpErr } = await supabase.storage.from('user-uploads').upload(pngPath, renderBuf, {
-        contentType: 'image/png',
-        upsert: true,
-      })
-      if (renderUpErr) return
+  try {
+    const renderBuf = await renderAoiMapPng(aoiEe, cuttingDateIso, sentinel2Year)
+    if (!renderBuf) return false
+    const { error: renderUpErr } = await supabase.storage.from('user-uploads').upload(pngPath, renderBuf, {
+      contentType: 'image/png',
+      upsert: true,
+    })
+    if (renderUpErr) return false
 
-      const { data: fileData, error: dlErr } = await supabase.storage.from('user-uploads').download(reportPath)
-      if (dlErr || !fileData) return
-      const report = JSON.parse(await fileData.text()) as { run_id?: string; has_snapshot?: boolean; snapshot_storage_filename?: string }
-      if (report.run_id !== runId) return
-
-      report.has_snapshot = true
-      report.snapshot_storage_filename = AOI_MAP_RENDER_FILENAME
-      await supabase.storage.from('user-uploads').upload(reportPath, JSON.stringify(report), {
-        contentType: 'application/json',
-        upsert: true,
-      })
-    } catch {
-      /* ignore */
+    const { data: fileData, error: dlErr } = await supabase.storage.from('user-uploads').download(reportPath)
+    if (dlErr || !fileData) return false
+    const report = JSON.parse(await fileData.text()) as {
+      run_id?: string
+      has_snapshot?: boolean
+      snapshot_storage_filename?: string
     }
-  })()
+    if (report.run_id !== runId) return false
+
+    report.has_snapshot = true
+    report.snapshot_storage_filename = AOI_MAP_RENDER_FILENAME
+    await supabase.storage.from('user-uploads').upload(reportPath, JSON.stringify(report), {
+      contentType: 'application/json',
+      upsert: true,
+    })
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -260,9 +264,23 @@ async function runDueDiligenceWithNormalized(
 
   const { data: sessionRow0 } = await supabase
     .from('assessment_sessions')
-    .select('metadata')
+    .select('metadata, user_id')
     .eq('id', sessionId)
     .single()
+
+  if (!sessionRow0?.user_id) {
+    return { error: 'Sessione non trovata' }
+  }
+
+  // Artifacts always live under the session owner folder (PDF/risultato look there).
+  // Service role is required so an admin can write into the owner's prefix.
+  const sessionOwnerId = sessionRow0.user_id
+  let storage: SupabaseClient
+  try {
+    storage = createServiceRoleClient()
+  } catch {
+    return { error: 'Configurazione storage mancante (SUPABASE_SERVICE_ROLE_KEY).' }
+  }
 
   const meta0 = (sessionRow0?.metadata as Record<string, unknown>) || {}
   const inProgress = meta0.dd_analysis_in_progress === true
@@ -305,17 +323,21 @@ async function runDueDiligenceWithNormalized(
   let runId: string | undefined
 
   try {
-    await removePreviousDueDiligenceRuns(supabase, user.id, sessionId)
+    await removePreviousDueDiligenceRuns(storage, sessionOwnerId, sessionId)
+    // Also clear staging leftovers under the runner (old aoi-uploaded-* / staging).
+    if (user.id !== sessionOwnerId) {
+      await removePreviousDueDiligenceRuns(storage, user.id, sessionId)
+    }
 
     runId = randomUUID()
-    const userId = user.id
+    const userId = sessionOwnerId
     const aoiPath = aoiGeoJsonSessionPath(userId, sessionId)
     const reportPath = ddReportJsonSessionPath(userId, sessionId)
     const pngPath = aoiMapRenderSessionPath(userId, sessionId)
 
     const aoiFeatureCollection = buildStorageFeatureCollection(normalized.geometries, validPointBufferAreaHa)
 
-    const { error: uploadAoiError } = await supabase.storage
+    const { error: uploadAoiError } = await storage.storage
       .from('user-uploads')
       .upload(aoiPath, JSON.stringify(aoiFeatureCollection), {
         contentType: 'application/geo+json',
@@ -419,12 +441,12 @@ async function runDueDiligenceWithNormalized(
       hasSnapshot: false,
     })
 
-    await supabase.storage.from('user-uploads').upload(reportPath, JSON.stringify(reportPayload), {
+    await storage.storage.from('user-uploads').upload(reportPath, JSON.stringify(reportPayload), {
       contentType: 'application/json',
       upsert: true,
     })
 
-    schedulePersistAoiMapPng(supabase, {
+    await persistAoiMapPng(storage, {
       reportPath,
       pngPath,
       runId,
@@ -551,41 +573,102 @@ export async function runDueDiligenceAoiAnalysisFromStorage(
   if (!user) return { error: 'Non autenticato' }
 
   try {
-    await validateSessionAccess(supabase, EUDR_TOOL_ID, sessionId)
+    const { sessionOwnerId } = await validateSessionAccess(supabase, EUDR_TOOL_ID, sessionId)
+
+    // Accept staging under session owner (canonical) or under the runner (legacy client upload).
+    const ownerPrefix = `${sessionOwnerId}/eudr-due-diligence/${sessionId}/`
+    const runnerPrefix = `${user.id}/eudr-due-diligence/${sessionId}/`
+    const pathOk =
+      Boolean(aoiStoragePath) &&
+      (aoiStoragePath.startsWith(ownerPrefix) || aoiStoragePath.startsWith(runnerPrefix))
+    if (!pathOk) {
+      return { error: 'Percorso AOI non valido' }
+    }
+
+    let storage: SupabaseClient = supabase
+    try {
+      storage = createServiceRoleClient()
+    } catch {
+      /* user client — works for own staging prefix */
+    }
+
+    const { data: fileData, error: dlErr } = await storage.storage.from('user-uploads').download(aoiStoragePath)
+    if (dlErr || !fileData) return { error: dlErr?.message ?? 'Download AOI fallito' }
+
+    const text = await fileData.text()
+    const bytes = Buffer.byteLength(text, 'utf8')
+    if (bytes > 10 * 1024 * 1024) {
+      return { error: 'AOI troppo grande: massimo 10MB' }
+    }
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      return { error: 'AOI non valida: JSON non parsabile' }
+    }
+
+    const normalized = normalizeAoiInput(parsed)
+    if (!normalized) {
+      return {
+        error:
+          'AOI non valida: caricare GeoJSON Point/MultiPoint/Polygon/MultiPolygon, oppure Feature/FeatureCollection (WGS84).',
+      }
+    }
+
+    return await runDueDiligenceWithNormalized(sessionId, normalized, cuttingDateIso, pointBufferAreaHa)
   } catch (e) {
     return { error: e instanceof Error ? e.message : 'Accesso negato' }
   }
+}
 
-  const expectedPrefix = `${user.id}/eudr-due-diligence/${sessionId}/`
-  if (!aoiStoragePath || !aoiStoragePath.startsWith(expectedPrefix)) {
-    return { error: 'Percorso AOI non valido' }
-  }
+/** Upload AOI staging GeoJSON under the session owner folder (service role). */
+export async function stageDueDiligenceAoiForSession(
+  sessionId: string,
+  geoJsonText: string
+): Promise<{ storagePath?: string; error?: string }> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { error: 'Non autenticato' }
 
-  const { data: fileData, error: dlErr } = await supabase.storage.from('user-uploads').download(aoiStoragePath)
-  if (dlErr || !fileData) return { error: dlErr?.message ?? 'Download AOI fallito' }
-
-  const text = await fileData.text()
-  const bytes = Buffer.byteLength(text, 'utf8')
-  if (bytes > 10 * 1024 * 1024) {
-    return { error: 'AOI troppo grande: massimo 10MB' }
-  }
-
-  let parsed: unknown
   try {
-    parsed = JSON.parse(text)
-  } catch {
-    return { error: 'AOI non valida: JSON non parsabile' }
-  }
+    const { sessionOwnerId } = await validateSessionAccess(supabase, EUDR_TOOL_ID, sessionId)
+    const bytes = Buffer.byteLength(geoJsonText, 'utf8')
+    if (bytes <= 0) return { error: 'File AOI vuoto' }
+    if (bytes > 10 * 1024 * 1024) return { error: 'AOI troppo grande: massimo 10MB' }
 
-  const normalized = normalizeAoiInput(parsed)
-  if (!normalized) {
-    return {
-      error:
-        'AOI non valida: caricare GeoJSON Point/MultiPoint/Polygon/MultiPolygon, oppure Feature/FeatureCollection (WGS84).',
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(geoJsonText)
+    } catch {
+      return { error: 'AOI non valida: JSON non parsabile' }
     }
-  }
+    if (!normalizeAoiInput(parsed)) {
+      return {
+        error:
+          'AOI non valida: caricare GeoJSON Point/MultiPoint/Polygon/MultiPolygon, oppure Feature/FeatureCollection (WGS84).',
+      }
+    }
 
-  return await runDueDiligenceWithNormalized(sessionId, normalized, cuttingDateIso, pointBufferAreaHa)
+    let storage: SupabaseClient
+    try {
+      storage = createServiceRoleClient()
+    } catch {
+      return { error: 'Configurazione storage mancante (SUPABASE_SERVICE_ROLE_KEY).' }
+    }
+
+    const storagePath = `${sessionOwnerId}/eudr-due-diligence/${sessionId}/aoi-upload-staging.geojson`
+    const { error: upErr } = await storage.storage.from('user-uploads').upload(storagePath, geoJsonText, {
+      contentType: 'application/geo+json',
+      upsert: true,
+    })
+    if (upErr) return { error: upErr.message }
+    return { storagePath }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Accesso negato' }
+  }
 }
 
 export async function getDueDiligenceArtifactUrl(
@@ -599,19 +682,33 @@ export async function getDueDiligenceArtifactUrl(
   if (!user) return { error: 'Non autenticato' }
 
   try {
-    await validateSessionAccess(supabase, EUDR_TOOL_ID, sessionId)
+    const { sessionOwnerId } = await validateSessionAccess(supabase, EUDR_TOOL_ID, sessionId)
+
+    const ownerPrefix = `${sessionOwnerId}/eudr-due-diligence/${sessionId}/`
+    const runnerPrefix = `${user.id}/eudr-due-diligence/${sessionId}/`
+    const pathOk =
+      storagePath.startsWith(ownerPrefix) ||
+      storagePath.startsWith(runnerPrefix) ||
+      // legacy flat path check: must include session id segment
+      (storagePath.includes('/eudr-due-diligence/') && storagePath.includes(`/${sessionId}/`))
+    if (!pathOk) {
+      return { error: 'Percorso non valido' }
+    }
+
+    let storage: SupabaseClient
+    try {
+      storage = createServiceRoleClient()
+    } catch {
+      return { error: 'Configurazione storage mancante' }
+    }
+
+    const { data, error } = await storage.storage
+      .from('user-uploads')
+      .createSignedUrl(storagePath, 3600, { download: false })
+
+    if (error) return { error: error.message }
+    return { signedUrl: data.signedUrl }
   } catch {
     return { error: 'Accesso negato' }
   }
-
-  if (!storagePath.includes(user.id) || !storagePath.includes('eudr-due-diligence')) {
-    return { error: 'Percorso non valido' }
-  }
-
-  const { data, error } = await supabase.storage
-    .from('user-uploads')
-    .createSignedUrl(storagePath, 3600, { download: false })
-
-  if (error) return { error: error.message }
-  return { signedUrl: data.signedUrl }
 }
