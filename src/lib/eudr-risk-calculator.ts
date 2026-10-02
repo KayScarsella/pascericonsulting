@@ -3,11 +3,14 @@
  * EUDR "Valutazione Finale" risk calculation aligned with legacy PHP $labels / Risk_Index_*.
  *
  * - Affidabilità (1,2,3,4,44): same DATI_LEGALI mapping as timber risk-calculator.
- * - Conflitti / Segnalazioni / Sanzioni: si → 1, no → 0.30 (PHP).
+ * - Conflitti / Sanzioni: si → 1, no → 0.30 (PHP).
  * - Passaggi proprietà / Non mescolamento: no → 1, si → 0.30 (PHP).
  * - Rischio paese: RB/RS/RA → low/standard/high (RS = 0.30 per rischio_paese.csv). RM kept as legacy alias.
  *
  * overallRisk = max(all indices); ≤ 0.30 → accettabile + expiry +12 months.
+ *
+ * 2026-10: removed scored dimensions Segnalazioni / Tutela ambiente / Norme foreste /
+ * Rispetto legislazione / Preoccupazioni (merged into remaining questions or deleted).
  */
 
 import type { RiskDetail, RiskCalculationResult } from "@/lib/risk-calculator"
@@ -37,24 +40,14 @@ const Q_CONFLITTI = "f4a5b6c7-d8e9-4f0a-8b1c-2d3e4f5a6b21"
 const Q_SICUREZZA_LAVORO = "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c31"
 /** 2) Diritti umani rispettati */
 const Q_DIRITTI_UMANI = "d7e8f9a0-b1c2-4d3e-9f4a-5b6c7d8e9f42"
-/** 3) FPIC / Popoli tradizionali */
+/** 3) FPIC / Popoli tradizionali (+ segnalazioni merge) */
 const Q_FPIC = "b8c9d0e1-f2a3-4b4c-8d5e-9f0a1b2c3d53"
-/** 4) Segnalazioni popolazioni indigene */
-const Q_SEGNALAZIONI = "e2f3a4b5-c6d7-4e8f-9a0b-1c2d3e4f5a64"
-/** 1) Evidenze diritti uso suolo */
+/** 1) Evidenze diritti uso suolo + tutela ambiente + norme forestali */
 const Q_USO_SUOLO = "d3e4f5a6-b7c8-4d9e-8f0a-1b2c3d4e5f81"
-/** 2) Evidenze tutela ambiente */
-const Q_TUTELA_AMBIENTE = "f6a7b8c9-d0e1-4f2a-9b3c-4d5e6f7a8b92"
-/** 3) Norme foreste / biodiversità */
-const Q_NORME_FORESTE = "a4b5c6d7-e8f9-4a0b-9c1d-2e3f4a5b6c03"
-/** 4) Rispetto legislazione produzione */
-const Q_RISPETTO_LEGISLAZIONE = "c7d8e9f0-a1b2-4c3d-9e4f-5a6b7c8d9e14"
-/** 5) Leggi status giuridico (fiscale, anticorruzione, doganale) */
+/** 2) Leggi status giuridico (+ assenza falsificazione) */
 const Q_STATUS_GIURIDICO = "e8f9a0b1-c2d3-4e4f-8a9b-5c6d7e8f9a25"
-/** 6) Deforestazione zero */
+/** 3) Deforestazione zero */
 const Q_DEFORESTAZIONE_ZERO = "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d36"
-/** 7) Preoccupazioni corruzione / falsificazione / applicazione legge */
-const Q_PREOCCUPAZIONI = "d5e6f7a8-b9c0-4d1e-9f2a-3c4d5e6f7a47"
 /** 1) Passaggi proprietà noti */
 const Q_PASSAGGI = "e9f0a1b2-c3d4-4e5f-8a9b-0c1d2e3f4a58"
 /** 2) Sicurezza non mescolamento */
@@ -90,25 +83,13 @@ const LABELS_DATI_LEGALI: Record<string, string> = {
   "44": "Affidabilità bassa",
 }
 
-/** PHP: Conflitti/Sanzioni/Segnalazioni si → 1, no → 0.30 */
+/** PHP: Conflitti/Sanzioni si → 1, no → 0.30 */
 const SI_BAD_EUDR: Record<string, number> = {
   si: 1.0,
   no: 0.3,
 }
 
-/** Segnalazioni: non_applicabile → low risk */
-const SEGNALAZIONI_LOOKUP: Record<string, number> = {
-  si: 1.0,
-  no: 0.3,
-  non_applicabile: 0.1,
-}
-
 const LABELS_SI_NO: Record<string, string> = { si: "Sì", no: "No" }
-const LABELS_SEGNALAZIONI: Record<string, string> = {
-  si: "Sì",
-  no: "No",
-  non_applicabile: "Non applicabile",
-}
 
 /** PHP: Passaggi/Mescolamento – no → 1, si → 0.30 */
 const NO_BAD_EUDR: Record<string, number> = {
@@ -174,7 +155,7 @@ export const EUDR_SCORED_QUESTIONS: {
   {
     id: Q_SICUREZZA_LAVORO,
     label:
-      "Sono rispettati i requisiti legali relativi alla salute e alla sicurezza sul lavoro",
+      "Sono rispettati i requisiti legali relativi alla salute e alla sicurezza sul lavoro nelle attività connesse alla raccolta, trasformazione e fornitura del legname?",
     shortLabel: "Sicurezza sul lavoro",
     lookup: DATI_LEGALI,
     labels: LABELS_DATI_LEGALI,
@@ -182,7 +163,7 @@ export const EUDR_SCORED_QUESTIONS: {
   {
     id: Q_DIRITTI_UMANI,
     label:
-      "I diritti umani tutelati dal diritto internazionale, così come sanciti dal diritto nazionale, vengono rispettati",
+      "I diritti umani tutelati dal diritto internazionale e dal diritto nazionale sono rispettati lungo la catena di approvvigionamento del prodotto interessato?",
     shortLabel: "Diritti umani",
     lookup: DATI_LEGALI,
     labels: LABELS_DATI_LEGALI,
@@ -190,53 +171,22 @@ export const EUDR_SCORED_QUESTIONS: {
   {
     id: Q_FPIC,
     label:
-      "I diritti dei Popoli Tradizionali, popolazioni indigene e le comunità locali (FPIC) sono rispettati",
+      "Diritti Popoli Tradizionali / FPIC e assenza di segnalazioni motivate sull'uso o proprietà della superficie",
     shortLabel: "FPIC / Popoli tradizionali",
     lookup: DATI_LEGALI,
     labels: LABELS_DATI_LEGALI,
   },
   {
-    id: Q_SEGNALAZIONI,
-    label:
-      "Esistono segnalazioni motivate da popolazioni indigene/tradizionali/comunità locali sull'uso o proprietà della superficie",
-    shortLabel: "Segnalazioni popoli",
-    lookup: SEGNALAZIONI_LOOKUP,
-    labels: LABELS_SEGNALAZIONI,
-  },
-  {
     id: Q_USO_SUOLO,
-    label: "Esistenza di evidenze sui diritti d'uso del suolo",
-    shortLabel: "Evidenze uso suolo",
-    lookup: DATI_LEGALI,
-    labels: LABELS_DATI_LEGALI,
-  },
-  {
-    id: Q_TUTELA_AMBIENTE,
-    label: "Esistenza di evidenze sui diritti di tutela dell'ambiente",
-    shortLabel: "Tutela ambiente",
-    lookup: DATI_LEGALI,
-    labels: LABELS_DATI_LEGALI,
-  },
-  {
-    id: Q_NORME_FORESTE,
-    label:
-      "Evidenza su norme relative alle foreste, gestione e conservazione biodiversità (racc. legno)",
-    shortLabel: "Norme foreste",
-    lookup: DATI_LEGALI,
-    labels: LABELS_DATI_LEGALI,
-  },
-  {
-    id: Q_RISPETTO_LEGISLAZIONE,
-    label:
-      "Informazioni probanti che le materie prime sono state prodotte nel rispetto della legislazione del paese",
-    shortLabel: "Rispetto legislazione",
+    label: "Evidenze su diritti d'uso del suolo, tutela ambiente, norme forestali",
+    shortLabel: "Evidenze uso suolo / ambiente / foreste",
     lookup: DATI_LEGALI,
     labels: LABELS_DATI_LEGALI,
   },
   {
     id: Q_STATUS_GIURIDICO,
     label:
-      "Evidenze su leggi applicabili (fiscale, anticorruzione, commerciale, doganale) sullo status giuridico della zona",
+      "Evidenze sul rispetto delle leggi (fiscale, anticorruzione, commerciale, doganale) e assenza di falsificazione documenti",
     shortLabel: "Status giuridico",
     lookup: DATI_LEGALI,
     labels: LABELS_DATI_LEGALI,
@@ -246,14 +196,6 @@ export const EUDR_SCORED_QUESTIONS: {
     label:
       "Informazioni probanti che i prodotti sono a deforestazione zero",
     shortLabel: "Deforestazione zero",
-    lookup: DATI_LEGALI,
-    labels: LABELS_DATI_LEGALI,
-  },
-  {
-    id: Q_PREOCCUPAZIONI,
-    label:
-      "Preoccupazioni su corruzione, falsificazione documenti, carenze applicazione legge (paese origine)",
-    shortLabel: "Preoccupazioni paese",
     lookup: DATI_LEGALI,
     labels: LABELS_DATI_LEGALI,
   },

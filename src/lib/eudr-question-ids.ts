@@ -18,7 +18,8 @@ export const EUDR_SPEC_PAESE_GRID_QUESTION_ID = "03dd3221-ba2f-4c83-9148-8fd06f3
 export const EUDR_Q_IMPORTAZIONE: string | null = null
 
 /**
- * Ultima sezione Analisi Rischio — numero paesi (se presente come domanda dedicata).
+ * Ultima sezione Analisi Rischio / catena — numero paesi (legacy).
+ * Rimosso dal questionario EUDR (2026-10); resolver resta per sessioni storiche se la riga esistesse ancora.
  */
 export const EUDR_Q_NUM_PAESE: string | null = null
 

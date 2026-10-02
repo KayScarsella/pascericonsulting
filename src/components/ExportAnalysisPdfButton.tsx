@@ -14,7 +14,7 @@ import type { EudrDdsType } from '@/types/session'
 const DISCLAIMER_EUTR =
   "Il rapporto è stato generato tramite il portale timber tutor di Pasceri Consulting. La responsabilità della valutazione della trascurabilità del rischio ricade esclusivamente sull'operatore EUTR che utilizza tale strumento informatico."
 const DISCLAIMER_EUDR =
-  "Il rapporto è stato generato tramite il portale EUDR tutor di Pasceri Consulting. La responsabilità della valutazione della trascurabilità del rischio ricade esclusivamente sul timber operator che utilizza tale strumento informatico."
+  "Il rapporto è stato generato tramite il portale EUDR tutor di Pasceri Consulting. La responsabilità della valutazione della trascurabilità del rischio ricade esclusivamente sull'operatore che utilizza tale strumento informatico."
 
 const THRESHOLD = 0.30
 
@@ -65,7 +65,7 @@ export interface ExportAnalysisPdfProps {
   /** Forza comportamenti specifici regolamento (wrapping titoli, disclaimer default, ecc.) */
   variant?: 'EUDR' | 'EUTR'
   nomeOperazione: string
-  /** Dati utente (profilo) per sezione PDF "Dati utente" */
+  /** Dati operatore (profilo) per sezione PDF "Dati operatore" */
   userProfile?: {
     full_name?: string | null
     ragione_sociale?: string | null
@@ -320,7 +320,7 @@ function buildPdf(
   // 2. Tabella riepilogo progetto con codice sessione base.
   autoTable(doc, {
     startY: y,
-    head: [['Sintesi richiesta', 'Valore']],
+    head: [['Sintesi richiesta', '']],
     body: [
       ['Codice analisi', analysisCode],
       ['Operazione', nomeOperazione],
@@ -346,7 +346,7 @@ function buildPdf(
 
   autoTable(doc, {
     startY: y,
-    head: [['Dati utente', 'Valore']],
+    head: [['Dati operatore', '']],
     body: [
       ['Ragione sociale / Nome', companyLabel],
       ['CF / P.IVA', formatValue(userProfile?.cf_partita_iva)],
@@ -368,7 +368,6 @@ function buildPdf(
   if (!isAccettabile) {
     y += 2
   }
-  drawSectionDivider('Risposte del questionario')
 
   // 4. Report di dettaglio (tabelle)
   const reportTitle = 'Report analisi (dettaglio risposte)'
@@ -384,8 +383,10 @@ function buildPdf(
     y += headerH + 8
   }
 
+  // EUDR: keep Verifica / Informazioni preliminari as separate sections (no A+B merge).
+  // Timber (EUTR): keep letter prefixes for section titles.
   const sectionsForPdfMerged: SectionForPdf[] = [...sectionsForPdf]
-  if (sectionsForPdfMerged.length >= 2) {
+  if (!isEudrPdf && sectionsForPdfMerged.length >= 2) {
     const firstTitle = normalizePdfText(sectionsForPdfMerged[0].sectionTitle).toUpperCase()
     const secondTitle = normalizePdfText(sectionsForPdfMerged[1].sectionTitle).toUpperCase()
     const firstIsA = firstTitle.startsWith('A)') || firstTitle.startsWith('A.')
@@ -406,6 +407,12 @@ function buildPdf(
     return `${letter}) ${rest || t}`
   }
 
+  /** EUDR: strip leftover letter prefixes; do not re-letter. */
+  const eudrSectionTitle = (title: string): string => {
+    const t = normalizePdfText(title).trim()
+    return t.replace(/^[A-Z]\s*[).]\s*/i, '').trim() || t
+  }
+
   if (sectionsForPdfMerged.length > 0) {
     if (y > 230) {
       doc.addPage()
@@ -424,7 +431,7 @@ function buildPdf(
     doc.setFontSize(13)
     if (isEudrPdf) {
       const titleLines = doc.splitTextToSize(
-        withSequentialLetterPrefix(section.sectionTitle, idx),
+        eudrSectionTitle(section.sectionTitle),
         pageW - 2 * margin
       )
       const lineH = 6
