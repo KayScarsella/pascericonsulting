@@ -18,11 +18,42 @@ const DISCLAIMER_EUDR =
 
 const THRESHOLD = 0.30
 
-const TEMPLATE_TEAL: [number, number, number] = [0, 112, 192] // Office blue
-const TEMPLATE_YELLOW: [number, number, number] = [254, 222, 0] // #FEDE00 (Informazioni di contatto in DOCX)
+const TEMPLATE_TEAL: [number, number, number] = [0, 112, 192] // Office blue (EUTR / Timber)
+/** Brand green from EUDR DOCX mockup (#006613) */
+const EUDR_BRAND: [number, number, number] = [0, 102, 19]
+const EUDR_TABLE_BORDER: [number, number, number] = [198, 198, 198] // #C6C6C6
+const TEMPLATE_YELLOW: [number, number, number] = [254, 222, 0] // #FEDE00 (soglia grafico)
 const HEADER_LOGO_W = 54
 const HEADER_LOGO_H = 16
 const TABLE_BODY_GRAY: [number, number, number] = [242, 242, 242]
+
+async function registerMontserratFont(doc: jsPDF): Promise<boolean> {
+  try {
+    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+    const [regRes, boldRes] = await Promise.all([
+      fetch(`${origin}/fonts/Montserrat-Regular.ttf`),
+      fetch(`${origin}/fonts/Montserrat-Bold.ttf`),
+    ])
+    if (!regRes.ok || !boldRes.ok) return false
+    const [regBuf, boldBuf] = await Promise.all([regRes.arrayBuffer(), boldRes.arrayBuffer()])
+    const toBase64 = (buf: ArrayBuffer) => {
+      const bytes = new Uint8Array(buf)
+      let binary = ''
+      const chunk = 0x8000
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+      }
+      return btoa(binary)
+    }
+    doc.addFileToVFS('Montserrat-Regular.ttf', toBase64(regBuf))
+    doc.addFileToVFS('Montserrat-Bold.ttf', toBase64(boldBuf))
+    doc.addFont('Montserrat-Regular.ttf', 'Montserrat', 'normal')
+    doc.addFont('Montserrat-Bold.ttf', 'Montserrat', 'bold')
+    return true
+  } catch {
+    return false
+  }
+}
 
 export interface SectionForPdf {
   sectionTitle: string
@@ -113,10 +144,10 @@ async function fetchLogoAsDataUrl(): Promise<{ dataUrl: string; format: 'JPEG' |
   }
 }
 
-function buildPdf(
+async function buildPdf(
   props: ExportAnalysisPdfProps,
   logoResult: { dataUrl: string; format: 'JPEG' | 'PNG' } | null
-): jsPDF {
+): Promise<jsPDF> {
   const {
     variant,
     nomeOperazione,
@@ -150,6 +181,29 @@ function buildPdf(
       ? 'EUDR'
       : 'EUTR')
   const isEudrPdf = resolvedVariant === 'EUDR'
+  const brandColor: [number, number, number] = isEudrPdf ? EUDR_BRAND : TEMPLATE_TEAL
+  let fontFamily = 'helvetica'
+  if (isEudrPdf && (await registerMontserratFont(doc))) {
+    fontFamily = 'Montserrat'
+  }
+  const setPdfFont = (style: 'normal' | 'bold' = 'normal') => {
+    doc.setFont(fontFamily, style)
+  }
+  const tableHeadStyles = (fontSize = 11) => ({
+    fillColor: brandColor,
+    textColor: [255, 255, 255] as [number, number, number],
+    fontStyle: 'bold' as const,
+    fontSize,
+    font: fontFamily,
+  })
+  const tableBodyStyles = (fontSize = 10) => ({
+    fontSize,
+    fillColor: TABLE_BODY_GRAY,
+    font: fontFamily,
+  })
+  const tableThemeExtras = isEudrPdf
+    ? { styles: { lineColor: EUDR_TABLE_BORDER, lineWidth: 0.1, font: fontFamily } }
+    : { styles: { font: fontFamily } }
   const formatValue = (value: unknown) => String(value ?? '').trim() || '—'
   const addressLine = [
     userProfile?.indirizzo,
@@ -218,13 +272,13 @@ function buildPdf(
       doc.addPage()
       y = margin
     }
-    doc.setDrawColor(TEMPLATE_TEAL[0], TEMPLATE_TEAL[1], TEMPLATE_TEAL[2])
+    doc.setDrawColor(brandColor[0], brandColor[1], brandColor[2])
     doc.setLineWidth(0.6)
     doc.line(margin, y, pageW - margin, y)
     y += 5
-    doc.setFont('helvetica', 'bold')
+    setPdfFont('bold')
     doc.setFontSize(titleSize)
-    doc.setTextColor(TEMPLATE_TEAL[0], TEMPLATE_TEAL[1], TEMPLATE_TEAL[2])
+    doc.setTextColor(brandColor[0], brandColor[1], brandColor[2])
     doc.text(title, margin, y)
     doc.setTextColor(0, 0, 0)
     y += 5
@@ -246,29 +300,38 @@ function buildPdf(
   }
   y = 28
   const regulationLabel = resolvedVariant === 'EUDR' ? 'EUDR' : 'Timber Regulation'
-  doc.setFontSize(21)
-  doc.setFont('helvetica', 'bold')
-  doc.setTextColor(TEMPLATE_TEAL[0], TEMPLATE_TEAL[1], TEMPLATE_TEAL[2])
-  doc.text(`Valutazione del Rischio ${regulationLabel}`, margin, y)
+  const mainTitle = isEudrPdf
+    ? `VALUTAZIONE DEL RISCHIO ${regulationLabel}`
+    : `Valutazione del Rischio ${regulationLabel}`
+  doc.setFontSize(isEudrPdf ? 18 : 21)
+  setPdfFont('bold')
+  doc.setTextColor(brandColor[0], brandColor[1], brandColor[2])
+  doc.text(mainTitle, margin, y)
   doc.setTextColor(0, 0, 0)
   y += 5
 
+  const contactParts = [
+    companyLabel !== '—' ? companyLabel : '',
+    addressLine.trim() || '',
+    String(userProfile?.recapito_telefonico || '').trim(),
+    String(userProfile?.email || '').trim(),
+  ].filter(Boolean)
+  const contactLineCount = Math.max(contactParts.length, 2)
   const barTop = y
-  const barH = 24
-  doc.setFillColor(236, 246, 246)
+  const barH = Math.max(24, 4 + contactLineCount * 6.2)
+  doc.setFillColor(isEudrPdf ? 245 : 236, isEudrPdf ? 248 : 246, isEudrPdf ? 245 : 246)
   doc.rect(margin, barTop, pageW - 2 * margin, barH, 'F')
-  doc.setDrawColor(210, 230, 230)
+  doc.setDrawColor(isEudrPdf ? 210 : 210, isEudrPdf ? 220 : 230, isEudrPdf ? 210 : 230)
   doc.rect(margin, barTop, pageW - 2 * margin, barH)
 
   const supplierX = margin + 3
   y = barTop + 6
   doc.setFontSize(10)
-  doc.setFont('helvetica', 'normal')
-  doc.text(companyLabel, supplierX, y, { maxWidth: 120 })
-  y += 6.2
-  doc.text(formatValue(addressLine), supplierX, y, { maxWidth: 120 })
-  y += 6.2
-  doc.text(`${formatValue(userProfile?.recapito_telefonico)} · — · — · —`, supplierX, y, { maxWidth: 120 })
+  setPdfFont('normal')
+  for (const line of contactParts.length > 0 ? contactParts : [companyLabel, formatValue(addressLine)]) {
+    doc.text(line, supplierX, y, { maxWidth: pageW - 2 * margin - 6 })
+    y += 6.2
+  }
   y = barTop + barH + 7
 
   const outcomeLabels = {
@@ -293,7 +356,11 @@ function buildPdf(
     16 +
     mainOutcomeLines.length * 4.2 +
     (ddsOutcomeLines.length > 0 ? 4 + ddsOutcomeLines.length * 4.2 : 0)
-  const outcomeColor: [number, number, number] = isAccettabile ? [74, 124, 46] : [185, 28, 28]
+  const outcomeColor: [number, number, number] = isAccettabile
+    ? isEudrPdf
+      ? EUDR_BRAND
+      : [74, 124, 46]
+    : [185, 28, 28]
   const outcomeBg: [number, number, number] = isAccettabile ? [232, 245, 226] : [254, 242, 242]
   doc.setFillColor(outcomeBg[0], outcomeBg[1], outcomeBg[2])
   doc.roundedRect(margin, y, pageW - 2 * margin, outcomeBoxH, 2, 2, 'F')
@@ -301,11 +368,11 @@ function buildPdf(
   doc.setLineWidth(0.4)
   doc.line(margin + 2, y + 1.5, margin + 2, y + outcomeBoxH - 1.5)
   doc.setFontSize(13)
-  doc.setFont('helvetica', 'bold')
+  setPdfFont('bold')
   doc.setTextColor(outcomeColor[0], outcomeColor[1], outcomeColor[2])
   doc.text(isAccettabile ? outcomeLabels.acceptable : outcomeLabels.unacceptable, margin + 6, y + 7)
   doc.setFontSize(9)
-  doc.setFont('helvetica', 'normal')
+  setPdfFont('normal')
   doc.text(`Indice massimo: ${overallRisk.toFixed(2)}`, margin + 6, y + 13)
   doc.setFontSize(8.5)
   doc.setTextColor(outcomeColor[0], outcomeColor[1], outcomeColor[2])
@@ -320,7 +387,7 @@ function buildPdf(
   // 2. Tabella riepilogo progetto con codice sessione base.
   autoTable(doc, {
     startY: y,
-    head: [['Sintesi richiesta', '']],
+    head: [[isEudrPdf ? 'SINTESI RICHIESTA' : 'Sintesi richiesta', '']],
     body: [
       ['Codice analisi', analysisCode],
       ['Operazione', nomeOperazione],
@@ -333,8 +400,9 @@ function buildPdf(
     ],
     margin: { left: margin, right: margin },
     theme: 'grid',
-    headStyles: { fillColor: TEMPLATE_TEAL, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 11 },
-    bodyStyles: { fontSize: 10, fillColor: TABLE_BODY_GRAY },
+    ...tableThemeExtras,
+    headStyles: tableHeadStyles(11),
+    bodyStyles: tableBodyStyles(10),
     columnStyles: {
       0: { cellWidth: 70, fontStyle: 'bold' },
       1: { cellWidth: pageW - 2 * margin - 70 },
@@ -346,18 +414,19 @@ function buildPdf(
 
   autoTable(doc, {
     startY: y,
-    head: [['Dati operatore', '']],
+    head: [[isEudrPdf ? 'DATI OPERATORE' : 'Dati operatore', '']],
     body: [
       ['Ragione sociale / Nome', companyLabel],
       ['CF / P.IVA', formatValue(userProfile?.cf_partita_iva)],
       ['Indirizzo', formatValue(addressLine)],
       ['Telefono', formatValue(userProfile?.recapito_telefonico)],
-      ['Email', formatValue(userProfile?.email)],
+      [isEudrPdf ? 'E-mail' : 'Email', formatValue(userProfile?.email)],
     ],
     margin: { left: margin, right: margin },
     theme: 'grid',
-    headStyles: { fillColor: TEMPLATE_TEAL, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 11 },
-    bodyStyles: { fontSize: 10, fillColor: TABLE_BODY_GRAY },
+    ...tableThemeExtras,
+    headStyles: tableHeadStyles(11),
+    bodyStyles: tableBodyStyles(10),
     columnStyles: {
       0: { cellWidth: 70, fontStyle: 'bold' },
       1: { cellWidth: pageW - 2 * margin - 70 },
@@ -373,10 +442,10 @@ function buildPdf(
   const reportTitle = 'Report analisi (dettaglio risposte)'
   const drawReportHeaderOnce = () => {
     const headerH = 10
-    doc.setFillColor(TEMPLATE_TEAL[0], TEMPLATE_TEAL[1], TEMPLATE_TEAL[2])
+    doc.setFillColor(brandColor[0], brandColor[1], brandColor[2])
     doc.rect(margin, y, pageW - 2 * margin, headerH, 'F')
     doc.setTextColor(255, 255, 255)
-    doc.setFont('helvetica', 'bold')
+    setPdfFont('bold')
     doc.setFontSize(11)
     doc.text(reportTitle, margin + 3, y + 6.8)
     doc.setTextColor(0, 0, 0)
@@ -427,9 +496,11 @@ function buildPdf(
       doc.addPage()
       y = margin
     }
-    doc.setFont('helvetica', 'bold')
+    setPdfFont('bold')
     doc.setFontSize(13)
     if (isEudrPdf) {
+      setPdfFont('bold')
+      doc.setTextColor(brandColor[0], brandColor[1], brandColor[2])
       const titleLines = doc.splitTextToSize(
         eudrSectionTitle(section.sectionTitle),
         pageW - 2 * margin
@@ -441,8 +512,10 @@ function buildPdf(
         y = margin
       }
       doc.text(titleLines, margin, y)
+      doc.setTextColor(0, 0, 0)
       y += titleLines.length * lineH + 5
     } else {
+      setPdfFont('bold')
       doc.text(withSequentialLetterPrefix(section.sectionTitle, idx), margin, y)
       y += 11
     }
@@ -486,13 +559,9 @@ function buildPdf(
       body: tableBody,
       margin: { left: margin, right: margin },
       theme: 'grid',
-      headStyles: {
-        fillColor: TEMPLATE_TEAL,
-        textColor: [255, 255, 255],
-        fontStyle: 'bold',
-        fontSize: 11,
-      },
-      bodyStyles: { fontSize: 10, fillColor: TABLE_BODY_GRAY },
+      ...tableThemeExtras,
+      headStyles: tableHeadStyles(11),
+      bodyStyles: tableBodyStyles(10),
       columnStyles: {
         0: { cellWidth: 95 },
         1: { cellWidth: pageW - 2 * margin - 95 },
@@ -518,7 +587,7 @@ function buildPdf(
     const rowGap = 2.5
 
     // Guida visiva rapida per lettura intuitiva del grafico
-    doc.setFont('helvetica', 'normal')
+    setPdfFont('normal')
     doc.setFontSize(8)
     doc.setFillColor(245, 245, 245)
     doc.rect(barX, y - 1.2, barW, 1.4, 'F')
@@ -541,7 +610,7 @@ function buildPdf(
     let rowY = y
     for (const d of details) {
       const label = d.shortLabel || d.label
-      doc.setFont('helvetica', 'normal')
+      setPdfFont('normal')
       doc.setFontSize(8)
       const labelTxt = doc.splitTextToSize(label, labelW)
       const rowH = barH + rowGap + (labelTxt.length > 1 ? (labelTxt.length - 1) * 3.2 : 0)
@@ -566,7 +635,7 @@ function buildPdf(
       doc.setFillColor(r, g, b)
       doc.rect(barX, rowY, w, barH, 'F')
 
-      doc.setFont('helvetica', 'bold')
+      setPdfFont('bold')
       doc.setFontSize(8)
       doc.text(d.riskIndex.toFixed(2), barX + barW + 2, rowY + 3.3)
 
@@ -583,11 +652,11 @@ function buildPdf(
   if (ddPdfPayload || isEudrPdf) {
     doc.addPage()
     y = margin
-    drawSectionDivider('Allegato due diligence geospaziale')
-    doc.setFont('helvetica', 'bold')
+    drawSectionDivider('Allegato Due Diligence geospaziale')
+    setPdfFont('bold')
     doc.setFontSize(14)
     y += 4
-    doc.setFont('helvetica', 'normal')
+    setPdfFont('normal')
     doc.setFontSize(9)
 
     if (!ddPdfPayload) {
@@ -599,8 +668,9 @@ function buildPdf(
         ]],
         margin: { left: margin, right: margin },
         theme: 'grid',
-        headStyles: { fillColor: TEMPLATE_TEAL, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
-        bodyStyles: { fontSize: 9, fillColor: TABLE_BODY_GRAY },
+        headStyles: tableHeadStyles(10),
+        ...tableThemeExtras,
+        bodyStyles: tableBodyStyles(9),
         columnStyles: { 0: { cellWidth: pageW - 2 * margin } },
         pageBreak: 'auto',
       })
@@ -610,7 +680,7 @@ function buildPdf(
     if (ddPdfPayload) {
       // Summary line + synthetic message (gate outcome moved to Dettagli)
       const gateActive = Boolean(ddPdfPayload.gate_triggers_non_accettabile)
-      const gateOutcomeLabel = gateActive ? 'NON TRASCURABILE' : 'nessun gate attivato'
+      const gateOutcomeLabel = gateActive ? 'Non trascurabile' : 'Nessun gate attivato'
       const messaggioSinteticoBlock = ddPdfPayload.ui_blocks?.find(
         (b) => (b.heading || '').trim().toLowerCase() === 'messaggio sintetico'
       )
@@ -628,8 +698,9 @@ function buildPdf(
         body: aoiSummaryRows,
         margin: { left: margin, right: margin },
         theme: 'grid',
-        headStyles: { fillColor: TEMPLATE_TEAL, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
-        bodyStyles: { fontSize: 9, fillColor: TABLE_BODY_GRAY },
+        headStyles: tableHeadStyles(10),
+        ...tableThemeExtras,
+        bodyStyles: tableBodyStyles(9),
         columnStyles: {
           0: { cellWidth: 50 },
           1: { cellWidth: pageW - 2 * margin - 50 },
@@ -650,8 +721,9 @@ function buildPdf(
         body: kpiRows,
         margin: { left: margin, right: margin },
         theme: 'grid',
-        headStyles: { fillColor: TEMPLATE_TEAL, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
-        bodyStyles: { fontSize: 9, fillColor: TABLE_BODY_GRAY },
+        headStyles: tableHeadStyles(10),
+        ...tableThemeExtras,
+        bodyStyles: tableBodyStyles(9),
         columnStyles: {
           0: { cellWidth: 70 },
           1: { cellWidth: pageW - 2 * margin - 70 },
@@ -662,7 +734,7 @@ function buildPdf(
 
     // Immagine mappa in sezione dedicata
     if (ddPdfPayload.dd_snapshot_image_data_url) {
-      drawSectionDivider('Foto mappa Area Di Interesse salvata')
+      drawSectionDivider('Foto mappa area di interesse salvata')
       try {
         const maxMapW = pageW - 2 * margin
         const maxMapH = 115
@@ -720,8 +792,9 @@ function buildPdf(
       body: legendLines.map((l) => [normalizePdfText(l)]),
       margin: { left: margin, right: margin },
       theme: 'grid',
-      headStyles: { fillColor: TEMPLATE_TEAL, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
-      bodyStyles: { fontSize: 8, fillColor: TABLE_BODY_GRAY },
+      headStyles: tableHeadStyles(10),
+      ...tableThemeExtras,
+      bodyStyles: tableBodyStyles(8),
       columnStyles: { 0: { cellWidth: pageW - 2 * margin } },
       pageBreak: 'auto',
     })
@@ -735,8 +808,9 @@ function buildPdf(
         body: ddPdfPayload.gate_reasons.map((r) => [normalizePdfText(r)]),
         margin: { left: margin, right: margin },
         theme: 'grid',
-        headStyles: { fillColor: [180, 30, 30], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
-        bodyStyles: { fontSize: 8, fillColor: TABLE_BODY_GRAY },
+        headStyles: { fillColor: [180, 30, 30], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10, font: fontFamily },
+        ...tableThemeExtras,
+        bodyStyles: tableBodyStyles(8),
         columnStyles: { 0: { cellWidth: pageW - 2 * margin } },
         pageBreak: 'auto',
       })
@@ -774,8 +848,9 @@ function buildPdf(
       body: detailRows,
       margin: { left: margin, right: margin },
       theme: 'grid',
-      headStyles: { fillColor: TEMPLATE_TEAL, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
-      bodyStyles: { fontSize: 8, fillColor: TABLE_BODY_GRAY },
+      headStyles: tableHeadStyles(10),
+      ...tableThemeExtras,
+      bodyStyles: tableBodyStyles(8),
       columnStyles: {
         0: { cellWidth: 55, fontStyle: 'bold' },
         1: { cellWidth: pageW - 2 * margin - 55 },
@@ -795,7 +870,7 @@ function buildPdf(
         doc.addPage()
         y = margin
       }
-      doc.setFont('helvetica', 'bold')
+      setPdfFont('bold')
       doc.text('Istogramma forest loss (Hansen) — pixel per anno', margin, y)
       y += 8
       const maxC = Math.max(...entries.map((e) => e.count), 1)
@@ -824,8 +899,9 @@ function buildPdf(
         body: ddPdfPayload.advisory_notes.map((n) => [normalizePdfText(n)]),
         margin: { left: margin, right: margin },
         theme: 'grid',
-        headStyles: { fillColor: TEMPLATE_TEAL, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
-        bodyStyles: { fontSize: 8, fillColor: TABLE_BODY_GRAY },
+        headStyles: tableHeadStyles(10),
+        ...tableThemeExtras,
+        bodyStyles: tableBodyStyles(8),
         columnStyles: { 0: { cellWidth: pageW - 2 * margin } },
         pageBreak: 'auto',
       })
@@ -840,8 +916,9 @@ function buildPdf(
         body: bullets.map((b) => [normalizePdfText(b)]),
         margin: { left: margin, right: margin },
         theme: 'grid',
-        headStyles: { fillColor: [180, 180, 180], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
-        bodyStyles: { fontSize: 7, fillColor: TABLE_BODY_GRAY },
+        headStyles: { fillColor: [180, 180, 180], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10, font: fontFamily },
+        ...tableThemeExtras,
+        bodyStyles: tableBodyStyles(7),
         columnStyles: { 0: { cellWidth: pageW - 2 * margin } },
         pageBreak: 'auto',
       })
@@ -855,7 +932,7 @@ function buildPdf(
         ['Screening', 'Verifica automatica iniziale', 'Test che controlla rapidamente se il legno e conforme'],
         ['JRC', 'Joint Research Centre europeo', "Centro di ricerca dell'Unione Europea"],
         ['GFC', 'Global Forest Change', 'Progetto che monitora i cambiamenti forestali globali'],
-        ['Ettari (ha)', 'Unita di misura dell area ~ 10.000 m²', 'Circa 1,2 campi da calcio o 14 piscine olimpioniche'],
+        ['Ettari (ha)', 'Unità di misura dell\'area ~ 10.000 m²', 'Circa 1,2 campi da calcio o 14 piscine olimpioniche'],
       ]
       autoTable(doc, {
         startY: y,
@@ -863,8 +940,9 @@ function buildPdf(
         body: glossaryRows,
         margin: { left: margin, right: margin },
         theme: 'grid',
-        headStyles: { fillColor: [180, 180, 180], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10 },
-        bodyStyles: { fontSize: 8, fillColor: TABLE_BODY_GRAY },
+        headStyles: { fillColor: [180, 180, 180], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 10, font: fontFamily },
+        ...tableThemeExtras,
+        bodyStyles: tableBodyStyles(8),
         columnStyles: {
           0: { cellWidth: 36 },
           1: { cellWidth: 70 },
@@ -884,7 +962,7 @@ function buildPdf(
   drawSectionDivider('Disclaimer')
   y += 18
   doc.setFontSize(8)
-  doc.setFont('helvetica', 'normal')
+  setPdfFont('normal')
   const disclaimer = (disclaimerText || (resolvedVariant === 'EUDR' ? DISCLAIMER_EUDR : DISCLAIMER_EUTR)).trim()
   const disclaimerLines = doc.splitTextToSize(disclaimer, pageW - 2 * margin)
   doc.text(disclaimerLines, margin, y)
@@ -935,7 +1013,7 @@ export function ExportAnalysisPdfButton(props: ExportAnalysisPdfProps) {
           /* ignore */
         }
       }
-      const doc = buildPdf(propsForPdf, logoResult)
+      const doc = await buildPdf(propsForPdf, logoResult)
       const filename = buildPdfFilename(props.nomeOperazione, props.sessionId)
       doc.save(filename)
     } finally {

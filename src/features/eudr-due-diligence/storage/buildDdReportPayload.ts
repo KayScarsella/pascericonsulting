@@ -70,8 +70,8 @@ export function buildDdReportPayload(
     ui_blocks.push({
       heading: 'Messaggio sintetico',
       body: hasLossFromCutYearOnward
-        ? "LE COORDINATE INSERITE EVIDENZIANO LA PRESENZA DI DEFORESTAZIONE PER L'ANNO DI TAGLIO (VEDI GRAFICO IN ROSSO)."
-        : "LE COORDINATE INSERITE NON EVIDENZIANO LA PRESENZA DI DEFORESTAZIONE PER L'ANNO DI TAGLIO.",
+        ? "Le coordinate inserite evidenziano la presenza di deforestazione per l'anno di taglio (vedi grafico in rosso)."
+        : "Le coordinate inserite non evidenziano la presenza di deforestazione per l'anno di taglio.",
     })
   }
 

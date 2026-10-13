@@ -582,8 +582,8 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
                   {metadata.cutting_date_iso && (
                     <p className="rounded-md border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-900">
                       {hasLossFromCutYear(metadata)
-                        ? "LE COORDINATE INSERITE EVIDENZIANO LA PRESENZA DI DEFORESTAZIONE PER L'ANNO DI TAGLIO (VEDI GRAFICO IN ROSSO)."
-                        : "LE COORDINATE INSERITE NON EVIDENZIANO LA PRESENZA DI DEFORESTAZIONE PER L'ANNO DI TAGLIO."}
+                        ? "Le coordinate inserite evidenziano la presenza di deforestazione per l'anno di taglio (vedi grafico in rosso)."
+                        : "Le coordinate inserite non evidenziano la presenza di deforestazione per l'anno di taglio."}
                     </p>
                   )}
                   <p className="text-xs text-slate-600">
