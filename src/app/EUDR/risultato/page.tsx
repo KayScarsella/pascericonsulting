@@ -366,18 +366,25 @@ export default async function EudrRisultatoPage({
             <div className="min-w-0 flex-1">
               <p className="text-sm md:text-base font-black tracking-wide uppercase text-slate-900">
                 {ddLastRunNormalized.triggers_non_accettabile
-                  ? "Screening dell’area di interesse soggetta a perdita forestale dopo la data di taglio dichiarata – risultato: rischio non trascurabile"
+                  ? ddLastRunNormalized.tendenza_deforestazione
+                    ? "Screening dell’area di interesse: tendenza deforestazione (loss nell’ultimo anno Hansen con taglio successivo) – risultato: rischio non trascurabile"
+                    : "Screening dell’area di interesse soggetta a perdita forestale dopo la data di taglio dichiarata – risultato: rischio non trascurabile"
                   : "Screening dell’area di interesse non soggetta a perdita forestale dopo la data di taglio dichiarata – risultato: rischio trascurabile"}
               </p>
               <h3 className="font-bold text-[#3d2b1a]">
-                Screening AOI (EUDR) —{" "}
-                {ddLastRunNormalized.triggers_non_accettabile
-                  ? "esito negativo"
-                  : "nessun gate attivato"}
+                {ddLastRunNormalized.tendenza_deforestazione
+                  ? "Tendenza deforestazione — esito negativo"
+                  : `Screening AOI (EUDR) — ${
+                      ddLastRunNormalized.triggers_non_accettabile
+                        ? "esito negativo"
+                        : "nessun gate attivato"
+                    }`}
               </h3>
               <p className="text-sm text-slate-600 mt-1">
                 {ddLastRunNormalized.triggers_non_accettabile
-                  ? 'Verifica: Ogni perdita FORESTALE rilevata dopo il 31/12/2020 all’interno della maschera forestale 2020 costituisce una "evidenza" di possibile non conformità.'
+                  ? ddLastRunNormalized.tendenza_deforestazione
+                    ? "Evidenza di tendenza deforestazione: loss nell’ultimo anno Hansen disponibile con data di taglio successiva (il gate classico post-taglio non conterebbe questa loss)."
+                    : 'Verifica: Ogni perdita FORESTALE rilevata dopo il 31/12/2020 all’interno della maschera forestale 2020 costituisce una "evidenza" di possibile non conformità.'
                   : "Nell’AOI non risulta evidenza significativa di loss su foresta al 2020 dopo il cutoff (JRC GFC2020 ∩ Hansen), né loss Hansen post-taglio oltre soglia. Il gate AOI non ha alzato il rischio oltre il questionario."}
               </p>
               {ddLastRunNormalized.cutting_date_iso &&

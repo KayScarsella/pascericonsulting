@@ -63,7 +63,8 @@ export function ToolNavbar({ toolName, basePath, items, userRole, toolbarExtra, 
 
   const canView = (minRole: string) => {
     if (userRole === 'admin') return true
-    if (userRole === 'premium') return minRole !== 'admin'
+    // tool e premium: tutte le voci tranne Master (admin)
+    if (userRole === 'premium' || userRole === 'tool') return minRole !== 'admin'
     return minRole === 'standard'
   }
 

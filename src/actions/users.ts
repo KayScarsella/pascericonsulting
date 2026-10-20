@@ -55,7 +55,7 @@ export async function getToolUsersForAdminPaginated(
 export async function updateUserRoleAction(
   targetUserId: string,
   toolId: string,
-  newRole: 'standard' | 'premium' | 'admin'
+  newRole: 'standard' | 'tool' | 'premium' | 'admin'
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const supabase = await getSupabase()
@@ -70,7 +70,7 @@ export async function updateUserRoleAction(
 export async function updateUsersRoleBulkAction(
   toolId: string,
   targetUserIds: string[],
-  newRole: 'standard' | 'premium' | 'admin'
+  newRole: 'standard' | 'tool' | 'premium' | 'admin'
 ): Promise<{ success: boolean; error?: string }> {
   try {
     await requireToolAdmin(toolId)

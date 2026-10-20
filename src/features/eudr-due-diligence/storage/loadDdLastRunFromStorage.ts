@@ -5,10 +5,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Json } from '@/types/supabase'
 import {
+  detectTendenzaDeforestazione,
   hasLossAfterCalendarYear,
   hasLossFromCalendarYearInclusive,
   type DdLastRunSnapshot,
 } from '../aoiRiskGate'
+import { HANSEN_LAST_LOSS_CALENDAR_YEAR } from '../constants/hansen-version'
 import type { LossYearHistogram } from '../types/due-diligence-run'
 import { ddReportJsonSessionPath, ddRunBasePath } from './paths'
 
@@ -69,6 +71,17 @@ function snapshotFromStoredReport(report: StoredDdReport, artifactSessionId: str
   const reasons = report.gate_reasons ?? []
   const gateUsesJrc = inferLogicMode(reasons) === 'raffinata' && report.gate_triggers_non_accettabile
 
+  const classicFromReport =
+    report.gate_triggers_non_accettabile === true &&
+    !reasons.some((r) => r.toLowerCase().includes('tendenza deforestazione'))
+
+  const tendenza_deforestazione = detectTendenzaDeforestazione({
+    cuttingYear: Number.isFinite(cuttingYear) ? cuttingYear : null,
+    classicGateTriggered: classicFromReport || has_loss_after_cutting_date,
+    histogram,
+    lastHansenYear: HANSEN_LAST_LOSS_CALENDAR_YEAR,
+  })
+
   return {
     run_id: runId,
     dd_artifact_session_id: report.session_id?.trim() || artifactSessionId,
@@ -82,6 +95,9 @@ function snapshotFromStoredReport(report: StoredDdReport, artifactSessionId: str
     has_loss_after_cutting_date,
     triggers_non_accettabile: report.gate_triggers_non_accettabile,
     reasons,
+    ...(tendenza_deforestazione || reasons.some((r) => r.toLowerCase().includes('tendenza'))
+      ? { tendenza_deforestazione: true }
+      : {}),
     ...(gateUsesJrc ? { gate_uses_jrc_gfc2020: true } : {}),
     logic_mode: inferLogicMode(reasons),
     ...(report.advisory_notes?.length ? { advisory_notes: report.advisory_notes } : {}),

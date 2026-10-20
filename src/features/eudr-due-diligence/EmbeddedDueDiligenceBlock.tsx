@@ -14,6 +14,7 @@ import {
   stageDueDiligenceAoiForSession,
 } from '@/actions/eudr-due-diligence'
 import { LossYearChart } from '@/features/eudr-due-diligence/map/LossYearChart'
+import { HANSEN_LAST_LOSS_CALENDAR_YEAR } from '@/features/eudr-due-diligence/constants/hansen-version'
 import type { RunMetadata } from '@/features/eudr-due-diligence/types/due-diligence-run'
 import { MapPin, Loader2 } from 'lucide-react'
 import {
@@ -130,6 +131,20 @@ function hasLossFromCutYear(metadata: RunMetadata): boolean {
     const band = Number(key)
     const calendarYear = band >= 1 && band <= 99 ? 2000 + band : band
     return calendarYear >= y && Number(count) > 0
+  })
+}
+
+function hasTendenzaDeforestazione(metadata: RunMetadata): boolean {
+  const iso = metadata.cutting_date_iso
+  if (!iso || !/^\d{4}/.test(iso) || !metadata.lossyear_histogram) return false
+  const y = parseInt(iso.slice(0, 4), 10)
+  if (!Number.isFinite(y)) return false
+  if (y <= HANSEN_LAST_LOSS_CALENDAR_YEAR) return false
+  if (hasLossFromCutYear(metadata)) return false
+  return Object.entries(metadata.lossyear_histogram).some(([key, count]) => {
+    const band = Number(key)
+    const calendarYear = band >= 1 && band <= 99 ? 2000 + band : band
+    return calendarYear === HANSEN_LAST_LOSS_CALENDAR_YEAR && Number(count) > 0
   })
 }
 
@@ -580,10 +595,18 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
               {metadata && (
                 <div className="mt-3 space-y-2">
                   {metadata.cutting_date_iso && (
-                    <p className="rounded-md border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-900">
+                    <p
+                      className={
+                        hasTendenzaDeforestazione(metadata)
+                          ? 'rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-950'
+                          : 'rounded-md border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-900'
+                      }
+                    >
                       {hasLossFromCutYear(metadata)
                         ? "Le coordinate inserite evidenziano la presenza di deforestazione per l'anno di taglio (vedi grafico in rosso)."
-                        : "Le coordinate inserite non evidenziano la presenza di deforestazione per l'anno di taglio."}
+                        : hasTendenzaDeforestazione(metadata)
+                          ? `Tendenza deforestazione: loss rilevata nell’ultimo anno Hansen disponibile (${HANSEN_LAST_LOSS_CALENDAR_YEAR}) con data di taglio successiva.`
+                          : "Le coordinate inserite non evidenziano la presenza di deforestazione per l'anno di taglio."}
                     </p>
                   )}
                   <p className="text-xs text-slate-600">

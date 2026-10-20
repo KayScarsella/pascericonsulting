@@ -15,7 +15,7 @@ export default async function EudrSearchPage({
   const { getToolImpersonation, getEffectiveToolUserId } = await import('@/lib/tool-impersonation')
   const impersonation = await getToolImpersonation(EUDR_TOOL_ID)
   const effectiveUserId = await getEffectiveToolUserId(EUDR_TOOL_ID)
-  const hasAccess = role === "admin" || role === "premium"
+  const hasAccess = role === "admin" || role === "premium" || role === "tool"
   const isAdmin = role === "admin" && !impersonation
 
   if (!hasAccess) {

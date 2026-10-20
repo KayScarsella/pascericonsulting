@@ -3,8 +3,9 @@
 import { getToolAccess } from "@/lib/tool-auth"
 import type { ToolRole } from "@/lib/tool-auth"
 import {
-  canAccessMinRole,
-  type DocumentMinRole,
+  canAccessAllowedRoles,
+  DEFAULT_ALLOWED_ROLES,
+  normalizeAllowedRoles,
 } from "@/lib/tool-role-access"
 import {
   assertStoragePathForTool,
@@ -19,6 +20,9 @@ import { revalidatePath } from "next/cache"
 import { createClient } from "@/utils/supabase/server"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/types/supabase"
+
+type AppRole = Database["public"]["Enums"]["app_role"]
+
 async function getSupabase() {
   return createClient()
 }
@@ -36,25 +40,28 @@ async function requireDocumentAdmin(toolId: string) {
   return { supabase, user }
 }
 
-async function resolveEffectiveMinRole(
+async function resolveEffectiveAllowedRoles(
   supabase: SupabaseClient<Database>,
   toolId: string,
   parentId: string | null,
-  requestedMinRole: DocumentMinRole
-): Promise<DocumentMinRole> {
-  if (!parentId) return requestedMinRole
+  requested: ToolRole[]
+): Promise<AppRole[]> {
+  const normalized = normalizeAllowedRoles(requested) as AppRole[]
+  if (!parentId) return normalized
 
   const { data: parent } = await supabase
     .from("documents")
-    .select("min_role, type")
+    .select("allowed_roles, type")
     .eq("id", parentId)
     .eq("tool_id", toolId)
     .single()
 
-  if (!parent || parent.type !== "folder") return requestedMinRole
-  const parentMin = parent.min_role as DocumentMinRole
-  if (parentMin === "premium") return "premium"
-  return requestedMinRole
+  if (!parent || parent.type !== "folder") return normalized
+  const parentRoles = (parent.allowed_roles ?? DEFAULT_ALLOWED_ROLES) as AppRole[]
+  // Intersezione: figli non possono ampliare rispetto al padre
+  const parentSet = new Set(parentRoles)
+  const intersected = normalized.filter((r) => parentSet.has(r) || r === "admin")
+  return normalizeAllowedRoles(intersected.length ? intersected : parentRoles) as AppRole[]
 }
 
 async function assertDocumentDownloadAccess(
@@ -65,15 +72,19 @@ async function assertDocumentDownloadAccess(
 ): Promise<{ error?: string }> {
   const { data: doc } = await supabase
     .from("documents")
-    .select("min_role")
+    .select("allowed_roles, min_role")
     .eq("storage_path", storagePath)
     .eq("tool_id", toolId)
     .eq("type", "file")
     .maybeSingle()
 
   if (!doc) return { error: "Documento non trovato" }
-  if (!canAccessMinRole(role, doc.min_role as DocumentMinRole)) {
-    return { error: "Contenuto riservato agli utenti Premium" }
+  const allowed =
+    (doc.allowed_roles as string[] | null)?.length
+      ? (doc.allowed_roles as string[])
+      : DEFAULT_ALLOWED_ROLES
+  if (!canAccessAllowedRoles(role, allowed)) {
+    return { error: "Contenuto riservato: non hai accesso a questa cartella" }
   }
   return {}
 }
@@ -87,20 +98,27 @@ export async function createFolder(
   parentId: string | null,
   name: string,
   pathRevalidate: string,
-  minRole: DocumentMinRole = "standard"
+  allowedRoles: ToolRole[] = DEFAULT_ALLOWED_ROLES
 ) {
   const { role } = await getToolAccess(toolId)
   if (role !== "admin") return { error: "Non autorizzato: servono permessi admin" }
 
   const supabase = await getSupabase()
-  const effectiveMinRole = await resolveEffectiveMinRole(supabase, toolId, parentId, minRole)
+  const effective = await resolveEffectiveAllowedRoles(
+    supabase,
+    toolId,
+    parentId,
+    allowedRoles
+  )
 
   const { error } = await supabase.from("documents").insert({
     tool_id: toolId,
     parent_id: parentId,
     name,
     type: "folder",
-    min_role: effectiveMinRole,
+    allowed_roles: effective,
+    // Legacy sync: premium-only se manca standard
+    min_role: effective.includes("standard") ? "standard" : "premium",
   })
 
   if (error) return { error: error.message }
@@ -109,11 +127,11 @@ export async function createFolder(
   return { success: true }
 }
 
-async function cascadeDocumentMinRole(
+async function cascadeDocumentAllowedRoles(
   supabase: SupabaseClient<Database>,
   folderId: string,
   toolId: string,
-  minRole: DocumentMinRole
+  allowedRoles: AppRole[]
 ): Promise<void> {
   const { data: children } = await supabase
     .from("documents")
@@ -124,7 +142,10 @@ async function cascadeDocumentMinRole(
   for (const child of children ?? []) {
     const { data: updatedChild, error: childError } = await supabase
       .from("documents")
-      .update({ min_role: minRole })
+      .update({
+        allowed_roles: allowedRoles,
+        min_role: allowedRoles.includes("standard") ? "standard" : "premium",
+      })
       .eq("id", child.id)
       .eq("tool_id", toolId)
       .select("id")
@@ -135,7 +156,7 @@ async function cascadeDocumentMinRole(
     }
 
     if (child.type === "folder") {
-      await cascadeDocumentMinRole(supabase, child.id, toolId, minRole)
+      await cascadeDocumentAllowedRoles(supabase, child.id, toolId, allowedRoles)
     }
   }
 }
@@ -144,10 +165,10 @@ async function cascadeDocumentMinRole(
  * Aggiorna visibilità di una cartella esistente (e propaga ai contenuti).
  * Richiede ruolo admin.
  */
-export async function updateFolderMinRole(
+export async function updateFolderAllowedRoles(
   folderId: string,
   toolId: string,
-  minRole: DocumentMinRole,
+  allowedRoles: ToolRole[],
   pathRevalidate: string
 ) {
   const auth = await requireDocumentAdmin(toolId)
@@ -164,19 +185,22 @@ export async function updateFolderMinRole(
   if (fetchError || !folder) return { error: "Cartella non trovata" }
   if (folder.type !== "folder") return { error: "L'elemento selezionato non è una cartella" }
 
-  const effectiveMinRole = await resolveEffectiveMinRole(
+  const effective = await resolveEffectiveAllowedRoles(
     supabase,
     toolId,
     folder.parent_id,
-    minRole
+    allowedRoles
   )
 
   const { data: updatedFolder, error: updateError } = await supabase
     .from("documents")
-    .update({ min_role: effectiveMinRole })
+    .update({
+      allowed_roles: effective,
+      min_role: effective.includes("standard") ? "standard" : "premium",
+    })
     .eq("id", folderId)
     .eq("tool_id", toolId)
-    .select("id, min_role")
+    .select("id, allowed_roles")
 
   if (updateError) return { error: updateError.message }
   if (!updatedFolder?.length) {
@@ -187,7 +211,7 @@ export async function updateFolderMinRole(
   }
 
   try {
-    await cascadeDocumentMinRole(supabase, folderId, toolId, effectiveMinRole)
+    await cascadeDocumentAllowedRoles(supabase, folderId, toolId, effective)
   } catch (e) {
     return {
       error: e instanceof Error ? e.message : "Errore durante l'aggiornamento dei contenuti",
@@ -195,7 +219,24 @@ export async function updateFolderMinRole(
   }
 
   revalidatePath(pathRevalidate)
-  return { success: true, minRole: updatedFolder[0].min_role as DocumentMinRole }
+  return {
+    success: true,
+    allowedRoles: updatedFolder[0].allowed_roles as ToolRole[],
+  }
+}
+
+/** @deprecated Use updateFolderAllowedRoles */
+export async function updateFolderMinRole(
+  folderId: string,
+  toolId: string,
+  minRole: "standard" | "premium",
+  pathRevalidate: string
+) {
+  const allowed =
+    minRole === "premium"
+      ? (["premium", "admin"] as ToolRole[])
+      : (["standard", "premium", "admin"] as ToolRole[])
+  return updateFolderAllowedRoles(folderId, toolId, allowed, pathRevalidate)
 }
 
 /** Step 1: autorizza admin e riserva path storage (payload leggero, niente file). */
@@ -245,7 +286,12 @@ export async function finalizeDocumentUpload(
     return { error: "File non trovato in storage. Riprova l'upload." }
   }
 
-  const fileMinRole = await resolveEffectiveMinRole(supabase, toolId, parentId, "standard")
+  const fileAllowed = await resolveEffectiveAllowedRoles(
+    supabase,
+    toolId,
+    parentId,
+    DEFAULT_ALLOWED_ROLES
+  )
 
   const { error: dbError } = await supabase.from("documents").insert({
     tool_id: toolId,
@@ -256,7 +302,8 @@ export async function finalizeDocumentUpload(
     mime_type: mimeType || null,
     size,
     created_by: user.id,
-    min_role: fileMinRole,
+    allowed_roles: fileAllowed,
+    min_role: fileAllowed.includes("standard") ? "standard" : "premium",
   })
 
   if (dbError) {

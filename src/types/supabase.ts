@@ -582,6 +582,7 @@ export type Database = {
       }
       documents: {
         Row: {
+          allowed_roles: Database["public"]["Enums"]["app_role"][]
           created_at: string | null
           created_by: string | null
           id: string
@@ -595,6 +596,7 @@ export type Database = {
           type: string
         }
         Insert: {
+          allowed_roles?: Database["public"]["Enums"]["app_role"][]
           created_at?: string | null
           created_by?: string | null
           id?: string
@@ -608,6 +610,7 @@ export type Database = {
           type: string
         }
         Update: {
+          allowed_roles?: Database["public"]["Enums"]["app_role"][]
           created_at?: string | null
           created_by?: string | null
           id?: string
@@ -1973,7 +1976,7 @@ export type Database = {
       fsc_next_logo_code: { Args: { _company_id: string }; Returns: string }
     }
     Enums: {
-      app_role: "standard" | "premium" | "admin"
+      app_role: "standard" | "tool" | "premium" | "admin"
       Corruption_Code: "AA" | "MA" | "MB" | "MM" | "TT"
       country_risk: "RA" | "RB" | "RS"
       fsc_control_frequency: "annual" | "semiannual"
@@ -2118,7 +2121,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["standard", "premium", "admin"],
+      app_role: ["standard", "tool", "premium", "admin"],
       Corruption_Code: ["AA", "MA", "MB", "MM", "TT"],
       country_risk: ["RA", "RB", "RS"],
       fsc_control_frequency: ["annual", "semiannual"],

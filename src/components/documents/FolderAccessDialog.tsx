@@ -2,11 +2,17 @@
 
 import { useEffect, useState, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
-import { Lock, Users } from "lucide-react"
+import { Lock, Users, Wrench } from "lucide-react"
 import { toast } from "sonner"
 
-import { createFolder, updateFolderMinRole } from "@/actions/documents"
-import type { DocumentMinRole } from "@/lib/tool-role-access"
+import { createFolder, updateFolderAllowedRoles } from "@/actions/documents"
+import {
+  DEFAULT_ALLOWED_ROLES,
+  DOCUMENT_ACCESS_ROLES,
+  normalizeAllowedRoles,
+  type DocumentAccessRole,
+} from "@/lib/tool-role-access"
+import type { ToolRole } from "@/lib/tool-auth"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -27,12 +33,38 @@ type FolderAccessDialogProps = {
   toolId: string
   pathRevalidate: string
   parentFolderId: string | null
-  /** Se la cartella corrente (parent) è premium, i figli non possono essere "tutti". */
-  parentIsPremium?: boolean
+  /** Allowlist della cartella padre: i figli non possono ampliare. */
+  parentAllowedRoles?: ToolRole[] | null
   folderId?: string
   initialName?: string
-  initialMinRole?: DocumentMinRole
+  initialAllowedRoles?: ToolRole[]
 }
+
+const ROLE_OPTIONS: {
+  role: DocumentAccessRole
+  icon: ReactNode
+  title: string
+  description: string
+}[] = [
+  {
+    role: "standard",
+    icon: <Users className="h-5 w-5 text-slate-600" />,
+    title: "Standard",
+    description: "Utenti con ruolo standard.",
+  },
+  {
+    role: "tool",
+    icon: <Wrench className="h-5 w-5 text-slate-600" />,
+    title: "Tool",
+    description: "Utenti con ruolo tool (accesso completo al tool, cartelle selezionate).",
+  },
+  {
+    role: "premium",
+    icon: <Lock className="h-5 w-5 text-amber-700" />,
+    title: "Premium",
+    description: "Utenti Premium (Admin ha sempre accesso).",
+  },
+]
 
 export function FolderAccessDialog({
   open,
@@ -41,21 +73,45 @@ export function FolderAccessDialog({
   toolId,
   pathRevalidate,
   parentFolderId,
-  parentIsPremium = false,
+  parentAllowedRoles = null,
   folderId,
   initialName = "",
-  initialMinRole = "standard",
+  initialAllowedRoles = DEFAULT_ALLOWED_ROLES,
 }: FolderAccessDialogProps) {
   const router = useRouter()
   const [name, setName] = useState(initialName)
-  const [minRole, setMinRole] = useState<DocumentMinRole>(initialMinRole)
+  const [selected, setSelected] = useState<Set<DocumentAccessRole>>(new Set())
   const [isSaving, setIsSaving] = useState(false)
+
+  const parentSet =
+    parentAllowedRoles && parentAllowedRoles.length > 0
+      ? new Set(parentAllowedRoles.filter((r) => r !== "admin") as DocumentAccessRole[])
+      : null
 
   useEffect(() => {
     if (!open) return
     setName(mode === "edit" ? initialName : "")
-    setMinRole(parentIsPremium ? "premium" : initialMinRole)
-  }, [open, mode, initialName, initialMinRole, parentIsPremium])
+    const base = normalizeAllowedRoles(initialAllowedRoles).filter(
+      (r): r is DocumentAccessRole => DOCUMENT_ACCESS_ROLES.includes(r as DocumentAccessRole)
+    )
+    const next = new Set(base)
+    if (parentSet) {
+      for (const r of DOCUMENT_ACCESS_ROLES) {
+        if (!parentSet.has(r)) next.delete(r)
+      }
+    }
+    setSelected(next.size ? next : new Set(parentSet ? [...parentSet] : ["premium"]))
+  }, [open, mode, initialName, initialAllowedRoles, parentAllowedRoles])
+
+  const toggle = (role: DocumentAccessRole) => {
+    if (parentSet && !parentSet.has(role)) return
+    setSelected((prev) => {
+      const n = new Set(prev)
+      if (n.has(role)) n.delete(role)
+      else n.add(role)
+      return n
+    })
+  }
 
   const handleSave = async () => {
     const trimmed = name.trim()
@@ -63,6 +119,12 @@ export function FolderAccessDialog({
       toast.error("Inserisci un nome per la cartella")
       return
     }
+    if (selected.size === 0) {
+      toast.error("Seleziona almeno un ruolo (oltre ad Admin, sempre incluso)")
+      return
+    }
+
+    const allowedRoles = normalizeAllowedRoles([...selected, "admin"]) as ToolRole[]
 
     setIsSaving(true)
     try {
@@ -72,7 +134,7 @@ export function FolderAccessDialog({
           parentFolderId,
           trimmed,
           pathRevalidate,
-          minRole
+          allowedRoles
         )
         if (result.error) {
           toast.error(result.error)
@@ -81,10 +143,10 @@ export function FolderAccessDialog({
         toast.success("Cartella creata")
       } else {
         if (!folderId) return
-        const result = await updateFolderMinRole(
+        const result = await updateFolderAllowedRoles(
           folderId,
           toolId,
-          minRole,
+          allowedRoles,
           pathRevalidate
         )
         if (result.error) {
@@ -110,7 +172,7 @@ export function FolderAccessDialog({
           </DialogTitle>
           <DialogDescription>
             {mode === "create"
-              ? "Scegli nome e chi può vedere questa cartella e i suoi contenuti."
+              ? "Scegli nome e quali ruoli possono vedere questa cartella e i suoi contenuti. Admin ha sempre accesso."
               : `Modifica chi può accedere a «${initialName}» e al contenuto al suo interno.`}
           </DialogDescription>
         </DialogHeader>
@@ -131,29 +193,30 @@ export function FolderAccessDialog({
 
           <div className="space-y-2">
             <Label>Chi può visualizzare</Label>
-            {parentIsPremium && (
+            {parentSet && (
               <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-md px-3 py-2">
-                La cartella padre è riservata ai Premium: anche questa cartella sarà
-                visibile solo a Premium e Admin.
+                La cartella padre limita i ruoli disponibili: non puoi ampliare l&apos;accesso oltre
+                il padre.
               </p>
             )}
-            <div className="grid gap-2 sm:grid-cols-1">
-              <AccessOption
-                selected={minRole === "standard"}
-                disabled={parentIsPremium}
-                icon={<Users className="h-5 w-5 text-slate-600" />}
-                title="Tutti gli utenti"
-                description="Standard, Premium e Admin possono aprire e scaricare i file."
-                onClick={() => setMinRole("standard")}
-              />
-              <AccessOption
-                selected={minRole === "premium"}
-                icon={<Lock className="h-5 w-5 text-amber-700" />}
-                title="Solo Premium"
-                description="Visibile solo a utenti Premium e Admin del tool."
-                onClick={() => setMinRole("premium")}
-              />
+            <div className="grid gap-2">
+              {ROLE_OPTIONS.map((opt) => {
+                const disabled = !!(parentSet && !parentSet.has(opt.role))
+                const checked = selected.has(opt.role)
+                return (
+                  <AccessOption
+                    key={opt.role}
+                    selected={checked}
+                    disabled={disabled}
+                    icon={opt.icon}
+                    title={opt.title}
+                    description={opt.description}
+                    onClick={() => toggle(opt.role)}
+                  />
+                )
+              })}
             </div>
+            <p className="text-xs text-slate-500">Admin del tool ha sempre accesso.</p>
           </div>
         </div>
 
@@ -204,11 +267,21 @@ function AccessOption({
     >
       <div
         className={cn(
-          "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border",
+          "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border",
           selected ? "border-[#967635] bg-[#967635]" : "border-slate-300"
         )}
       >
-        {selected && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+        {selected && (
+          <svg className="h-3 w-3 text-white" viewBox="0 0 12 12" fill="none" aria-hidden>
+            <path
+              d="M2.5 6.5L5 9l4.5-5.5"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        )}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">

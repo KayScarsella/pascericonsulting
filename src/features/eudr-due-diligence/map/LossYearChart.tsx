@@ -42,18 +42,35 @@ export function LossYearChart({ histogram, cuttingDateIso }: Props) {
     cuttingYear != null &&
     allFromEudr.some((e) => e.calendarYear >= cuttingYear && e.count > 0)
 
+  const hasLossInLastHansenYear = allFromEudr.some(
+    (e) => e.calendarYear === HANSEN_LAST_LOSS_CALENDAR_YEAR && e.count > 0
+  )
+  const showTendenzaDeforestazione =
+    cuttingYear != null &&
+    cuttingYear > HANSEN_LAST_LOSS_CALENDAR_YEAR &&
+    !hasLossFromCutYearOnward &&
+    hasLossInLastHansenYear
+
   const explicitResultMessage =
     cuttingYear == null
       ? null
       : hasLossFromCutYearOnward
         ? "Le coordinate inserite evidenziano la presenza di deforestazione per l'anno di taglio (vedi grafico in rosso)."
-        : "Le coordinate inserite non evidenziano la presenza di deforestazione per l'anno di taglio."
+        : showTendenzaDeforestazione
+          ? `Tendenza deforestazione: loss rilevata nell’ultimo anno Hansen disponibile (${HANSEN_LAST_LOSS_CALENDAR_YEAR}) con data di taglio successiva (${cuttingYear}).`
+          : "Le coordinate inserite non evidenziano la presenza di deforestazione per l'anno di taglio."
 
   if (entries.length === 0) {
     if (cuttingYear != null) {
       return (
         <div className="space-y-3">
-          <div className="rounded-lg border border-slate-300 bg-slate-50 p-3 text-xs font-semibold text-slate-900">
+          <div
+            className={
+              showTendenzaDeforestazione
+                ? 'rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-950'
+                : 'rounded-lg border border-slate-300 bg-slate-50 p-3 text-xs font-semibold text-slate-900'
+            }
+          >
             {explicitResultMessage}
           </div>
           <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-4 text-sm text-emerald-900">
@@ -115,7 +132,13 @@ export function LossYearChart({ histogram, cuttingDateIso }: Props) {
   return (
     <div className="space-y-3">
       {explicitResultMessage && (
-        <div className="rounded-lg border border-slate-300 bg-slate-50 p-3 text-xs font-semibold text-slate-900">
+        <div
+          className={
+            showTendenzaDeforestazione
+              ? 'rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-950'
+              : 'rounded-lg border border-slate-300 bg-slate-50 p-3 text-xs font-semibold text-slate-900'
+          }
+        >
           {explicitResultMessage}
         </div>
       )}

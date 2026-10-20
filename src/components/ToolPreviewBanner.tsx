@@ -8,7 +8,7 @@ export function ToolPreviewBanner({ toolName }: { toolName: string }) {
       <AlertTitle className="text-amber-900">{toolName} — versione anteprima</AlertTitle>
       <AlertDescription className="text-amber-800">
         Alcune funzionalità possono cambiare. L&apos;accesso alle sezioni dipende dal ruolo
-        assegnato al tool (standard, premium o admin).
+        assegnato al tool (standard, tool, premium o admin).
       </AlertDescription>
     </Alert>
   )

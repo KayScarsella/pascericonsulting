@@ -84,15 +84,21 @@ export type MasterSection = (typeof MASTER_SECTIONS)[number] | 'companies'
 const ROLE_LABELS: Record<string, string> = {
   admin: 'Admin',
   premium: 'Premium',
+  tool: 'Tool',
   standard: 'Standard',
 }
 
-function isUserRole(value: string): value is 'standard' | 'premium' | 'admin' {
-  return value === 'standard' || value === 'premium' || value === 'admin'
+function isUserRole(value: string): value is 'standard' | 'tool' | 'premium' | 'admin' {
+  return (
+    value === 'standard' ||
+    value === 'tool' ||
+    value === 'premium' ||
+    value === 'admin'
+  )
 }
 
-function isInviteRole(value: string): value is 'standard' | 'premium' {
-  return value === 'standard' || value === 'premium'
+function isInviteRole(value: string): value is 'standard' | 'tool' | 'premium' {
+  return value === 'standard' || value === 'tool' || value === 'premium'
 }
 
 function isBulkSpeciesMode(value: string): value is 'set' | 'clear' {
@@ -113,14 +119,25 @@ function isNotifExpiryMode(value: string): value is 'clear' {
 
 function isCountryBulkField(
   value: string
-): value is 'conflicts' | 'sanction' | 'extra_eu' | 'corruption_code' | 'cpi_multi' {
+): value is
+  | 'conflicts'
+  | 'sanction'
+  | 'extra_eu'
+  | 'corruption_code'
+  | 'country_risk'
+  | 'cpi_multi' {
   return (
     value === 'conflicts' ||
     value === 'sanction' ||
     value === 'extra_eu' ||
     value === 'corruption_code' ||
+    value === 'country_risk' ||
     value === 'cpi_multi'
   )
+}
+
+function isCountryRiskBulk(value: string): value is 'RA' | 'RB' | 'RS' | 'none' {
+  return value === 'RA' || value === 'RB' || value === 'RS' || value === 'none'
 }
 
 function isCorruptionCode(value: string): value is 'AA' | 'MA' | 'MB' | 'MM' | 'TT' {
@@ -261,7 +278,7 @@ export function MasterSectionClient({
 
   const [inviteOpen, setInviteOpen] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
-  const [inviteRole, setInviteRole] = useState<'standard' | 'premium'>('standard')
+  const [inviteRole, setInviteRole] = useState<'standard' | 'tool' | 'premium'>('standard')
   const isCloudFsc = toolId === CLOUD_FSC_TOOL_ID
   const canImpersonateUsers = isImpersonationAllowedTool(toolId)
   const [inviteFscCompanyId, setInviteFscCompanyId] = useState<string>('none')
@@ -271,7 +288,7 @@ export function MasterSectionClient({
   const [cleanupLoading, setCleanupLoading] = useState(false)
   const [selectionResetKey, setSelectionResetKey] = useState(0)
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([])
-  const [bulkUserRole, setBulkUserRole] = useState<'standard' | 'premium' | 'admin'>('standard')
+  const [bulkUserRole, setBulkUserRole] = useState<'standard' | 'tool' | 'premium' | 'admin'>('standard')
   const [bulkUsersLoading, setBulkUsersLoading] = useState(false)
   const [bulkResendLoading, setBulkResendLoading] = useState(false)
   const [selectedSpeciesIds, setSelectedSpeciesIds] = useState<string[]>([])
@@ -284,9 +301,12 @@ export function MasterSectionClient({
   const [bulkNotifExpiryMode, setBulkNotifExpiryMode] = useState<'clear'>('clear')
   const [bulkNotifLoading, setBulkNotifLoading] = useState(false)
   const [selectedCountryIds, setSelectedCountryIds] = useState<string[]>([])
-  const [bulkField, setBulkField] = useState<'conflicts' | 'sanction' | 'extra_eu' | 'corruption_code' | 'cpi_multi'>('conflicts')
+  const [bulkField, setBulkField] = useState<
+    'conflicts' | 'sanction' | 'extra_eu' | 'corruption_code' | 'country_risk' | 'cpi_multi'
+  >('conflicts')
   const [bulkBoolValue, setBulkBoolValue] = useState<'true' | 'false'>('false')
   const [bulkCorruptionCode, setBulkCorruptionCode] = useState<'AA' | 'MA' | 'MB' | 'MM' | 'TT'>('MM')
+  const [bulkCountryRisk, setBulkCountryRisk] = useState<'RA' | 'RB' | 'RS' | 'none'>('RB')
   const [bulkCpi23Enabled, setBulkCpi23Enabled] = useState(false)
   const [bulkCpi24Enabled, setBulkCpi24Enabled] = useState(false)
   const [bulkCpi25Enabled, setBulkCpi25Enabled] = useState(false)
@@ -375,7 +395,7 @@ export function MasterSectionClient({
     }
     const handleRoleChange = async (
       userId: string,
-      newRole: 'standard' | 'premium' | 'admin'
+      newRole: 'standard' | 'tool' | 'premium' | 'admin'
     ) => {
       setUpdating(userId)
       const res = await updateUserRoleAction(userId, toolId, newRole)
@@ -518,7 +538,7 @@ export function MasterSectionClient({
             <Select
               value={row.role}
               onValueChange={(v) =>
-                handleRoleChange(uid, v as 'standard' | 'premium' | 'admin')
+                handleRoleChange(uid, v as 'standard' | 'tool' | 'premium' | 'admin')
               }
               disabled={busy}
             >
@@ -532,6 +552,7 @@ export function MasterSectionClient({
               <SelectContent>
                 <SelectItem value="admin">{ROLE_LABELS.admin}</SelectItem>
                 <SelectItem value="premium">{ROLE_LABELS.premium}</SelectItem>
+                <SelectItem value="tool">{ROLE_LABELS.tool}</SelectItem>
                 <SelectItem value="standard">{ROLE_LABELS.standard}</SelectItem>
               </SelectContent>
             </Select>
@@ -711,6 +732,7 @@ export function MasterSectionClient({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="standard">Standard</SelectItem>
+                    <SelectItem value="tool">Tool</SelectItem>
                     <SelectItem value="premium">Premium</SelectItem>
                   </SelectContent>
                 </Select>
@@ -895,6 +917,7 @@ export function MasterSectionClient({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="standard">Standard</SelectItem>
+                <SelectItem value="tool">Tool</SelectItem>
                 <SelectItem value="premium">Premium</SelectItem>
                 <SelectItem value="admin">Admin</SelectItem>
               </SelectContent>
@@ -1913,7 +1936,8 @@ export function MasterSectionClient({
                 <SelectItem value="sanction">Imposta “Sanzioni”</SelectItem>
                 <SelectItem value="extra_eu">Imposta “Extra UE”</SelectItem>
                 <SelectItem value="corruption_code">Imposta “Cod. corruzione”</SelectItem>
-                  <SelectItem value="cpi_multi">Imposta CPI (più anni)</SelectItem>
+                <SelectItem value="country_risk">Imposta “Rischio paese”</SelectItem>
+                <SelectItem value="cpi_multi">Imposta CPI (più anni)</SelectItem>
               </SelectContent>
             </Select>
 
@@ -1992,6 +2016,23 @@ export function MasterSectionClient({
                   <SelectItem value="TT">TT</SelectItem>
                 </SelectContent>
               </Select>
+            ) : bulkField === 'country_risk' ? (
+              <Select
+                value={bulkCountryRisk}
+                onValueChange={(v) => {
+                  if (isCountryRiskBulk(v)) setBulkCountryRisk(v)
+                }}
+              >
+                <SelectTrigger className="h-8 w-[140px] bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="RA">RA</SelectItem>
+                  <SelectItem value="RB">RB</SelectItem>
+                  <SelectItem value="RS">RS</SelectItem>
+                  <SelectItem value="none">Svuota</SelectItem>
+                </SelectContent>
+              </Select>
             ) : (
               <Select
                 value={bulkBoolValue}
@@ -2052,11 +2093,16 @@ export function MasterSectionClient({
                 const patch =
                   bulkField === 'corruption_code'
                     ? { corruption_code: bulkCorruptionCode }
-                    : bulkField === 'conflicts'
-                      ? { conflicts: bulkBoolValue === 'true' }
-                      : bulkField === 'sanction'
-                        ? { sanction: bulkBoolValue === 'true' }
-                        : { extra_eu: bulkBoolValue === 'true' }
+                    : bulkField === 'country_risk'
+                      ? {
+                          country_risk:
+                            bulkCountryRisk === 'none' ? null : bulkCountryRisk,
+                        }
+                      : bulkField === 'conflicts'
+                        ? { conflicts: bulkBoolValue === 'true' }
+                        : bulkField === 'sanction'
+                          ? { sanction: bulkBoolValue === 'true' }
+                          : { extra_eu: bulkBoolValue === 'true' }
                 const res = await updateCountriesBulk(toolId, selectedCountryIds, patch)
                 setBulkLoading(false)
                 if (res.success) {

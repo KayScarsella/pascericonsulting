@@ -56,7 +56,7 @@ export default async function SearchPage({
   const { getToolImpersonation, getEffectiveToolUserId } = await import('@/lib/tool-impersonation')
   const impersonation = await getToolImpersonation(TIMBER_TOOL_ID)
   const effectiveUserId = await getEffectiveToolUserId(TIMBER_TOOL_ID)
-  const hasAccess = role === "admin" || role === "premium"
+  const hasAccess = role === "admin" || role === "premium" || role === "tool"
   const isAdmin = role === "admin" && !impersonation
   const scopedUserId = impersonation ? effectiveUserId : userId
 

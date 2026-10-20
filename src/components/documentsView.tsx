@@ -1,5 +1,10 @@
 import { getToolAccess } from "@/lib/tool-auth"
-import { canAccessMinRole, type DocumentMinRole } from "@/lib/tool-role-access"
+import type { ToolRole } from "@/lib/tool-auth"
+import {
+  canAccessAllowedRoles,
+  DEFAULT_ALLOWED_ROLES,
+  normalizeAllowedRoles,
+} from "@/lib/tool-role-access"
 import { FileExplorer } from "@/components/ui/fileExplorer"
 import { createDocumentSignedUrls } from "@/lib/documents-download"
 import { logRoutePerf } from "@/lib/perf-debug"
@@ -10,6 +15,17 @@ interface ToolDocumentsViewProps {
   toolId: string
   searchParams: Promise<{ folderId?: string }>
   basePath: string
+}
+
+function docAllowedRoles(doc: {
+  allowed_roles?: string[] | null
+  min_role?: string | null
+}): ToolRole[] {
+  if (doc.allowed_roles?.length) {
+    return normalizeAllowedRoles(doc.allowed_roles)
+  }
+  if (doc.min_role === "premium") return ["premium", "admin"]
+  return DEFAULT_ALLOWED_ROLES
 }
 
 export async function ToolDocumentsView({
@@ -78,8 +94,8 @@ export async function ToolDocumentsView({
       )
     }
 
-    const folderMinRole = (folderResult.data.min_role ?? "standard") as DocumentMinRole
-    if (!canAccessMinRole(role, folderMinRole)) {
+    const folderRoles = docAllowedRoles(folderResult.data)
+    if (!canAccessAllowedRoles(role, folderRoles)) {
       return (
         <div className="space-y-6">
           <h2 className="text-2xl font-bold text-slate-900">Archivio Documentale</h2>
@@ -94,16 +110,13 @@ export async function ToolDocumentsView({
   }
 
   const parentFolderId = folderResult.data?.parent_id ?? null
-  const parentIsPremium =
-    currentFolderId &&
-    folderResult.data &&
-    (folderResult.data.min_role ?? "standard") === "premium"
+  const parentAllowedRoles = folderResult.data
+    ? docAllowedRoles(folderResult.data)
+    : null
 
-  // Cartelle premium visibili come teaser; file solo se il ruolo lo consente.
+  // Cartelle locked visibili come teaser; file solo se il ruolo lo consente.
   const visibleDocuments = (documents || []).filter(
-    (d) =>
-      d.type === "folder" ||
-      canAccessMinRole(role, (d.min_role ?? "standard") as DocumentMinRole)
+    (d) => d.type === "folder" || canAccessAllowedRoles(role, docAllowedRoles(d))
   )
 
   const filePaths = visibleDocuments
@@ -140,7 +153,7 @@ export async function ToolDocumentsView({
         userRole={role}
         toolId={toolId}
         pathRevalidate={basePath}
-        parentIsPremium={!!parentIsPremium}
+        parentAllowedRoles={parentAllowedRoles}
         downloadUrls={downloadUrls}
       />
     </div>

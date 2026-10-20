@@ -7,7 +7,7 @@ import { Database } from "@/types/supabase"
 import { isOnboardingComplete } from "@/lib/onboarding"
 
 // Definiamo i ruoli possibili in ordine di "potere"
-export type ToolRole = 'admin' | 'premium' | 'standard'
+export type ToolRole = 'admin' | 'premium' | 'tool' | 'standard'
 
 // Questa funzione è "cachata": deduplica le richieste nello stesso rendering
 export const getToolAccess = cache(async (toolId: string) => {

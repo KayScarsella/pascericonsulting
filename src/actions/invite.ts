@@ -15,7 +15,7 @@ import { upsertFscCompanyMemberAdmin } from '@/actions/fsc/members'
 import { notifyUserOfFscCompanyAccess } from '@/lib/fsc/company-notify'
 import type { FscMemberType } from '@/types/fsc'
 
-export type AppInviteRole = 'standard' | 'premium' | 'admin'
+export type AppInviteRole = 'standard' | 'tool' | 'premium' | 'admin'
 
 export type InviteUserIntent = 'default' | 'resend_pending_onboarding'
 
@@ -403,7 +403,12 @@ export async function resendPendingOnboardingInviteAction(
   }
 
   const role = access.role as AppInviteRole
-  if (role !== 'standard' && role !== 'premium' && role !== 'admin') {
+  if (
+    role !== 'standard' &&
+    role !== 'tool' &&
+    role !== 'premium' &&
+    role !== 'admin'
+  ) {
     return { success: false, error: 'Ruolo non valido per reinvio.' }
   }
 

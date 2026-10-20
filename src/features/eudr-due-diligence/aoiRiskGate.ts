@@ -14,6 +14,7 @@ import type { LossYearHistogram, RunMetadata } from './types/due-diligence-run'
 import type { RiskCalculationResult, RiskDetail } from '@/lib/risk-calculator'
 import { RISK_THRESHOLD } from '@/lib/risk-calculator'
 import { DEFAULT_MIN_LOSS_ON_FOREST_HA } from './constants/eudr-aoi-gate'
+import { HANSEN_LAST_LOSS_CALENDAR_YEAR } from './constants/hansen-version'
 
 /** Persisted on assessment_sessions.metadata after each completed AOI run */
 export type DdLastRunSnapshot = {
@@ -35,6 +36,11 @@ export type DdLastRunSnapshot = {
   logic_mode?: 'raffinata' | 'base'
   /** Avvisi non vincolanti (es. Hansen solo annuale, stesso anno taglio) */
   advisory_notes?: string[]
+  /**
+   * Loss nell'ultimo anno Hansen disponibile con data di taglio successiva
+   * (il gate classico non conterebbe quella loss) → evidenza «Tendenza deforestazione».
+   */
+  tendenza_deforestazione?: boolean
   /** Sessione su cui sono stati salvati gli artifact (cartella storage) — per PDF/cleanup */
   dd_artifact_session_id?: string
   /** User id della cartella storage `{userId}/eudr-due-diligence/...` (sempre il proprietario sessione) */
@@ -97,6 +103,39 @@ export function hasLossFromCalendarYearInclusive(
   return false
 }
 
+/** True se l'histogram ha almeno un pixel nell'anno calendario indicato. */
+export function hasLossInCalendarYear(
+  histogram: LossYearHistogram | undefined,
+  calendarYear: number
+): boolean {
+  if (!histogram || typeof histogram !== 'object') return false
+  for (const [bandStr, count] of Object.entries(histogram)) {
+    const n = Number(count) || 0
+    if (n <= 0) continue
+    const band = Number(bandStr)
+    if (!Number.isFinite(band)) continue
+    if (lossyearBandToCalendarYear(band) === calendarYear) return true
+  }
+  return false
+}
+
+/**
+ * Tendenza deforestazione: data di taglio successiva all'ultimo anno Hansen,
+ * loss presente in quell'anno, ma il gate classico post-taglio non scatta.
+ */
+export function detectTendenzaDeforestazione(args: {
+  cuttingYear: number | null
+  classicGateTriggered: boolean
+  histogram: LossYearHistogram | undefined
+  lastHansenYear?: number
+}): boolean {
+  const lastYear = args.lastHansenYear ?? HANSEN_LAST_LOSS_CALENDAR_YEAR
+  if (args.classicGateTriggered) return false
+  if (args.cuttingYear == null || !Number.isFinite(args.cuttingYear)) return false
+  if (args.cuttingYear <= lastYear) return false
+  return hasLossInCalendarYear(args.histogram, lastYear)
+}
+
 /**
  * Costruisce snapshot e flag da RunMetadata completata.
  * Priorità: se eudr_refined è ok e ha loss su foresta 2020 ≥ soglia → gate con motivazione JRC.
@@ -157,23 +196,43 @@ export function buildDdLastRunSnapshot(meta: RunMetadata): DdLastRunSnapshot {
     }
   }
 
-  const triggers_non_accettabile = triggersFromRefined || triggersFromHansenFallback
+  const classicTriggered = triggersFromRefined || triggersFromHansenFallback
+
+  /** Preferisci histogram su foresta 2020 se JRC ok; altrimenti Hansen completo. */
+  const histForTrend =
+    gateUsesJrc && forestHist && typeof forestHist === 'object' && Object.keys(forestHist).length > 0
+      ? forestHist
+      : histogramAll
+
+  const tendenza_deforestazione = detectTendenzaDeforestazione({
+    cuttingYear: hasValidCutting ? cuttingYear : null,
+    classicGateTriggered: classicTriggered,
+    histogram: histForTrend,
+  })
+
+  const triggers_non_accettabile = classicTriggered || tendenza_deforestazione
 
   const reasons: string[] = []
   if (triggers_non_accettabile) {
-    reasons.push(
-      'Verifica: Ogni perdita FORESTALE rilevata dopo il 31/12/2020 all’interno della maschera forestale 2020 costituisce una "evidenza" di possibile non conformità.'
-    )
-    if (triggersFromRefined && lossHaOnForest != null) {
+    if (tendenza_deforestazione && !classicTriggered) {
       reasons.push(
-        `Evidenza EUDR-raffinata: loss su foresta al 2020 (JRC GFC2020) con anno di loss ≥ ${minGateYear ?? EUDR_FIRST_LOSS_CALENDAR_YEAR}, circa ${lossHaOnForest.toFixed(2)} ha (soglia ${minHa} ha).`
+        `Tendenza deforestazione: loss rilevata nell’ultimo anno Hansen disponibile (${HANSEN_LAST_LOSS_CALENDAR_YEAR}) con data di taglio successiva (${cuttingYear}). Il gate classico post-taglio non conterebbe questa loss.`
       )
-    } else if (triggersFromHansenFallback) {
+    } else {
       reasons.push(
-        minGateYear != null
-          ? `Rilevata perdita forestale Hansen nell'AOI con anno di loss ≥ ${minGateYear} (allineato a data di taglio e cutoff EUDR).`
-          : 'Verifica: Ogni perdita FORESTALE rilevata dopo il 31/12/2020 all’interno della maschera forestale 2020 costituisce una "evidenza" di possibile non conformità.'
+        'Verifica: Ogni perdita FORESTALE rilevata dopo il 31/12/2020 all’interno della maschera forestale 2020 costituisce una "evidenza" di possibile non conformità.'
       )
+      if (triggersFromRefined && lossHaOnForest != null) {
+        reasons.push(
+          `Evidenza EUDR-raffinata: loss su foresta al 2020 (JRC GFC2020) con anno di loss ≥ ${minGateYear ?? EUDR_FIRST_LOSS_CALENDAR_YEAR}, circa ${lossHaOnForest.toFixed(2)} ha (soglia ${minHa} ha).`
+        )
+      } else if (triggersFromHansenFallback) {
+        reasons.push(
+          minGateYear != null
+            ? `Rilevata perdita forestale Hansen nell'AOI con anno di loss ≥ ${minGateYear} (allineato a data di taglio e cutoff EUDR).`
+            : 'Verifica: Ogni perdita FORESTALE rilevata dopo il 31/12/2020 all’interno della maschera forestale 2020 costituisce una "evidenza" di possibile non conformità.'
+        )
+      }
     }
   }
 
@@ -209,6 +268,7 @@ export function buildDdLastRunSnapshot(meta: RunMetadata): DdLastRunSnapshot {
     has_loss_after_cutting_date,
     triggers_non_accettabile,
     reasons,
+    ...(tendenza_deforestazione ? { tendenza_deforestazione: true } : {}),
     ...(gateUsesJrc ? { gate_uses_jrc_gfc2020: true } : {}),
     ...(lossHaOnForest != null ? { loss_on_forest_2020_post_eudr_ha: lossHaOnForest } : {}),
     logic_mode,
@@ -228,13 +288,18 @@ export function applyAoiGateToEudrRiskResult(
       : r
   )
 
+  const isTendenza =
+    ddLastRun.tendenza_deforestazione === true &&
+    (ddLastRun.reasons || []).some((r) => r.toLowerCase().includes('tendenza deforestazione'))
+
   const gateDetail: RiskDetail = {
     questionId: AOI_GATE_QUESTION_ID,
-    label:
-      'Screening geospaziale AOI (Hansen + JRC GFC2020 dove applicabile): evidenza post-cutoff EUDR; con data di taglio, solo loss con anno ≥ max(2021, anno taglio)',
-    shortLabel: 'Screening AOI (EUDR)',
+    label: isTendenza
+      ? `Tendenza deforestazione (loss nell’ultimo anno Hansen ${HANSEN_LAST_LOSS_CALENDAR_YEAR} con data di taglio successiva)`
+      : 'Screening geospaziale AOI (Hansen + JRC GFC2020 dove applicabile): evidenza post-cutoff EUDR; con data di taglio, solo loss con anno ≥ max(2021, anno taglio)',
+    shortLabel: isTendenza ? 'Tendenza deforestazione' : 'Screening AOI (EUDR)',
     riskIndex: AOI_GATE_RISK_INDEX,
-    answerRaw: 'triggered',
+    answerRaw: isTendenza ? 'tendenza_deforestazione' : 'triggered',
     answerLabel: normalizedReasons.join(' '),
   }
 
@@ -245,8 +310,9 @@ export function applyAoiGateToEudrRiskResult(
     details,
     overallRisk,
     outcome: 'non accettabile',
-    outcomeDescription:
-      'Esito non accettabile per evidenza geospaziale nell’AOI (perdita rilevante dopo il 31/12/2020 e, se nota la data di taglio, con anno di loss dall’anno di taglio in poi). Sono necessarie verifiche e/o mitigazione.',
+    outcomeDescription: isTendenza
+      ? `Esito non accettabile per tendenza deforestazione: loss nell’ultimo anno Hansen disponibile (${HANSEN_LAST_LOSS_CALENDAR_YEAR}) con data di taglio successiva. Sono necessarie verifiche e/o mitigazione.`
+      : 'Esito non accettabile per evidenza geospaziale nell’AOI (perdita rilevante dopo il 31/12/2020 e, se nota la data di taglio, con anno di loss dall’anno di taglio in poi). Sono necessarie verifiche e/o mitigazione.',
     expiryDate: null,
   }
 }

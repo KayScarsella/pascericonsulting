@@ -374,6 +374,7 @@ export async function updateCountriesBulk(
       | 'conflicts'
       | 'sanction'
       | 'corruption_code'
+      | 'country_risk'
       | 'cpi_23'
       | 'cpi_24'
       | 'cpi_25'
@@ -388,6 +389,13 @@ export async function updateCountriesBulk(
     if (patch.corruption_code != null && !allowedEnum.has(String(patch.corruption_code))) {
       return { success: false, error: 'Codice corruzione non valido.' }
     }
+    const allowedRisk = new Set(['RA', 'RB', 'RS'])
+    if (
+      patch.country_risk != null &&
+      !allowedRisk.has(String(patch.country_risk))
+    ) {
+      return { success: false, error: 'Rischio paese non valido.' }
+    }
 
     const update: Partial<CountryInsert> = {}
     if (typeof patch.extra_eu === 'boolean') update.extra_eu = patch.extra_eu
@@ -396,6 +404,10 @@ export async function updateCountriesBulk(
     if (patch.corruption_code === null) update.corruption_code = null
     if (typeof patch.corruption_code === 'string' && patch.corruption_code.trim()) {
       update.corruption_code = patch.corruption_code.trim() as CountryInsert['corruption_code']
+    }
+    if (patch.country_risk === null) update.country_risk = null
+    if (typeof patch.country_risk === 'string' && allowedRisk.has(patch.country_risk)) {
+      update.country_risk = patch.country_risk as CountryInsert['country_risk']
     }
     if (patch.cpi_23 === null) update.cpi_23 = null
     if (typeof patch.cpi_23 === 'number') update.cpi_23 = patch.cpi_23

@@ -5,6 +5,7 @@
 
 import type { RunMetadata } from '../types/due-diligence-run'
 import type { DdLastRunSnapshot } from '../aoiRiskGate'
+import { HANSEN_LAST_LOSS_CALENDAR_YEAR } from '../constants/hansen-version'
 import { buildDdReplicatePayload } from './ddReplicatePayload'
 
 export const DD_REPORT_VERSION = 2
@@ -66,12 +67,27 @@ export function buildDdReportPayload(
       return calendarYear >= cuttingYear && Number(count) > 0
     })
 
+  const hasLossInLastHansenYear = Object.entries(meta.lossyear_histogram || {}).some(
+    ([key, count]) => {
+      const band = Number(key)
+      const calendarYear = band >= 1 && band <= 99 ? 2000 + band : band
+      return calendarYear === HANSEN_LAST_LOSS_CALENDAR_YEAR && Number(count) > 0
+    }
+  )
+  const tendenza =
+    cuttingYear != null &&
+    cuttingYear > HANSEN_LAST_LOSS_CALENDAR_YEAR &&
+    !hasLossFromCutYearOnward &&
+    hasLossInLastHansenYear
+
   if (cuttingYear != null) {
     ui_blocks.push({
-      heading: 'Messaggio sintetico',
+      heading: tendenza ? 'Tendenza deforestazione' : 'Messaggio sintetico',
       body: hasLossFromCutYearOnward
         ? "Le coordinate inserite evidenziano la presenza di deforestazione per l'anno di taglio (vedi grafico in rosso)."
-        : "Le coordinate inserite non evidenziano la presenza di deforestazione per l'anno di taglio.",
+        : tendenza
+          ? `Tendenza deforestazione: loss rilevata nell’ultimo anno Hansen disponibile (${HANSEN_LAST_LOSS_CALENDAR_YEAR}) con data di taglio successiva (${cuttingYear}).`
+          : "Le coordinate inserite non evidenziano la presenza di deforestazione per l'anno di taglio.",
     })
   }
 

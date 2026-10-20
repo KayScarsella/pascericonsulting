@@ -19,15 +19,14 @@ export function PremiumFolderUpsell({
   variant = "page",
 }: PremiumFolderUpsellProps) {
   const title = folderName
-    ? `«${folderName}» è riservata agli utenti Premium`
-    : "Contenuto riservato agli utenti Premium"
+    ? `«${folderName}» non è inclusa nel tuo ruolo`
+    : "Contenuto non disponibile per il tuo ruolo"
 
   const body = (
     <>
       <p className="text-slate-600 max-w-md">
-        Questa cartella e i documenti al suo interno sono disponibili solo per gli utenti{" "}
-        <strong>Premium</strong> o <strong>Admin</strong>. Contatta un amministratore del tool
-        per richiedere l&apos;upgrade del tuo account.
+        Questa cartella e i documenti al suo interno non rientrano nei permessi del tuo ruolo
+        sul tool. Contatta un amministratore per richiedere l&apos;accesso.
       </p>
       <Button asChild variant="outline" className="mt-2">
         <Link href={archivePath}>Torna all&apos;archivio</Link>
@@ -44,9 +43,8 @@ export function PremiumFolderUpsell({
           </div>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription className="text-center">
-            Questa cartella e i documenti al suo interno sono disponibili solo per gli utenti
-            Premium o Admin. Contatta un amministratore del tool per richiedere l&apos;upgrade del
-            tuo account.
+            Questa cartella e i documenti al suo interno non rientrano nei permessi del tuo ruolo
+            sul tool. Contatta un amministratore per richiedere l&apos;accesso.
           </DialogDescription>
         </DialogHeader>
         <div className="flex justify-center pt-2">

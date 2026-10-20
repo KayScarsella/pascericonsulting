@@ -4,7 +4,11 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Folder, FileText, Download, Upload, Plus, ArrowLeft, Trash2, Loader2, Lock, Shield } from "lucide-react"
 import type { ToolRole } from "@/lib/tool-auth"
-import { canAccessMinRole, type DocumentMinRole } from "@/lib/tool-role-access"
+import {
+  canAccessAllowedRoles,
+  DEFAULT_ALLOWED_ROLES,
+  normalizeAllowedRoles,
+} from "@/lib/tool-role-access"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { FolderAccessDialog } from "@/components/documents/FolderAccessDialog"
@@ -35,10 +39,18 @@ interface FileExplorerProps {
   userRole: ToolRole
   toolId: string
   pathRevalidate: string
-  /** Cartella corrente (parent dei nuovi elementi) è premium → i figli ereditano. */
-  parentIsPremium?: boolean
+  /** Allowlist della cartella corrente (parent): i figli non possono ampliare. */
+  parentAllowedRoles?: ToolRole[] | null
   /** Prefetch server-side (batch signed URLs, TTL 5 min). */
   downloadUrls?: Record<string, string>
+}
+
+function itemAllowedRoles(item: DocItem): ToolRole[] {
+  if (item.allowed_roles?.length) {
+    return normalizeAllowedRoles(item.allowed_roles)
+  }
+  if (item.min_role === "premium") return ["premium", "admin"]
+  return DEFAULT_ALLOWED_ROLES
 }
 
 export function FileExplorer({
@@ -49,7 +61,7 @@ export function FileExplorer({
   userRole,
   toolId,
   pathRevalidate,
-  parentIsPremium = false,
+  parentAllowedRoles = null,
   downloadUrls = {},
 }: FileExplorerProps) {
   const router = useRouter()
@@ -61,17 +73,15 @@ export function FileExplorer({
   const [editFolder, setEditFolder] = useState<{
     id: string
     name: string
-    minRole: DocumentMinRole
+    allowedRoles: ToolRole[]
   } | null>(null)
-  const [premiumUpsellFolder, setPremiumUpsellFolder] = useState<{
+  const [lockedFolder, setLockedFolder] = useState<{
     id: string
     name: string
   } | null>(null)
 
-  const isPremiumFolderLocked = (item: DocItem) =>
-    item.type === "folder" &&
-    (item.min_role ?? "standard") === "premium" &&
-    !canAccessMinRole(userRole, "premium")
+  const isFolderLocked = (item: DocItem) =>
+    item.type === "folder" && !canAccessAllowedRoles(userRole, itemAllowedRoles(item))
 
   // --- DOWNLOAD ---
   const triggerDownload = (signedUrl: string, filename: string) => {
@@ -231,8 +241,8 @@ export function FileExplorer({
 
   const handleFolderClick = (item: DocItem) => {
     if (item.type !== "folder") return
-    if (isPremiumFolderLocked(item)) {
-      setPremiumUpsellFolder({ id: item.id, name: item.name })
+    if (isFolderLocked(item)) {
+      setLockedFolder({ id: item.id, name: item.name })
       return
     }
     handleNavigate(item.id)
@@ -317,12 +327,16 @@ export function FileExplorer({
         )}
 
         {items.map((item) => {
-          const lockedPremium = isPremiumFolderLocked(item)
+          const locked = isFolderLocked(item)
+          const roles = itemAllowedRoles(item)
+          const restricted =
+            item.type === "folder" &&
+            (!roles.includes("standard") || !roles.includes("tool") || !roles.includes("premium"))
           return (
           <li
             key={item.id}
             className={`p-4 flex items-center justify-between transition-colors group ${
-              lockedPremium ? "bg-slate-50/80 hover:bg-amber-50/40" : "hover:bg-slate-50"
+              locked ? "bg-slate-50/80 hover:bg-amber-50/40" : "hover:bg-slate-50"
             }`}
           >
             <div
@@ -333,7 +347,7 @@ export function FileExplorer({
             >
               <div
                 className={`p-2 rounded ${
-                  lockedPremium
+                  locked
                     ? "bg-slate-100 text-slate-400"
                     : item.type === "folder"
                       ? "bg-amber-50 text-amber-600"
@@ -341,7 +355,7 @@ export function FileExplorer({
                 }`}
               >
                 {item.type === "folder" ? (
-                  lockedPremium ? <Lock className="w-5 h-5" /> : <Folder className="w-5 h-5" />
+                  locked ? <Lock className="w-5 h-5" /> : <Folder className="w-5 h-5" />
                 ) : (
                   <FileText className="w-5 h-5" />
                 )}
@@ -350,21 +364,21 @@ export function FileExplorer({
                 <div className="flex items-center gap-2 flex-wrap">
                   <p
                     className={`font-medium ${
-                      lockedPremium ? "text-slate-600" : "text-slate-900"
+                      locked ? "text-slate-600" : "text-slate-900"
                     }`}
                   >
                     {item.name}
                   </p>
-                  {item.type === "folder" && item.min_role === "premium" && (
+                  {restricted && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
                       <Lock className="h-3 w-3" />
-                      Premium
+                      Accesso limitato
                     </span>
                   )}
                 </div>
-                {lockedPremium && (
+                {locked && (
                   <p className="text-xs text-amber-700/90 mt-0.5">
-                    Disponibile con account Premium — clicca per saperne di più
+                    Non inclusa nel tuo ruolo — clicca per saperne di più
                   </p>
                 )}
                 {item.type === "file" && item.size && (
@@ -402,7 +416,7 @@ export function FileExplorer({
                     setEditFolder({
                       id: item.id,
                       name: item.name,
-                      minRole: (item.min_role ?? "standard") as DocumentMinRole,
+                      allowedRoles: itemAllowedRoles(item),
                     })
                   }}
                 >
@@ -438,17 +452,17 @@ export function FileExplorer({
         toolId={toolId}
         pathRevalidate={pathRevalidate}
         parentFolderId={currentFolderId}
-        parentIsPremium={parentIsPremium}
+        parentAllowedRoles={parentAllowedRoles}
       />
 
       <Dialog
-        open={!!premiumUpsellFolder}
-        onOpenChange={(open) => !open && setPremiumUpsellFolder(null)}
+        open={!!lockedFolder}
+        onOpenChange={(open) => !open && setLockedFolder(null)}
       >
         <DialogContent className="sm:max-w-md">
-          {premiumUpsellFolder && (
+          {lockedFolder && (
             <PremiumFolderUpsell
-              folderName={premiumUpsellFolder.name}
+              folderName={lockedFolder.name}
               archivePath={pathRevalidate}
               variant="dialog"
             />
@@ -464,10 +478,10 @@ export function FileExplorer({
           toolId={toolId}
           pathRevalidate={pathRevalidate}
           parentFolderId={currentFolderId}
-          parentIsPremium={parentIsPremium}
+          parentAllowedRoles={parentAllowedRoles}
           folderId={editFolder.id}
           initialName={editFolder.name}
-          initialMinRole={editFolder.minRole}
+          initialAllowedRoles={editFolder.allowedRoles}
         />
       )}
     </div>
