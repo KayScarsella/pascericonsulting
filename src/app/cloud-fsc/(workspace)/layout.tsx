@@ -8,8 +8,11 @@ export default async function CloudFscWorkspaceLayout({
 }: {
   children: React.ReactNode
 }) {
-  const { role } = await getToolAccess(CLOUD_FSC_TOOL_ID)
-  const companyCtx = await getFscCompanyContext()
+  // getToolAccess / getFscCompanyContext are React.cache'd — deduped with parent layout.
+  const [{ role }, companyCtx] = await Promise.all([
+    getToolAccess(CLOUD_FSC_TOOL_ID),
+    getFscCompanyContext(),
+  ])
 
   if (role !== 'admin' && companyCtx.needsSetup) {
     redirect(role === 'premium' ? '/cloud-fsc/setup' : '/cloud-fsc/presentazione')

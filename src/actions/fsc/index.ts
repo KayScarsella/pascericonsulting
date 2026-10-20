@@ -33,6 +33,7 @@ export {
   finalizeFscGestioneUpload,
   getFscEnteDownloadUrl,
   getFscGestioneDownloadUrl,
+  listFscCategoryCounts,
   listFscDocumentVersions,
   listFscEnteDocuments,
   listFscEnteDocumentVersions,

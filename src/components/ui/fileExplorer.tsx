@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Folder, FileText, Download, Upload, Plus, ArrowLeft, Trash2, Loader2, Lock, Shield } from "lucide-react"
 import type { ToolRole } from "@/lib/tool-auth"
@@ -31,6 +31,9 @@ import { Database } from "@/types/supabase"
 // Tipo derivato direttamente dal DB
 export type DocItem = Database['public']['Tables']['documents']['Row']
 
+const DOWNLOAD_STAGGER_MS = 150
+const UPLOAD_PROGRESS_THROTTLE_MS = 100
+
 interface FileExplorerProps {
   items: DocItem[]
   currentFolderId: string | null
@@ -41,8 +44,6 @@ interface FileExplorerProps {
   pathRevalidate: string
   /** Allowlist della cartella corrente (parent): i figli non possono ampliare. */
   parentAllowedRoles?: ToolRole[] | null
-  /** Prefetch server-side (batch signed URLs, TTL 5 min). */
-  downloadUrls?: Record<string, string>
 }
 
 function itemAllowedRoles(item: DocItem): ToolRole[] {
@@ -62,13 +63,13 @@ export function FileExplorer({
   toolId,
   pathRevalidate,
   parentAllowedRoles = null,
-  downloadUrls = {},
 }: FileExplorerProps) {
   const router = useRouter()
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [isDeleting, setIsDeleting] = useState<string | null>(null)
   const [isDownloading, setIsDownloading] = useState<string | null>(null)
+  const [urlCache, setUrlCache] = useState<Record<string, string>>({})
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [editFolder, setEditFolder] = useState<{
     id: string
@@ -79,6 +80,8 @@ export function FileExplorer({
     id: string
     name: string
   } | null>(null)
+  const lastProgressAt = useRef(0)
+  const hasDownloadableFiles = items.some((i) => i.type === "file")
 
   const isFolderLocked = (item: DocItem) =>
     item.type === "folder" && !canAccessAllowedRoles(userRole, itemAllowedRoles(item))
@@ -95,9 +98,9 @@ export function FileExplorer({
 
   const handleDownload = async (path: string | null, filename: string) => {
     if (!path) return
-    const prefetched = downloadUrls[path]
-    if (prefetched) {
-      triggerDownload(prefetched, filename)
+    const cached = urlCache[path]
+    if (cached) {
+      triggerDownload(cached, filename)
       return
     }
 
@@ -108,7 +111,10 @@ export function FileExplorer({
         alert("Errore download: " + error)
         return
       }
-      if (signedUrl) triggerDownload(signedUrl, filename)
+      if (signedUrl) {
+        setUrlCache((prev) => ({ ...prev, [path]: signedUrl }))
+        triggerDownload(signedUrl, filename)
+      }
     } catch (e) {
       console.error(e)
       alert("Errore imprevisto")
@@ -124,8 +130,8 @@ export function FileExplorer({
     setIsDownloading("__all__")
     try {
       const paths = files.map((f) => f.storage_path as string)
-      const missing = paths.filter((p) => !downloadUrls[p])
-      let urlMap = { ...downloadUrls }
+      const missing = paths.filter((p) => !urlCache[p])
+      let urlMap = { ...urlCache }
 
       if (missing.length > 0) {
         const { urls, error } = await getDownloadUrls(missing, toolId)
@@ -134,11 +140,18 @@ export function FileExplorer({
           return
         }
         urlMap = { ...urlMap, ...urls }
+        setUrlCache(urlMap)
       }
 
-      for (const file of files) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]
         const url = urlMap[file.storage_path as string]
-        if (url) triggerDownload(url, file.name)
+        if (url) {
+          triggerDownload(url, file.name)
+          if (i < files.length - 1) {
+            await new Promise((r) => setTimeout(r, DOWNLOAD_STAGGER_MS))
+          }
+        }
       }
     } catch (e) {
       console.error(e)
@@ -192,6 +205,9 @@ export function FileExplorer({
 
       toast.loading(`Caricamento ${file.name}… 0%`, { id: toastId })
       const uploadResult = await uploadDocumentWithProgress(storagePath, file, (percent) => {
+        const now = Date.now()
+        if (percent < 100 && now - lastProgressAt.current < UPLOAD_PROGRESS_THROTTLE_MS) return
+        lastProgressAt.current = now
         setUploadProgress(percent)
         toast.loading(`Caricamento ${file.name}… ${percent}%`, { id: toastId })
       })
@@ -263,7 +279,7 @@ export function FileExplorer({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {items.some((i) => i.type === "file") && (
+          {hasDownloadableFiles && (
             <Button
               size="sm"
               variant="outline"

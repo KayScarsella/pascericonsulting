@@ -34,8 +34,10 @@ export default async function CloudFscLayout({
 }: {
   children: React.ReactNode
 }) {
-  const { role, isToolActive } = await getToolAccess(CLOUD_FSC_TOOL_ID)
-  const companyCtx = await getFscCompanyContext()
+  const [{ role, isToolActive }, companyCtx] = await Promise.all([
+    getToolAccess(CLOUD_FSC_TOOL_ID),
+    getFscCompanyContext(),
+  ])
 
   const inOnboarding = Boolean(companyCtx.needsSetup && role !== 'admin')
 

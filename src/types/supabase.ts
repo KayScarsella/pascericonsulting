@@ -1903,6 +1903,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      cascade_document_allowed_roles: {
+        Args: {
+          p_folder_id: string
+          p_tool_id: string
+          p_allowed_roles: ("standard" | "tool" | "premium" | "admin")[]
+          p_min_role: string
+        }
+        Returns: number
+      }
       get_recursive_storage_paths: {
         Args: { target_id: string }
         Returns: {

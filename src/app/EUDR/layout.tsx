@@ -19,8 +19,10 @@ export default async function EudrLayout({
 }: {
   children: React.ReactNode
 }) {
-  const { role } = await getToolAccess(EUDR_TOOL_ID)
-  const impersonation = await getToolImpersonation(EUDR_TOOL_ID)
+  const [{ role }, impersonation] = await Promise.all([
+    getToolAccess(EUDR_TOOL_ID),
+    getToolImpersonation(EUDR_TOOL_ID),
+  ])
   const targetLabel =
     impersonation?.targetFullName?.trim() ||
     impersonation?.targetEmail?.trim() ||

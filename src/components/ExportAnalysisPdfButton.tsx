@@ -2,8 +2,7 @@
 
 import { useState } from 'react'
 import { FileDown, Loader2 } from 'lucide-react'
-import { jsPDF } from 'jspdf'
-import autoTable from 'jspdf-autotable'
+import type { jsPDF } from 'jspdf'
 import type { RiskDetail } from '@/lib/risk-calculator'
 import {
   getEudrDdsPdfOutcomeLine,
@@ -129,7 +128,9 @@ export interface ExportAnalysisPdfProps {
 
 async function fetchLogoAsDataUrl(): Promise<{ dataUrl: string; format: 'JPEG' | 'PNG' } | null> {
   try {
-    const res = await fetch(`${typeof window !== 'undefined' ? window.location.origin : ''}/unnamed.jpeg`)
+    const res = await fetch(
+      `${typeof window !== 'undefined' ? window.location.origin : ''}/pasceri-consulting-logo.png`
+    )
     if (!res.ok) return null
     const blob = await res.blob()
     const dataUrl = await new Promise<string | null>((resolve) => {
@@ -138,7 +139,7 @@ async function fetchLogoAsDataUrl(): Promise<{ dataUrl: string; format: 'JPEG' |
       r.onerror = () => resolve(null)
       r.readAsDataURL(blob)
     })
-    return dataUrl ? { dataUrl, format: 'JPEG' as const } : null
+    return dataUrl ? { dataUrl, format: 'PNG' as const } : null
   } catch {
     return null
   }
@@ -148,6 +149,12 @@ async function buildPdf(
   props: ExportAnalysisPdfProps,
   logoResult: { dataUrl: string; format: 'JPEG' | 'PNG' } | null
 ): Promise<jsPDF> {
+  const [{ jsPDF }, autoTableMod] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+  ])
+  const autoTable = autoTableMod.default
+
   const {
     variant,
     nomeOperazione,

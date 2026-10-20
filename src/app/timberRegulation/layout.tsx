@@ -18,8 +18,10 @@ export default async function TimberLayout({
 }: {
   children: React.ReactNode
 }) {
-  const { role } = await getToolAccess(TIMBER_TOOL_ID)
-  const impersonation = await getToolImpersonation(TIMBER_TOOL_ID)
+  const [{ role }, impersonation] = await Promise.all([
+    getToolAccess(TIMBER_TOOL_ID),
+    getToolImpersonation(TIMBER_TOOL_ID),
+  ])
   const targetLabel =
     impersonation?.targetFullName?.trim() ||
     impersonation?.targetEmail?.trim() ||

@@ -174,18 +174,22 @@ async function listDocumentsForModule(
   )
 
   const rootIds = [...new Set(docs.map(getVersionRootId))]
+  const rootIdSet = new Set(rootIds)
 
-  const { data: allVersions } = await supabase
-    .from('fsc_documents')
-    .select('id, parent_document_id, version, status')
-    .eq('company_id', ctx.data.companyId)
-    .eq('module', module)
-
+  // Scoped version rows only (roots + children), not the whole module history.
   const versionCountByRoot = new Map<string, number>()
-  for (const row of allVersions ?? []) {
-    const r = row as Pick<FscDocument, 'id' | 'parent_document_id'>
-    const root = r.parent_document_id ?? r.id
-    if (rootIds.includes(root)) {
+  if (rootIds.length > 0) {
+    const { data: versionRows } = await supabase
+      .from('fsc_documents')
+      .select('id, parent_document_id')
+      .eq('company_id', ctx.data.companyId)
+      .eq('module', module)
+      .or(`id.in.(${rootIds.join(',')}),parent_document_id.in.(${rootIds.join(',')})`)
+
+    for (const row of versionRows ?? []) {
+      const r = row as Pick<FscDocument, 'id' | 'parent_document_id'>
+      const root = r.parent_document_id ?? r.id
+      if (!rootIdSet.has(root)) continue
       versionCountByRoot.set(root, (versionCountByRoot.get(root) ?? 0) + 1)
     }
   }
@@ -581,6 +585,41 @@ export type PrepareFscGestioneUploadInput = {
   version?: number
 }
 
+/** Lightweight per-category counts (active docs only). */
+export async function listFscCategoryCounts(
+  module: FscDocumentModuleSlug,
+  year?: number
+): Promise<Record<string, number>> {
+  const ctx = await requireFscContext()
+  if (!ctx.success) return {}
+
+  const supabase = await createClient()
+  let query = supabase
+    .from('fsc_documents')
+    .select('category')
+    .eq('company_id', ctx.data.companyId)
+    .eq('module', module)
+    .eq('status', 'active')
+
+  if (year !== undefined) {
+    query = query.eq('reference_year', year)
+  }
+
+  const { data, error } = await query
+  if (error) {
+    console.error('listFscCategoryCounts:', error)
+    return {}
+  }
+
+  const counts: Record<string, number> = {}
+  for (const row of data ?? []) {
+    const cat = row.category as string
+    if (!cat) continue
+    counts[cat] = (counts[cat] ?? 0) + 1
+  }
+  return counts
+}
+
 export async function listFscGestioneDocuments(
   category?: string
 ): Promise<FscGestioneDocument[]> {
@@ -659,6 +698,7 @@ export async function listFscEnteYears(): Promise<number[]> {
   if (!ctx.success) return []
 
   const supabase = await createClient()
+  // Distinct years — PostgREST has no DISTINCT; fetch only the year column.
   const { data, error } = await supabase
     .from('fsc_documents')
     .select('reference_year')
@@ -666,6 +706,7 @@ export async function listFscEnteYears(): Promise<number[]> {
     .eq('module', 'ente')
     .eq('status', 'active')
     .not('reference_year', 'is', null)
+    .order('reference_year', { ascending: false })
 
   if (error) {
     console.error('listFscEnteYears:', error)
@@ -675,7 +716,7 @@ export async function listFscEnteYears(): Promise<number[]> {
   const years = [
     ...new Set((data ?? []).map((r) => r.reference_year as number)),
   ]
-  return years.sort((a, b) => b - a)
+  return years
 }
 
 export async function listFscEnteDocumentVersions(

@@ -1,4 +1,4 @@
-import { area as turfArea } from '@turf/turf'
+import { area as turfArea } from '@turf/area'
 import { normalizeAoiInput } from '@/features/eudr-due-diligence/server/earthengine/normalizeAoi'
 
 export type BoscologGeoFeatureCollection = {

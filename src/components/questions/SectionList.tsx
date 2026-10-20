@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from "react"
+import dynamic from "next/dynamic"
 import { useRouter } from "next/navigation"
 import { QuestionItem } from "@/components/questions/questionItem"
 import { mapResponses, checkSectionRules } from "@/lib/logic-engine"
@@ -21,7 +22,14 @@ import {
 } from "@/lib/eudr-question-ids"
 import { buildCpiAnswerFromExtra } from "@/lib/year-values"
 import { isQuestionAnsweredByType, isJsonAnswerQuestionType } from "@/lib/question-type-utils"
-import { EmbeddedDueDiligenceBlock } from "@/features/eudr-due-diligence/EmbeddedDueDiligenceBlock"
+
+const EmbeddedDueDiligenceBlock = dynamic(
+    () =>
+        import("@/features/eudr-due-diligence/EmbeddedDueDiligenceBlock").then(
+            (m) => m.EmbeddedDueDiligenceBlock
+        ),
+    { ssr: false, loading: () => <div className="h-24 animate-pulse rounded-lg bg-slate-100" /> }
+)
 
 /** Sezione E — Paese di raccolta: dopo "Rischio paese" mostra blocco AOI inline */
 const SECTION_E_PAES_EMBED_AFTER = "8e3c8459-5a9b-4ecf-8a4e-9f9da2b53cc1"

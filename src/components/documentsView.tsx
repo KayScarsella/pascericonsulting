@@ -5,11 +5,15 @@ import {
   DEFAULT_ALLOWED_ROLES,
   normalizeAllowedRoles,
 } from "@/lib/tool-role-access"
-import { FileExplorer } from "@/components/ui/fileExplorer"
-import { createDocumentSignedUrls } from "@/lib/documents-download"
+import { FileExplorer, type DocItem } from "@/components/ui/fileExplorer"
 import { logRoutePerf } from "@/lib/perf-debug"
 import { createClient } from "@/utils/supabase/server"
 import { PremiumFolderUpsell } from "@/components/documents/PremiumFolderUpsell"
+
+const DOCUMENT_LIST_COLUMNS =
+  "id, name, type, parent_id, storage_path, size, mime_type, allowed_roles, min_role, tool_id, created_at" as const
+
+const DOCUMENTS_PAGE_SIZE = 100
 
 interface ToolDocumentsViewProps {
   toolId: string
@@ -47,31 +51,28 @@ export async function ToolDocumentsView({
   const isAdmin = role === "admin"
   const supabase = await createClient()
 
-  const folderQuery = currentFolderId
-    ? supabase
-        .from("documents")
-        .select("*")
-        .eq("id", currentFolderId)
-        .eq("tool_id", toolId)
-        .maybeSingle()
-    : null
+  let folderResult: {
+    data: {
+      id: string
+      name: string
+      type: string
+      parent_id: string | null
+      allowed_roles?: string[] | null
+      min_role?: string | null
+    } | null
+    error: { message: string } | null
+  } = { data: null, error: null }
 
-  let documentsQuery = supabase.from("documents").select("*").eq("tool_id", toolId)
+  // ACL cartella prima del listing figli (evita lavoro inutile se locked/inesistente).
   if (currentFolderId) {
-    documentsQuery = documentsQuery.eq("parent_id", currentFolderId)
-  } else {
-    documentsQuery = documentsQuery.is("parent_id", null)
-  }
+    queryCount += 1
+    folderResult = await supabase
+      .from("documents")
+      .select("id, name, type, parent_id, allowed_roles, min_role")
+      .eq("id", currentFolderId)
+      .eq("tool_id", toolId)
+      .maybeSingle()
 
-  queryCount += 1
-  if (folderQuery) queryCount += 1
-
-  const [{ data: documents }, folderResult] = await Promise.all([
-    documentsQuery.order("type", { ascending: false }).order("name", { ascending: true }),
-    folderQuery ?? Promise.resolve({ data: null, error: null }),
-  ])
-
-  if (currentFolderId) {
     if (folderResult.error) {
       console.error("[documents] folder lookup failed:", folderResult.error.message)
       return (
@@ -109,22 +110,31 @@ export async function ToolDocumentsView({
     }
   }
 
+  queryCount += 1
+  let documentsQuery = supabase
+    .from("documents")
+    .select(DOCUMENT_LIST_COLUMNS)
+    .eq("tool_id", toolId)
+  if (currentFolderId) {
+    documentsQuery = documentsQuery.eq("parent_id", currentFolderId)
+  } else {
+    documentsQuery = documentsQuery.is("parent_id", null)
+  }
+
+  const { data: documents } = await documentsQuery
+    .order("type", { ascending: false })
+    .order("name", { ascending: true })
+    .range(0, DOCUMENTS_PAGE_SIZE - 1)
+
   const parentFolderId = folderResult.data?.parent_id ?? null
   const parentAllowedRoles = folderResult.data
     ? docAllowedRoles(folderResult.data)
     : null
 
   // Cartelle locked visibili come teaser; file solo se il ruolo lo consente.
-  const visibleDocuments = (documents || []).filter(
+  const visibleDocuments = ((documents || []) as DocItem[]).filter(
     (d) => d.type === "folder" || canAccessAllowedRoles(role, docAllowedRoles(d))
   )
-
-  const filePaths = visibleDocuments
-    .filter((d) => d.type === "file" && d.storage_path)
-    .map((d) => d.storage_path as string)
-
-  const downloadUrls =
-    filePaths.length > 0 ? await createDocumentSignedUrls(supabase, toolId, filePaths) : {}
 
   logRoutePerf(basePath, {
     tab: currentFolderId ?? "root",
@@ -154,7 +164,6 @@ export async function ToolDocumentsView({
         toolId={toolId}
         pathRevalidate={basePath}
         parentAllowedRoles={parentAllowedRoles}
-        downloadUrls={downloadUrls}
       />
     </div>
   )

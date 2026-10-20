@@ -23,7 +23,14 @@ import { normalizeAoiInput } from '@/features/eudr-due-diligence/server/eartheng
 import { buildDdLastRunSnapshot } from '@/features/eudr-due-diligence/aoiRiskGate'
 import { removePreviousDueDiligenceRuns } from '@/features/eudr-due-diligence/storage/cleanupSessionRuns'
 import { composeAoiPosterEeImage } from '@/features/eudr-due-diligence/server/earthengine/aoiMapLayerSpecs'
-import { point, multiPoint, polygon, multiPolygon, buffer as turfBuffer, featureCollection } from '@turf/turf'
+import { buffer as turfBuffer } from '@turf/buffer'
+import {
+  point,
+  multiPoint,
+  polygon,
+  multiPolygon,
+  featureCollection,
+} from '@turf/helpers'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 const EUDR_CUTOFF = '2020-12-31'
@@ -226,14 +233,26 @@ async function runDueDiligenceWithNormalized(
   forest2020Tiles?: { tilesUrlTemplate: string; attribution: string }
   sentinel2YearTiles?: { years: Array<{ year: number; tilesUrlTemplate: string }>; attribution: string }
 }> {
-  const cuttingDateRaw = cuttingDateIso?.trim()
-  if (!cuttingDateRaw || !/^\d{4}-\d{2}-\d{2}$/.test(cuttingDateRaw)) {
+  const cuttingDateRaw = cuttingDateIso?.trim() ?? ''
+  let cuttingDate: string
+  if (/^\d{4}$/.test(cuttingDateRaw)) {
+    const y = Number.parseInt(cuttingDateRaw, 10)
+    const maxYear = new Date().getFullYear()
+    if (!Number.isFinite(y) || y < 2000 || y > maxYear) {
+      return {
+        error:
+          "Anno di taglio obbligatorio: inserire un anno valido (YYYY) prima di eseguire l'analisi.",
+      }
+    }
+    cuttingDate = `${cuttingDateRaw}-01-01`
+  } else if (/^\d{4}-\d{2}-\d{2}$/.test(cuttingDateRaw)) {
+    cuttingDate = cuttingDateRaw
+  } else {
     return {
       error:
-        "Data di taglio obbligatoria: inserire una data valida (YYYY-MM-DD) prima di eseguire l'analisi.",
+        "Anno di taglio obbligatorio: inserire un anno valido (YYYY) prima di eseguire l'analisi.",
     }
   }
-  const cuttingDate = cuttingDateRaw
   const hasPoints = hasPointGeometries(normalized.geometries)
   let validPointBufferAreaHa: number | null = null
   if (hasPoints) {

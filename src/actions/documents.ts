@@ -28,16 +28,19 @@ async function getSupabase() {
 }
 
 async function requireDocumentAdmin(toolId: string) {
-  const supabase = await getSupabase()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return { error: "Non autenticato" as const }
-
-  const { role } = await getToolAccess(toolId)
+  const { role, userId } = await getToolAccess(toolId)
   if (role !== "admin") return { error: "Non autorizzato: servono permessi admin" as const }
 
-  return { supabase, user }
+  const supabase = await getSupabase()
+  return { supabase, user: { id: userId } }
+}
+
+const DOCUMENTS_STORAGE_REMOVE_CHUNK = 200
+
+function chunkPaths<T>(items: T[], size: number): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size))
+  return out
 }
 
 async function resolveEffectiveAllowedRoles(
@@ -133,32 +136,14 @@ async function cascadeDocumentAllowedRoles(
   toolId: string,
   allowedRoles: AppRole[]
 ): Promise<void> {
-  const { data: children } = await supabase
-    .from("documents")
-    .select("id, type")
-    .eq("parent_id", folderId)
-    .eq("tool_id", toolId)
-
-  for (const child of children ?? []) {
-    const { data: updatedChild, error: childError } = await supabase
-      .from("documents")
-      .update({
-        allowed_roles: allowedRoles,
-        min_role: allowedRoles.includes("standard") ? "standard" : "premium",
-      })
-      .eq("id", child.id)
-      .eq("tool_id", toolId)
-      .select("id")
-
-    if (childError) throw new Error(childError.message)
-    if (!updatedChild?.length) {
-      throw new Error("Impossibile aggiornare un elemento nella cartella")
-    }
-
-    if (child.type === "folder") {
-      await cascadeDocumentAllowedRoles(supabase, child.id, toolId, allowedRoles)
-    }
-  }
+  const minRole = allowedRoles.includes("standard") ? "standard" : "premium"
+  const { error } = await supabase.rpc("cascade_document_allowed_roles", {
+    p_folder_id: folderId,
+    p_tool_id: toolId,
+    p_allowed_roles: allowedRoles,
+    p_min_role: minRole,
+  })
+  if (error) throw new Error(error.message)
 }
 
 /**
@@ -279,13 +264,6 @@ export async function finalizeDocumentUpload(
     return { error: e instanceof Error ? e.message : "Percorso non valido" }
   }
 
-  const { error: existsError } = await supabase.storage
-    .from("documents")
-    .createSignedUrl(storagePath, 60)
-  if (existsError) {
-    return { error: "File non trovato in storage. Riprova l'upload." }
-  }
-
   const fileAllowed = await resolveEffectiveAllowedRoles(
     supabase,
     toolId,
@@ -308,6 +286,10 @@ export async function finalizeDocumentUpload(
 
   if (dbError) {
     await supabase.storage.from("documents").remove([storagePath])
+    // Unique/FK failures usually mean missing upload or race; surface a clear message.
+    if (dbError.code === "23505" || dbError.message.toLowerCase().includes("duplicate")) {
+      return { error: "File non trovato in storage o già registrato. Riprova l'upload." }
+    }
     return { error: dbError.message }
   }
 
@@ -349,11 +331,12 @@ export async function deleteItem(id: string, toolId: string, pathRevalidate: str
     }
     if (pathsToDelete && pathsToDelete.length > 0) {
       const paths = pathsToDelete.map((row: { storage_path: string }) => row.storage_path)
-
-      const { error: storageError } = await supabase.storage.from("documents").remove(paths)
-
-      if (storageError) {
-        console.error("Errore Storage:", storageError)
+      for (const group of chunkPaths(paths, DOCUMENTS_STORAGE_REMOVE_CHUNK)) {
+        const { error: storageError } = await supabase.storage.from("documents").remove(group)
+        if (storageError) {
+          console.error("Errore Storage:", storageError)
+          return { error: "Impossibile eliminare i file dallo storage. Riprova." }
+        }
       }
     }
 
@@ -399,21 +382,40 @@ export async function getDownloadUrl(storagePath: string, toolId: string) {
   return { signedUrl: data.signedUrl }
 }
 
-/** Batch signed URLs — 1 server action per N file (es. download multiplo). */
+/** Batch signed URLs — 1 query ACL + 1 batch Storage (es. download multiplo). */
 export async function getDownloadUrls(storagePaths: string[], toolId: string) {
   const { role } = await getToolAccess(toolId)
   if (!role) return { error: "Accesso negato al tool", urls: {} as Record<string, string> }
 
-  const supabase = await getSupabase()
-  const allowedPaths: string[] = []
-
-  for (const path of storagePaths) {
+  const validPaths = storagePaths.filter((path) => {
     try {
       assertStoragePathForTool(path, toolId)
-      const access = await assertDocumentDownloadAccess(supabase, path, toolId, role)
-      if (!access.error) allowedPaths.push(path)
+      return true
     } catch {
-      // skip invalid paths
+      return false
+    }
+  })
+  if (validPaths.length === 0) return { urls: {} as Record<string, string> }
+
+  const supabase = await getSupabase()
+  const { data: docs } = await supabase
+    .from("documents")
+    .select("storage_path, allowed_roles, min_role")
+    .eq("tool_id", toolId)
+    .eq("type", "file")
+    .in("storage_path", validPaths)
+
+  const allowedPaths: string[] = []
+  for (const doc of docs ?? []) {
+    if (!doc.storage_path) continue
+    const allowed =
+      (doc.allowed_roles as string[] | null)?.length
+        ? (doc.allowed_roles as string[])
+        : doc.min_role === "premium"
+          ? (["premium", "admin"] as string[])
+          : DEFAULT_ALLOWED_ROLES
+    if (canAccessAllowedRoles(role, allowed)) {
+      allowedPaths.push(doc.storage_path)
     }
   }
 

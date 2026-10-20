@@ -61,8 +61,16 @@ export async function updateSession(request: NextRequest) {
   if (user) {
     const pathname = request.nextUrl.pathname;
 
-    // Landing loads profile/onboarding in RSC; skip extra DB round-trip here.
-    if (pathname === "/landingPage") {
+    // RSC paths that already load profiles via getSessionContext — skip proxy DB hit.
+    // Still enforce must_reset_password on login/onboarding entry and other non-tool pages.
+    const skipProfileCheck =
+      pathname === "/landingPage" ||
+      pathname.startsWith("/EUDR") ||
+      pathname.startsWith("/timberRegulation") ||
+      pathname.startsWith("/cloud-fsc") ||
+      pathname.startsWith("/boscolog");
+
+    if (skipProfileCheck) {
       return response;
     }
 

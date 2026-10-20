@@ -16,6 +16,8 @@ import type { FscGestioneDocument } from '@/types/fsc'
 type FscDocumentsExplorerProps = {
   module: FscDocumentModuleSlug
   documentsByCategory: Record<string, FscGestioneDocument[]>
+  /** Counts for sidebar badges (may cover categories not fully loaded). */
+  categoryCounts?: Record<string, number>
   canEdit: boolean
   companyName: string
   initialCategory?: string
@@ -37,6 +39,7 @@ const MODULE_TITLES: Record<FscDocumentModuleSlug, { title: string; subtitle: st
 export function FscDocumentsExplorer({
   module,
   documentsByCategory,
+  categoryCounts,
   canEdit,
   companyName,
   initialCategory,
@@ -100,7 +103,8 @@ export function FscDocumentsExplorer({
           >
             {categories.map((cat) => (
               <option key={cat.slug} value={cat.slug}>
-                {cat.label} ({documentsByCategory[cat.slug]?.length ?? 0})
+                {cat.label} (
+                {categoryCounts?.[cat.slug] ?? documentsByCategory[cat.slug]?.length ?? 0})
               </option>
             ))}
           </select>
@@ -137,7 +141,8 @@ export function FscDocumentsExplorer({
         <aside className="hidden w-56 shrink-0 lg:block">
           <nav className="space-y-1 rounded-xl border border-slate-200 bg-white p-2">
             {categories.map((cat) => {
-              const count = documentsByCategory[cat.slug]?.length ?? 0
+              const count =
+                categoryCounts?.[cat.slug] ?? documentsByCategory[cat.slug]?.length ?? 0
               const isActive = activeCategory === cat.slug
               return (
                 <button

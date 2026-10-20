@@ -1,5 +1,6 @@
 import { getCurrentFscCompany } from '@/actions/fsc/company'
 import {
+  listFscCategoryCounts,
   listFscEnteDocuments,
   listFscEnteYears,
   listFscGestioneDocuments,
@@ -8,6 +9,8 @@ import { FscDocumentsExplorer } from '@/components/cloud-fsc/documents/FscDocume
 import { CLOUD_FSC_TOOL_ID } from '@/lib/constants'
 import {
   getFscModuleCategories,
+  getFscModuleDefaultCategory,
+  isFscModuleCategorySlug,
   type FscDocumentModuleSlug,
 } from '@/lib/fsc/constants'
 import { getToolAccess } from '@/lib/tool-auth'
@@ -36,6 +39,11 @@ export async function FscDocumentsView({
   }
 
   const isEnte = module === 'ente'
+  const defaultCategory = getFscModuleDefaultCategory(module)
+  const activeCategory =
+    initialCategory && isFscModuleCategorySlug(module, initialCategory)
+      ? initialCategory
+      : defaultCategory
 
   let selectedYear: number | null = null
   if (isEnte && initialYear) {
@@ -43,16 +51,17 @@ export async function FscDocumentsView({
     if (!Number.isNaN(parsed)) selectedYear = parsed
   }
 
-  const [allDocs, availableYears] = await Promise.all([
+  const [activeDocs, categoryCounts, availableYears] = await Promise.all([
     isEnte
-      ? listFscEnteDocuments(undefined, selectedYear ?? undefined)
-      : listFscGestioneDocuments(),
-    isEnte ? listFscEnteYears() : Promise.resolve([]),
+      ? listFscEnteDocuments(activeCategory, selectedYear ?? undefined)
+      : listFscGestioneDocuments(activeCategory),
+    listFscCategoryCounts(module, selectedYear ?? undefined),
+    isEnte ? listFscEnteYears() : Promise.resolve([] as number[]),
   ])
 
   const documentsByCategory = getFscModuleCategories(module).reduce(
     (acc, cat) => {
-      acc[cat.slug] = allDocs.filter((d) => d.category === cat.slug)
+      acc[cat.slug] = cat.slug === activeCategory ? activeDocs : []
       return acc
     },
     {} as Record<string, FscGestioneDocument[]>
@@ -62,9 +71,10 @@ export async function FscDocumentsView({
     <FscDocumentsExplorer
       module={module}
       documentsByCategory={documentsByCategory}
+      categoryCounts={categoryCounts}
       canEdit={companyCtx.data.membership.can_edit}
       companyName={companyCtx.data.company.ragione_sociale}
-      initialCategory={initialCategory}
+      initialCategory={activeCategory}
       availableYears={availableYears}
       selectedYear={selectedYear}
     />

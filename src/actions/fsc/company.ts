@@ -1,5 +1,6 @@
 'use server'
 
+import { cache } from 'react'
 import { CLOUD_FSC_TOOL_ID } from '@/lib/constants'
 import { getToolAccess } from '@/lib/tool-auth'
 import type { FscCompany, FscCompanyMember } from '@/types/fsc'
@@ -70,14 +71,10 @@ async function loadCompanyById(
 }
 
 /** Full context: active company, setup flag, all companies for switcher. */
-export async function getFscCompanyContext(): Promise<FscCompanyContextResult> {
-  const { role } = await getToolAccess(CLOUD_FSC_TOOL_ID)
+export const getFscCompanyContext = cache(async (): Promise<FscCompanyContextResult> => {
+  const { role, userId } = await getToolAccess(CLOUD_FSC_TOOL_ID)
 
   const supabase = await createClient()
-  const { data: userData, error: userError } = await supabase.auth.getUser()
-  if (userError || !userData.user) {
-    return { success: false, error: 'Utente non autenticato' }
-  }
 
   const companies = await listUserFscCompanies()
   if (companies.length === 0) {
@@ -100,13 +97,13 @@ export async function getFscCompanyContext(): Promise<FscCompanyContextResult> {
     return { success: true, needsSetup: true, companies }
   }
 
-  const ctx = await loadCompanyById(supabase, companyId as string, userData.user.id)
+  const ctx = await loadCompanyById(supabase, companyId as string, userId)
   if (!ctx) {
     return { success: true, needsSetup: true, companies }
   }
 
   return { success: true, data: ctx, companies }
-}
+})
 
 /** Ensures the user has a company for CLOUD FSC and returns it with membership. */
 export async function getCurrentFscCompany(): Promise<{

@@ -11,6 +11,9 @@ import { SectionList } from "@/components/questions/SectionList"
 import { processPrimaFaseEUDR } from "@/actions/workflows"
 import { resolveEudrWorkflowState } from "@/lib/eudr-workflow-state"
 
+/** Earth Engine due-diligence Server Actions can exceed the default 60s limit. */
+export const maxDuration = 300
+
 export default async function RiskAnalysisPage({
   searchParams,
 }: {
