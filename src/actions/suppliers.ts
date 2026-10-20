@@ -9,18 +9,30 @@ export type SupplierFormData = Omit<TablesInsert<'suppliers'>, 'id' | 'tool_id' 
 
 export async function getSuppliers(toolId: string): Promise<Tables<'suppliers'>[]> {
   const supabase = await createClient()
-  
-  const { data, error } = await supabase
+
+  const { getEffectiveToolUserId, getToolImpersonation, isImpersonationAllowedTool } =
+    await import('@/lib/tool-impersonation')
+
+  let query = supabase
     .from('suppliers')
     .select('*')
     .eq('tool_id', toolId)
-    .order('name', { ascending: true })
+
+  if (isImpersonationAllowedTool(toolId)) {
+    const impersonation = await getToolImpersonation(toolId)
+    if (impersonation) {
+      const ownerUserId = await getEffectiveToolUserId(toolId)
+      query = query.eq('user_id', ownerUserId)
+    }
+  }
+
+  const { data, error } = await query.order('name', { ascending: true })
 
   if (error) {
     console.error("Errore recupero fornitori:", error)
     return []
   }
-  
+
   return data
 }
 

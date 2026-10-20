@@ -66,27 +66,28 @@ export default async function RisultatoPage({
   }
 
   queryCount += 1
-  const [{ data: session }, { data: userProfile }] = await Promise.all([
-    supabase
-      .from("assessment_sessions")
-      .select(
-        "id, user_id, session_type, parent_session_id, metadata, status, final_outcome, evaluation_code"
-      )
-      .eq("id", sessionId)
-      .single(),
-    supabase
-      .from("profiles")
-      .select(
-        "full_name,ragione_sociale,cf_partita_iva,indirizzo,cap,citta,provincia,recapito_telefonico,email"
-      )
-      .eq("id", userId)
-      .single(),
-  ])
+  const { data: session } = await supabase
+    .from("assessment_sessions")
+    .select(
+      "id, user_id, session_type, parent_session_id, metadata, status, final_outcome, evaluation_code"
+    )
+    .eq("id", sessionId)
+    .single()
 
   if (!session)
     return <div className="p-8 text-center text-red-600 font-bold">Sessione non trovata.</div>
   if (session.user_id !== userId && role !== "admin")
     return <div className="p-8 text-center text-red-600 font-bold">Accesso negato.</div>
+
+  // Profile of session owner (impersonated user when admin acts as them)
+  queryCount += 1
+  const { data: userProfile } = await supabase
+    .from("profiles")
+    .select(
+      "full_name,ragione_sociale,cf_partita_iva,indirizzo,cap,citta,provincia,recapito_telefonico,email"
+    )
+    .eq("id", session.user_id)
+    .single()
 
   const metadata = session.metadata as Record<string, unknown> | null
   let baseEvaluationCode = session.evaluation_code ?? null
@@ -208,10 +209,7 @@ export default async function RisultatoPage({
     const parts = (s: SupplierRecord) => {
       const lines: string[] = []
       if (s.name) lines.push(`Nome: ${s.name}`)
-      if (s.vat_number) lines.push(`P.IVA: ${s.vat_number}`)
-      if (s.eori_number) lines.push(`EORI: ${s.eori_number}`)
       if (s.address) lines.push(`Indirizzo: ${s.address}`)
-      if (s.phone) lines.push(`Telefono: ${s.phone}`)
       if (s.email) lines.push(`Email: ${s.email}`)
       if (s.website) lines.push(`Sito: ${s.website}`)
       if (s.contact_person) lines.push(`Referente: ${s.contact_person}`)
@@ -225,10 +223,7 @@ export default async function RisultatoPage({
 
   const SUPPLIER_FIELDS: { key: keyof SupplierRecord; label: string }[] = [
     { key: 'name', label: 'Nome' },
-    { key: 'vat_number', label: 'P.IVA' },
-    { key: 'eori_number', label: 'EORI' },
     { key: 'address', label: 'Indirizzo' },
-    { key: 'phone', label: 'Telefono' },
     { key: 'email', label: 'Email' },
     { key: 'website', label: 'Sito' },
     { key: 'contact_person', label: 'Referente' },

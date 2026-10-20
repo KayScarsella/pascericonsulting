@@ -14,11 +14,14 @@ export const EUDR_DDS_STANDARD_LABEL_LEGACY =
 
 export const EUDR_DDS_STANDARD_PDF_LABEL = EUDR_DDS_STANDARD_LABEL
 
-const MAX_NON_EU_COMPANIES_SEMPLIFICATA = 5
-const MAX_COUNTRIES_SEMPLIFICATA = 2
+/** Semplificata: un solo paese a basso rischio (RB) + catena semplice. */
+const MAX_COUNTRIES_SEMPLIFICATA = 1
+
+export type EudrChainComplexity = 'semplice' | 'non_semplice'
 
 export type EudrDdsDeterminationInput = {
-  nonEuCompanyCount: number
+  /** Risposta domanda 4) Complessità della catena */
+  chainComplexity: EudrChainComplexity | null
   countryCount: number
   countryRiskCodes: string[]
   isRiskTrascurabile: boolean
@@ -27,21 +30,15 @@ export type EudrDdsDeterminationInput = {
 
 export function determineEudrDdsType(input: EudrDdsDeterminationInput): EudrDdsType {
   if (input.aoiGateTriggered) return 'standard'
-  if (input.nonEuCompanyCount > MAX_NON_EU_COMPANIES_SEMPLIFICATA) return 'standard'
-  if (input.countryCount > MAX_COUNTRIES_SEMPLIFICATA) return 'standard'
   if (!input.isRiskTrascurabile) return 'standard'
+  if (input.chainComplexity !== 'semplice') return 'standard'
+  if (input.countryCount !== MAX_COUNTRIES_SEMPLIFICATA) return 'standard'
 
   const allLowRisk =
     input.countryCount > 0 &&
     input.countryRiskCodes.every((code) => code.toUpperCase() === 'RB')
 
-  if (
-    input.countryCount <= MAX_COUNTRIES_SEMPLIFICATA &&
-    allLowRisk &&
-    input.isRiskTrascurabile
-  ) {
-    return 'semplificata'
-  }
+  if (allLowRisk) return 'semplificata'
 
   return 'standard'
 }

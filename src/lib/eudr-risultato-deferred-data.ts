@@ -69,10 +69,7 @@ type SupplierRecord = {
 
 const SUPPLIER_FIELDS: { key: keyof SupplierRecord; label: string }[] = [
   { key: "name", label: "Nome" },
-  { key: "vat_number", label: "P.IVA" },
-  { key: "eori_number", label: "EORI" },
   { key: "address", label: "Indirizzo" },
-  { key: "phone", label: "Telefono" },
   { key: "email", label: "Email" },
   { key: "website", label: "Sito" },
   { key: "contact_person", label: "Referente" },

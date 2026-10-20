@@ -11,19 +11,19 @@ import {
 const baseAccettabile =
   'Per questo approvvigionamento il rischio deforestazione è trascurabile, non sono necessarie azioni di mitigazione.'
 
-test('semplificata: 5 società, 2 paesi RB, rischio trascurabile', () => {
+test('semplificata: catena semplice, 1 paese RB, rischio trascurabile', () => {
   const type = determineEudrDdsType({
-    nonEuCompanyCount: 5,
-    countryCount: 2,
-    countryRiskCodes: ['RB', 'RB'],
+    chainComplexity: 'semplice',
+    countryCount: 1,
+    countryRiskCodes: ['RB'],
     isRiskTrascurabile: true,
   })
   assert.equal(type, 'semplificata')
 })
 
-test('standard: 6 società extra-UE', () => {
+test('standard: catena non_semplice', () => {
   const type = determineEudrDdsType({
-    nonEuCompanyCount: 6,
+    chainComplexity: 'non_semplice',
     countryCount: 1,
     countryRiskCodes: ['RB'],
     isRiskTrascurabile: true,
@@ -31,21 +31,31 @@ test('standard: 6 società extra-UE', () => {
   assert.equal(type, 'standard')
 })
 
-test('standard: più di 2 paesi', () => {
+test('standard: complessità catena assente', () => {
   const type = determineEudrDdsType({
-    nonEuCompanyCount: 2,
-    countryCount: 3,
-    countryRiskCodes: ['RB', 'RB', 'RB'],
+    chainComplexity: null,
+    countryCount: 1,
+    countryRiskCodes: ['RB'],
     isRiskTrascurabile: true,
   })
   assert.equal(type, 'standard')
 })
 
-test('standard: paesi RS non idonei a semplificata', () => {
+test('standard: più di 1 paese', () => {
   const type = determineEudrDdsType({
-    nonEuCompanyCount: 2,
+    chainComplexity: 'semplice',
     countryCount: 2,
-    countryRiskCodes: ['RB', 'RS'],
+    countryRiskCodes: ['RB', 'RB'],
+    isRiskTrascurabile: true,
+  })
+  assert.equal(type, 'standard')
+})
+
+test('standard: paese RS non idoneo a semplificata', () => {
+  const type = determineEudrDdsType({
+    chainComplexity: 'semplice',
+    countryCount: 1,
+    countryRiskCodes: ['RS'],
     isRiskTrascurabile: true,
   })
   assert.equal(type, 'standard')
@@ -53,7 +63,7 @@ test('standard: paesi RS non idonei a semplificata', () => {
 
 test('standard: rischio non trascurabile', () => {
   const type = determineEudrDdsType({
-    nonEuCompanyCount: 1,
+    chainComplexity: 'semplice',
     countryCount: 1,
     countryRiskCodes: ['RB'],
     isRiskTrascurabile: false,
@@ -63,7 +73,7 @@ test('standard: rischio non trascurabile', () => {
 
 test('standard: AOI gate', () => {
   const type = determineEudrDdsType({
-    nonEuCompanyCount: 1,
+    chainComplexity: 'semplice',
     countryCount: 1,
     countryRiskCodes: ['RB'],
     isRiskTrascurabile: true,

@@ -11,6 +11,9 @@ export const EUDR_Q_CITES = "6e0896e6-0be7-4286-bd7a-3fba6e34b83f"
 /** Repeater Specie–Paesi (Valutazione / configurazione analisi finali) */
 export const EUDR_SPEC_PAESE_GRID_QUESTION_ID = "03dd3221-ba2f-4c83-9148-8fd06f389b0a"
 
+/** 4) Complessità della catena — semplice / non_semplice */
+export const EUDR_Q_CHAIN_COMPLEXITY = "a5b6c7d8-e9f0-4a1b-9c2d-3e4f5a6b7c81"
+
 /**
  * Analisi Rischio — "Procedura di importazione da fuori UE" (valori 1–11 = n. società extra-UE).
  * Impostare l'UUID reale da Supabase se noto; altrimenti si usa resolveEudrImportQuestionId.

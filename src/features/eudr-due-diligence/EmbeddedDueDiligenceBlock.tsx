@@ -39,6 +39,17 @@ type Props = {
 
 const MAX_POINT_BUFFER_HA = 4
 
+/** Accept year (YYYY) or full date; persist as YYYY-01-01 for Hansen year logic. */
+function normalizeCuttingDateIso(raw: string): string | null {
+  const t = raw.trim()
+  const yearOnly = /^\d{4}$/.test(t) ? t : /^\d{4}-\d{2}-\d{2}$/.test(t) ? t.slice(0, 4) : null
+  if (!yearOnly) return null
+  const y = Number.parseInt(yearOnly, 10)
+  const maxYear = new Date().getFullYear()
+  if (!Number.isFinite(y) || y < 2000 || y > maxYear) return null
+  return `${yearOnly}-01-01`
+}
+
 function hasPointLikeGeometry(aoi: unknown): boolean {
   if (!aoi || typeof aoi !== 'object') return false
   const o = aoi as Record<string, unknown>
@@ -173,13 +184,13 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
 
   async function runAnalysis(aoi: unknown) {
     setError(null)
-    if (!cuttingDate.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(cuttingDate.trim())) {
-      setError('Inserire la data di taglio (obbligatoria) in formato YYYY-MM-DD prima di eseguire l\'analisi.')
+    const cuttingIso = normalizeCuttingDateIso(cuttingDate)
+    if (!cuttingIso) {
+      setError("Inserire l'anno di taglio (obbligatorio, es. 2021) prima di eseguire l'analisi.")
       return
     }
     setLoading(true)
     try {
-      const cuttingIso = cuttingDate.trim()
       const trimmedArea = pointBufferAreaHa.trim()
       const parsedArea = trimmedArea ? Number(trimmedArea) : null
       const pointBufferArea =
@@ -223,13 +234,13 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
 
   async function runAnalysisFromStorage(storagePath: string) {
     setError(null)
-    if (!cuttingDate.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(cuttingDate.trim())) {
-      setError("Inserire la data di taglio (obbligatoria) in formato YYYY-MM-DD prima di eseguire l'analisi.")
+    const cuttingIso = normalizeCuttingDateIso(cuttingDate)
+    if (!cuttingIso) {
+      setError("Inserire l'anno di taglio (obbligatorio, es. 2021) prima di eseguire l'analisi.")
       return
     }
     setLoading(true)
     try {
-      const cuttingIso = cuttingDate.trim()
       const trimmedArea = pointBufferAreaHa.trim()
       const parsedArea = trimmedArea ? Number(trimmedArea) : null
       const pointBufferArea =
@@ -276,8 +287,8 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
     e.target.value = ''
 
     setError(null)
-    if (!cuttingDate.trim()) {
-      setError('Inserire prima la data di taglio (obbligatoria), poi caricare di nuovo il file.')
+    if (!normalizeCuttingDateIso(cuttingDate)) {
+      setError("Inserire prima l'anno di taglio (obbligatorio, es. 2021), poi caricare di nuovo il file.")
       return
     }
 
@@ -333,8 +344,8 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
 
   function runFromTextarea() {
     setError(null)
-    if (!cuttingDate.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(cuttingDate.trim())) {
-      setError('Inserire la data di taglio (obbligatoria) in formato YYYY-MM-DD.')
+    if (!normalizeCuttingDateIso(cuttingDate)) {
+      setError("Inserire l'anno di taglio (obbligatorio, es. 2021).")
       return
     }
     try {
@@ -414,7 +425,7 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
                   È un processo pesante: <strong>non rilanciare</strong> più volte di seguito.
                 </p>
                 <p>
-                  Data di taglio selezionata: <strong className="text-foreground">{cuttingDate || '—'}</strong>
+                  Anno di taglio selezionato: <strong className="text-foreground">{cuttingDate || '—'}</strong>
                 </p>
                 <p className="text-amber-800">
                   Un eventuale risultato precedente per questa sessione verrà sostituito (artifact su storage aggiornati).
@@ -477,23 +488,25 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
       </div>
 
       <div className="p-5 space-y-5">
-        {/* Data taglio — stesso stile delle altre domande */}
+        {/* Anno taglio — Hansen è annuale */}
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-2">
-            Data di taglio / harvest <span className="text-red-600">*</span> obbligatoria (YYYY-MM-DD)
+            Anno di taglio / harvest <span className="text-red-600">*</span> obbligatorio (YYYY)
           </label>
           <input
-            type="date"
+            type="number"
             required
             disabled={loading}
-            min="2000-01-01"
-            max={new Date().toISOString().slice(0, 10)}
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm disabled:opacity-50"
+            min={2000}
+            max={new Date().getFullYear()}
+            step={1}
+            placeholder="es. 2021"
+            className="w-32 rounded-md border border-slate-300 px-3 py-2 text-sm disabled:opacity-50"
             value={cuttingDate}
             onChange={(e) => setCuttingDate(e.target.value)}
           />
           <p className="text-xs text-slate-500 mt-1">
-            L&apos;analisi e il grafico usano solo gli anni <strong>dopo</strong> l&apos;anno di questa data;
+            L&apos;analisi e il grafico usano solo gli anni <strong>dopo</strong> questo anno;
             i compositi satellite nella mappa sono limitati agli anni ≥ anno di taglio.
           </p>
         </div>
@@ -711,7 +724,6 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
                       </li>
                     </ul>
                   </details>
-                  <p className="text-[10px] text-slate-400">Run {metadata.run_id.slice(0, 8)}…</p>
                 </div>
               )}
             </div>

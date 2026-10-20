@@ -424,7 +424,7 @@ export async function finalizeEudrAnalisi(sessionId: string): Promise<{ redirect
       completed_at: new Date().toISOString(),
       dds_type: ddsOutcome.ddsType,
       dds_determined_at: new Date().toISOString(),
-      dds_non_eu_companies: ddsOutcome.ddsInputs.nonEuCompanyCount,
+      dds_chain_complexity: ddsOutcome.ddsInputs.chainComplexity,
       dds_country_count: ddsOutcome.ddsInputs.countryCount,
       dds_country_risks: ddsOutcome.ddsInputs.countryRiskCodes,
       outcome_description: ddsOutcome.outcomeDescription,

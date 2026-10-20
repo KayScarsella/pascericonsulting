@@ -73,27 +73,28 @@ export default async function EudrRisultatoPage({
   }
 
   queryCount += 1
-  const [{ data: session }, { data: userProfile }] = await Promise.all([
-    supabase
-      .from("assessment_sessions")
-      .select(
-        "id, user_id, session_type, parent_session_id, metadata, status, final_outcome, evaluation_code"
-      )
-      .eq("id", sessionId)
-      .single(),
-    supabase
-      .from("profiles")
-      .select(
-        "full_name,ragione_sociale,cf_partita_iva,indirizzo,cap,citta,provincia,recapito_telefonico,email"
-      )
-      .eq("id", userId)
-      .single(),
-  ])
+  const { data: session } = await supabase
+    .from("assessment_sessions")
+    .select(
+      "id, user_id, session_type, parent_session_id, metadata, status, final_outcome, evaluation_code"
+    )
+    .eq("id", sessionId)
+    .single()
 
   if (!session)
     return <div className="p-8 text-center text-red-600 font-bold">Sessione non trovata.</div>
   if (session.user_id !== userId && role !== "admin")
     return <div className="p-8 text-center text-red-600 font-bold">Accesso negato.</div>
+
+  // Profile of session owner (impersonated user when admin acts as them)
+  queryCount += 1
+  const { data: userProfile } = await supabase
+    .from("profiles")
+    .select(
+      "full_name,ragione_sociale,cf_partita_iva,indirizzo,cap,citta,provincia,recapito_telefonico,email"
+    )
+    .eq("id", session.user_id)
+    .single()
 
   const metadata = session.metadata as Record<string, unknown> | null
   let baseEvaluationCode = session.evaluation_code ?? null

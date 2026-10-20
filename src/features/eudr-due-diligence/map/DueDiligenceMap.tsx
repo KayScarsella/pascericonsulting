@@ -44,20 +44,27 @@ function walkCoords(coords: unknown, acc: LonLatBounds): void {
   for (const child of coords) walkCoords(child, acc)
 }
 
-function computeFeatureCollectionBounds(fc: FeatureCollection): LonLatBounds | null {
+function computeFeatureBounds(feature: FeatureCollection['features'][number]): LonLatBounds | null {
+  const geom = feature.geometry
+  if (!geom || !('coordinates' in geom) || geom.coordinates == null) return null
   const acc: LonLatBounds = {
     minLon: Infinity,
     maxLon: -Infinity,
     minLat: Infinity,
     maxLat: -Infinity,
   }
-  for (const feature of fc.features ?? []) {
-    const geom = feature.geometry
-    if (!geom || !('coordinates' in geom) || geom.coordinates == null) continue
-    walkCoords(geom.coordinates, acc)
-  }
+  walkCoords(geom.coordinates, acc)
   if (acc.minLon === Infinity) return null
   return acc
+}
+
+/** Bounds of first valid feature (one lot) — avoids world-zoom on multi-lot GeoJSON. */
+function computeFocusLotBounds(fc: FeatureCollection): LonLatBounds | null {
+  for (const feature of fc.features ?? []) {
+    const bounds = computeFeatureBounds(feature)
+    if (bounds) return bounds
+  }
+  return null
 }
 
 function fitMapToBounds(
@@ -139,6 +146,8 @@ export function DueDiligenceMap({
   const [selectedYear, setSelectedYear] = useState<number | null>(null)
   const [aoiBounds, setAoiBounds] = useState<LonLatBounds | null>(null)
   const mapRef = useRef<MapRef>(null)
+  const pendingFitRef = useRef<{ bounds: LonLatBounds; duration: number } | null>(null)
+  const mapReadyRef = useRef(false)
 
   const highResTiles = useMemo(() => getHighResTilesTemplate(), [])
   const yearsAvailable = useMemo(
@@ -147,6 +156,20 @@ export function DueDiligenceMap({
   )
   const activeYearEntry =
     selectedYear != null ? sentinel2YearTiles?.find((e) => e.year === selectedYear) : null
+
+  function requestFitToBounds(bounds: LonLatBounds, duration: number) {
+    if (mapReadyRef.current && mapRef.current) {
+      fitMapToBounds(mapRef, bounds, setViewState, duration)
+    } else {
+      pendingFitRef.current = { bounds, duration }
+      // Still update viewState center so first paint is closer
+      const center = {
+        longitude: (bounds.minLon + bounds.maxLon) / 2,
+        latitude: (bounds.minLat + bounds.maxLat) / 2,
+      }
+      setViewState((prev) => ({ ...prev, ...center, zoom: Math.max(prev.zoom, 10) }))
+    }
+  }
 
   useEffect(() => {
     if (yearsAvailable.length > 0 && selectedYear == null) {
@@ -160,15 +183,16 @@ export function DueDiligenceMap({
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setGeojson(null)
       setAoiBounds(null)
+      pendingFitRef.current = null
       return
     }
     fetch(geoJsonUrl)
       .then((r) => r.json())
       .then((data: FeatureCollection) => {
         setGeojson(data)
-        const bounds = computeFeatureCollectionBounds(data)
+        const bounds = computeFocusLotBounds(data)
         setAoiBounds(bounds)
-        if (bounds) fitMapToBounds(mapRef, bounds, setViewState, 0)
+        if (bounds) requestFitToBounds(bounds, 0)
       })
       .catch(() => {
         setGeojson(null)
@@ -195,7 +219,7 @@ export function DueDiligenceMap({
           <button
             type="button"
             className="rounded border border-slate-300 bg-white px-2 py-1 font-medium text-slate-700 hover:bg-slate-50"
-            onClick={() => fitMapToBounds(mapRef, aoiBounds, setViewState, 400)}
+            onClick={() => requestFitToBounds(aoiBounds, 400)}
           >
             Centra
           </button>
@@ -239,6 +263,12 @@ export function DueDiligenceMap({
           ref={mapRef}
           {...viewState}
           onLoad={() => {
+            mapReadyRef.current = true
+            const pending = pendingFitRef.current
+            if (pending) {
+              pendingFitRef.current = null
+              fitMapToBounds(mapRef, pending.bounds, setViewState, pending.duration)
+            }
             try {
               const m = mapRef.current?.getMap() as { getCanvas?: () => HTMLCanvasElement } | undefined
               if (m?.getCanvas && onMapLoad) onMapLoad(m as { getCanvas: () => HTMLCanvasElement })

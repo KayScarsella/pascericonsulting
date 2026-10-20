@@ -2,13 +2,14 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, Json } from '@/types/supabase'
 import { EUDR_TOOL_ID } from '@/lib/constants'
 import {
+  EUDR_Q_CHAIN_COMPLEXITY,
   EUDR_SPEC_PAESE_GRID_QUESTION_ID,
-  resolveEudrImportQuestionId,
   resolveEudrNumPaesiQuestionId,
 } from '@/lib/eudr-question-ids'
 import {
   buildEudrOutcomeDescription,
   determineEudrDdsType,
+  type EudrChainComplexity,
   type EudrDdsDeterminationInput,
 } from '@/lib/eudr-dds-determination'
 import type { EudrDdsType } from '@/types/session'
@@ -19,6 +20,14 @@ function parsePositiveInt(raw: string | null | undefined): number | null {
   if (raw == null || String(raw).trim() === '') return null
   const n = Number.parseInt(String(raw).trim(), 10)
   return Number.isFinite(n) && n >= 0 ? n : null
+}
+
+function parseChainComplexity(raw: string | null | undefined): EudrChainComplexity | null {
+  const v = String(raw ?? '')
+    .trim()
+    .toLowerCase()
+  if (v === 'semplice' || v === 'non_semplice') return v
+  return null
 }
 
 function distinctPaeseIdsFromGrid(answerJson: unknown): string[] {
@@ -37,7 +46,7 @@ function distinctPaeseIdsFromGrid(answerJson: unknown): string[] {
 }
 
 /**
- * Collect DDS inputs from the root/parent verifica session (import + countries grid).
+ * Collect DDS inputs from the root/parent verifica session (chain complexity + countries grid).
  */
 export async function collectEudrDdsInputs(
   supabase: SupabaseClient<Database>,
@@ -45,16 +54,13 @@ export async function collectEudrDdsInputs(
   opts: { isRiskTrascurabile: boolean; aoiGateTriggered?: boolean }
 ): Promise<Pick<
   EudrDdsDeterminationInput,
-  'nonEuCompanyCount' | 'countryCount' | 'countryRiskCodes' | 'isRiskTrascurabile' | 'aoiGateTriggered'
+  'chainComplexity' | 'countryCount' | 'countryRiskCodes' | 'isRiskTrascurabile' | 'aoiGateTriggered'
 >> {
-  const [importQId, numPaesiQId] = await Promise.all([
-    resolveEudrImportQuestionId(supabase),
-    resolveEudrNumPaesiQuestionId(supabase),
-  ])
+  const numPaesiQId = await resolveEudrNumPaesiQuestionId(supabase)
 
   const questionIds = [
     EUDR_SPEC_PAESE_GRID_QUESTION_ID,
-    ...(importQId ? [importQId] : []),
+    EUDR_Q_CHAIN_COMPLEXITY,
     ...(numPaesiQId ? [numPaesiQId] : []),
   ]
 
@@ -74,12 +80,8 @@ export async function collectEudrDdsInputs(
     if (parsed != null) countryCount = Math.max(countryCount, parsed)
   }
 
-  let nonEuCompanyCount = 0
-  if (importQId) {
-    const importRow = responses?.find((r) => r.question_id === importQId)
-    const parsed = parsePositiveInt(importRow?.answer_text)
-    if (parsed != null) nonEuCompanyCount = parsed
-  }
+  const chainRow = responses?.find((r) => r.question_id === EUDR_Q_CHAIN_COMPLEXITY)
+  const chainComplexity = parseChainComplexity(chainRow?.answer_text)
 
   let countryRiskCodes: string[] = []
   if (gridPaeseIds.length > 0) {
@@ -94,7 +96,7 @@ export async function collectEudrDdsInputs(
   }
 
   return {
-    nonEuCompanyCount,
+    chainComplexity,
     countryCount,
     countryRiskCodes,
     isRiskTrascurabile: opts.isRiskTrascurabile,
@@ -123,7 +125,7 @@ export type EudrDdsOutcome = {
   outcomeDescription: string
   ddsInputs: Pick<
     EudrDdsDeterminationInput,
-    'nonEuCompanyCount' | 'countryCount' | 'countryRiskCodes'
+    'chainComplexity' | 'countryCount' | 'countryRiskCodes'
   >
 }
 
@@ -151,7 +153,7 @@ export async function computeEudrDdsOutcome(
     ddsType,
     outcomeDescription,
     ddsInputs: {
-      nonEuCompanyCount: ddsInputs.nonEuCompanyCount,
+      chainComplexity: ddsInputs.chainComplexity,
       countryCount: ddsInputs.countryCount,
       countryRiskCodes: ddsInputs.countryRiskCodes,
     },
