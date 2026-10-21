@@ -1,6 +1,11 @@
 import { createClient } from "@/utils/supabase/server"
 import { getEudrPdfSections } from "@/lib/eudr-pdf-sections"
-import type { DdLastRunSnapshot } from "@/features/eudr-due-diligence/aoiRiskGate"
+import {
+  AOI_GATE_ANSWER_LABELS,
+  AOI_GATE_ANSWER_LOOKUP,
+  AOI_GATE_QUESTION_ID,
+  type DdLastRunSnapshot,
+} from "@/features/eudr-due-diligence/aoiRiskGate"
 import { loadDdLastRunFromStorage } from "@/features/eudr-due-diligence/storage/loadDdLastRunFromStorage"
 import {
   EUDR_SCORED_QUESTIONS,
@@ -106,6 +111,13 @@ export async function loadEudrRisultatoDeferredData(
       lookup: sq.lookup,
       labels: sq.labels,
     }
+  }
+  const aoiDetail = result.details.find((d) => d.questionId === AOI_GATE_QUESTION_ID)
+  questionLabelsMap[AOI_GATE_QUESTION_ID] = {
+    label: aoiDetail?.label ?? "Screening geospaziale AOI",
+    shortLabel: aoiDetail?.shortLabel ?? "Screening AOI (EUDR)",
+    lookup: AOI_GATE_ANSWER_LOOKUP,
+    labels: AOI_GATE_ANSWER_LABELS,
   }
 
   let mitigationHistory: MitigationHistoryEntry[] = []
@@ -323,6 +335,22 @@ export async function loadEudrRisultatoDeferredData(
       return { sectionTitle: section.title, questions: expanded.filter((q) => q.questionText) }
     })
     .filter((s) => s.questions.length > 0)
+
+  const aoiMitigation = mitigationByQuestionId.get(AOI_GATE_QUESTION_ID)
+  if (aoiDetail && aoiMitigation && aoiMitigation.length > 0) {
+    sectionsForPdf.push({
+      sectionTitle: "Screening AOI — mitigazione",
+      questions: [
+        {
+          questionId: AOI_GATE_QUESTION_ID,
+          questionText: aoiDetail.label,
+          answerText: aoiDetail.answerLabel,
+          riskIndex: aoiDetail.riskIndex,
+          mitigation: aoiMitigation,
+        },
+      ],
+    })
+  }
 
   let ddPdfPayload: DdPdfPayload | null = null
   if (effectiveDdLastRun?.run_id) {

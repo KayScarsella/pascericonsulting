@@ -134,10 +134,12 @@ export async function computeEudrDdsOutcome(
   sessionId: string,
   parentSessionId: string | null,
   riskResult: RiskCalculationResult,
-  ddLastRun?: DdLastRunSnapshot
+  ddLastRun?: DdLastRunSnapshot,
+  options?: { aoiMitigated?: boolean }
 ): Promise<EudrDdsOutcome> {
   const isRiskTrascurabile = riskResult.outcome === 'accettabile'
-  const aoiGateTriggered = Boolean(ddLastRun?.triggers_non_accettabile)
+  const aoiGateTriggered =
+    Boolean(ddLastRun?.triggers_non_accettabile) && options?.aoiMitigated !== true
   const rootId = await resolveEudrParentSessionId(supabase, sessionId, parentSessionId)
   const ddsInputs = await collectEudrDdsInputs(supabase, rootId, {
     isRiskTrascurabile,

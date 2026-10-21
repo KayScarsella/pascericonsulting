@@ -13,6 +13,16 @@ import {
   EUDR_SCORED_QUESTIONS,
   getEudrLabelForRaw,
 } from "@/lib/eudr-risk-calculator"
+import {
+  AOI_GATE_MITIGATED_ANSWER,
+  AOI_GATE_MITIGATED_RISK_INDEX,
+  AOI_GATE_QUESTION_ID,
+  aoiGateAnswerLabel,
+  applyAoiGateToEudrRiskResult,
+  isAoiGateMitigatedForSession,
+  type DdLastRunSnapshot,
+} from "@/features/eudr-due-diligence/aoiRiskGate"
+import { resolveDdLastRun } from "@/features/eudr-due-diligence/storage/loadDdLastRunFromStorage"
 import { MitigationForm } from "@/components/MitigationForm"
 
 export default async function EudrMitigazionePage({
@@ -112,18 +122,27 @@ export default async function EudrMitigazionePage({
     answersMap[r.question_id] = r.answer_text
   })
 
-  const result = calculateEudrRisk(answersMap)
+  const metadataDdLastRun = metadata?.dd_last_run as DdLastRunSnapshot | undefined
+  const [ddLastRun, aoiMitigated] = await Promise.all([
+    resolveDdLastRun(supabase, session.user_id, sessionId, metadataDdLastRun),
+    isAoiGateMitigatedForSession(supabase, sessionId),
+  ])
+  const result = applyAoiGateToEudrRiskResult(calculateEudrRisk(answersMap), ddLastRun, {
+    mitigated: aoiMitigated,
+  })
   const failingDetails = result.details.filter((d) => d.riskIndex > RISK_THRESHOLD)
 
   if (failingDetails.length === 0) {
     redirect(`/EUDR/risultato?session_id=${sessionId}`)
   }
 
-  const questionIds = failingDetails.map((d) => d.questionId)
-  const { data: questionsData } = await supabase
-    .from("questions")
-    .select("id, config")
-    .in("id", questionIds)
+  const questionIds = failingDetails
+    .map((d) => d.questionId)
+    .filter((id) => id !== AOI_GATE_QUESTION_ID)
+  const { data: questionsData } =
+    questionIds.length > 0
+      ? await supabase.from("questions").select("id, config").in("id", questionIds)
+      : { data: [] as { id: string; config: unknown }[] }
 
   const fileRequiredByQuestion = new Map<string, boolean>()
   for (const q of questionsData || []) {
@@ -132,6 +151,25 @@ export default async function EudrMitigazionePage({
   }
 
   const failingQuestions = failingDetails.map((d) => {
+    if (d.questionId === AOI_GATE_QUESTION_ID) {
+      return {
+        questionId: d.questionId,
+        label: d.label,
+        shortLabel: d.shortLabel,
+        currentAnswer: d.answerRaw,
+        currentAnswerLabel: aoiGateAnswerLabel(d.answerRaw),
+        riskIndex: d.riskIndex,
+        options: [
+          {
+            value: AOI_GATE_MITIGATED_ANSWER,
+            label: "Mitigato",
+            riskIndex: AOI_GATE_MITIGATED_RISK_INDEX,
+          },
+        ],
+        inputType: "select" as const,
+        requiresFile: true,
+      }
+    }
     const scoredQ = EUDR_SCORED_QUESTIONS.find((sq) => sq.id === d.questionId)!
     const options = Object.entries(scoredQ.lookup).map(([value, riskIndex]) => ({
       value,
@@ -177,14 +215,19 @@ export default async function EudrMitigazionePage({
     if (historyData) {
       mitigationHistory = historyData.map((h) => {
         const scoredQ = EUDR_SCORED_QUESTIONS.find((sq) => sq.id === h.question_id)
+        const isAoi = h.question_id === AOI_GATE_QUESTION_ID
         return {
           ...h,
-          previous_label: scoredQ
-            ? getEudrLabelForRaw(scoredQ.labels, h.previous_answer)
-            : (h.previous_answer ?? "—"),
-          new_label: scoredQ
-            ? getEudrLabelForRaw(scoredQ.labels, h.new_answer)
-            : h.new_answer,
+          previous_label: isAoi
+            ? aoiGateAnswerLabel(h.previous_answer)
+            : scoredQ
+              ? getEudrLabelForRaw(scoredQ.labels, h.previous_answer)
+              : (h.previous_answer ?? "—"),
+          new_label: isAoi
+            ? aoiGateAnswerLabel(h.new_answer)
+            : scoredQ
+              ? getEudrLabelForRaw(scoredQ.labels, h.new_answer)
+              : h.new_answer,
           comment: h.comment ?? null,
           file_path: h.file_path ?? null,
         }

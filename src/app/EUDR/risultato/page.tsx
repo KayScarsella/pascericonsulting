@@ -20,7 +20,7 @@ import {
 } from "@/lib/eudr-risk-calculator"
 import {
   applyAoiGateToEudrRiskResult,
-  AOI_GATE_QUESTION_ID,
+  isAoiGateMitigatedForSession,
   type DdLastRunSnapshot,
 } from "@/features/eudr-due-diligence/aoiRiskGate"
 import type { RiskCalculationResult } from "@/lib/eudr-risk-calculator"
@@ -164,12 +164,10 @@ export default async function EudrRisultatoPage({
 
   let result: RiskCalculationResult = calculateEudrRisk(answersMap)
   const metadataDdLastRun = metadata?.dd_last_run as DdLastRunSnapshot | undefined
-  const ddLastRun = await resolveDdLastRun(
-    supabase,
-    session.user_id,
-    sessionId,
-    metadataDdLastRun
-  )
+  const [ddLastRun, aoiMitigated] = await Promise.all([
+    resolveDdLastRun(supabase, session.user_id, sessionId, metadataDdLastRun),
+    isAoiGateMitigatedForSession(supabase, sessionId),
+  ])
   if (ddLastRun && !metadataDdLastRun?.run_id) {
     await persistDdLastRunBackfill(supabase, sessionId, ddLastRun, metadata)
   }
@@ -183,14 +181,17 @@ export default async function EudrRisultatoPage({
   const ddLastRunNormalized = ddLastRun
     ? { ...ddLastRun, reasons: normalizeAoiReasons(ddLastRun.reasons) }
     : ddLastRun
-  result = applyAoiGateToEudrRiskResult(result, ddLastRunNormalized)
+  result = applyAoiGateToEudrRiskResult(result, ddLastRunNormalized, {
+    mitigated: aoiMitigated,
+  })
 
   const ddsOutcome = await computeEudrDdsOutcome(
     supabase,
     sessionId,
     session.parent_session_id,
     result,
-    ddLastRunNormalized
+    ddLastRunNormalized,
+    { aoiMitigated }
   )
   const displayOutcomeDescription = ddsOutcome.outcomeDescription
   const ddsType: EudrDdsType = ddsOutcome.ddsType
@@ -211,8 +212,8 @@ export default async function EudrRisultatoPage({
 
   const isAccettabile = result.outcome === "accettabile"
   const failingQuestions = result.details.filter((d) => d.riskIndex > RISK_THRESHOLD)
-  // La mitigazione serve per domande del questionario: l'AOI gate è una "soglia" e non è mitigabile.
-  const failingNonAoiQuestions = failingQuestions.filter((d) => d.questionId !== AOI_GATE_QUESTION_ID)
+  const aoiEvidence = Boolean(ddLastRunNormalized?.triggers_non_accettabile)
+  const aoiCriterionMitigated = aoiEvidence && aoiMitigated
 
   logRoutePerf("/EUDR/risultato", {
     tab: sessionId,
@@ -353,40 +354,54 @@ export default async function EudrRisultatoPage({
       {ddLastRunNormalized && (
         <div
           className={`rounded-2xl border p-5 mb-10 ${
-            ddLastRunNormalized.triggers_non_accettabile
-              ? "border-red-200 bg-red-50/80"
-              : "border-[#4a7c2e]/25 bg-[#4a7c2e]/5"
+            aoiCriterionMitigated
+              ? "border-amber-200 bg-amber-50/80"
+              : ddLastRunNormalized.triggers_non_accettabile
+                ? "border-red-200 bg-red-50/80"
+                : "border-[#4a7c2e]/25 bg-[#4a7c2e]/5"
           }`}
         >
           <div className="flex items-start gap-3">
-            {ddLastRunNormalized.triggers_non_accettabile ? (
+            {aoiCriterionMitigated ? (
+              <CheckCircle className="w-6 h-6 text-amber-600 flex-shrink-0 mt-0.5" />
+            ) : ddLastRunNormalized.triggers_non_accettabile ? (
               <AlertTriangle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
             ) : (
               <CheckCircle className="w-6 h-6 text-[#4a7c2e] flex-shrink-0 mt-0.5" />
             )}
             <div className="min-w-0 flex-1">
               <p className="text-sm md:text-base font-black tracking-wide uppercase text-slate-900">
-                {ddLastRunNormalized.triggers_non_accettabile
+                {aoiCriterionMitigated
                   ? ddLastRunNormalized.tendenza_deforestazione
-                    ? "Screening dell’area di interesse: tendenza deforestazione (loss nell’ultimo anno Hansen con taglio successivo) – risultato: rischio non trascurabile"
-                    : "Screening dell’area di interesse soggetta a perdita forestale dopo la data di taglio dichiarata – risultato: rischio non trascurabile"
-                  : "Screening dell’area di interesse non soggetta a perdita forestale dopo la data di taglio dichiarata – risultato: rischio trascurabile"}
+                    ? "Screening dell’area di interesse: tendenza deforestazione (loss nell’ultimo anno Hansen con taglio successivo) – criterio mitigato"
+                    : "Screening dell’area di interesse soggetta a perdita forestale dopo la data di taglio dichiarata – criterio mitigato"
+                  : ddLastRunNormalized.triggers_non_accettabile
+                    ? ddLastRunNormalized.tendenza_deforestazione
+                      ? "Screening dell’area di interesse: tendenza deforestazione (loss nell’ultimo anno Hansen con taglio successivo) – risultato: rischio non trascurabile"
+                      : "Screening dell’area di interesse soggetta a perdita forestale dopo la data di taglio dichiarata – risultato: rischio non trascurabile"
+                    : "Screening dell’area di interesse non soggetta a perdita forestale dopo la data di taglio dichiarata – risultato: rischio trascurabile"}
               </p>
               <h3 className="font-bold text-[#3d2b1a]">
-                {ddLastRunNormalized.tendenza_deforestazione
-                  ? "Tendenza deforestazione — esito negativo"
-                  : `Screening AOI (EUDR) — ${
-                      ddLastRunNormalized.triggers_non_accettabile
-                        ? "esito negativo"
-                        : "nessun gate attivato"
-                    }`}
+                {aoiCriterionMitigated
+                  ? ddLastRunNormalized.tendenza_deforestazione
+                    ? "Tendenza deforestazione — criterio mitigato"
+                    : "Screening AOI (EUDR) — criterio mitigato"
+                  : ddLastRunNormalized.tendenza_deforestazione
+                    ? "Tendenza deforestazione — esito negativo"
+                    : `Screening AOI (EUDR) — ${
+                        ddLastRunNormalized.triggers_non_accettabile
+                          ? "esito negativo"
+                          : "nessun gate attivato"
+                      }`}
               </h3>
               <p className="text-sm text-slate-600 mt-1">
-                {ddLastRunNormalized.triggers_non_accettabile
-                  ? ddLastRunNormalized.tendenza_deforestazione
-                    ? "Evidenza di tendenza deforestazione: loss nell’ultimo anno Hansen disponibile con data di taglio successiva (il gate classico post-taglio non conterebbe questa loss)."
-                    : 'Verifica: Ogni perdita FORESTALE rilevata dopo il 31/12/2020 all’interno della maschera forestale 2020 costituisce una "evidenza" di possibile non conformità.'
-                  : "Nell’AOI non risulta evidenza significativa di loss su foresta al 2020 dopo il cutoff (JRC GFC2020 ∩ Hansen), né loss Hansen post-taglio oltre soglia. Il gate AOI non ha alzato il rischio oltre il questionario."}
+                {aoiCriterionMitigated
+                  ? "Il criterio di rischio è stato mitigato (indice 0.30). L’evidenza geospaziale del run resta documentata."
+                  : ddLastRunNormalized.triggers_non_accettabile
+                    ? ddLastRunNormalized.tendenza_deforestazione
+                      ? "Evidenza di tendenza deforestazione: loss nell’ultimo anno Hansen disponibile con data di taglio successiva (il gate classico post-taglio non conterebbe questa loss)."
+                      : 'Verifica: Ogni perdita FORESTALE rilevata dopo il 31/12/2020 all’interno della maschera forestale 2020 costituisce una "evidenza" di possibile non conformità.'
+                    : "Nell’AOI non risulta evidenza significativa di loss su foresta al 2020 dopo il cutoff (JRC GFC2020 ∩ Hansen), né loss Hansen post-taglio oltre soglia. Il gate AOI non ha alzato il rischio oltre il questionario."}
               </p>
               {ddLastRunNormalized.cutting_date_iso &&
                 /^\d{4}/.test(ddLastRunNormalized.cutting_date_iso) && (
@@ -421,7 +436,11 @@ export default async function EudrRisultatoPage({
               )}
               {ddLastRunNormalized.triggers_non_accettabile &&
                 ddLastRunNormalized.reasons?.length > 0 && (
-                <ul className="mt-3 text-sm text-red-800 list-disc list-inside space-y-1">
+                <ul
+                  className={`mt-3 text-sm list-disc list-inside space-y-1 ${
+                    aoiCriterionMitigated ? "text-amber-950" : "text-red-800"
+                  }`}
+                >
                   {ddLastRunNormalized.reasons.map((r, i) => (
                     <li key={i}>{r}</li>
                   ))}
@@ -547,7 +566,7 @@ export default async function EudrRisultatoPage({
         </div>
       </div>
 
-      {!isAccettabile && failingNonAoiQuestions.length > 0 && (
+      {!isAccettabile && failingQuestions.length > 0 && (
         <div className="rounded-2xl border-2 border-dashed border-red-200 bg-gradient-to-r from-red-50/50 to-orange-50/30 p-6 mb-10">
           <div className="flex items-center gap-4">
             <div className="flex-shrink-0 p-3 bg-gradient-to-br from-red-500 to-red-700 rounded-xl shadow-md">
@@ -556,8 +575,8 @@ export default async function EudrRisultatoPage({
             <div className="flex-1 min-w-0">
               <h3 className="text-lg font-bold text-red-900">Azioni di mitigazione richieste</h3>
               <p className="text-sm text-red-700/80 mt-1">
-                {failingNonAoiQuestions.length}{" "}
-                {failingNonAoiQuestions.length === 1
+                {failingQuestions.length}{" "}
+                {failingQuestions.length === 1
                   ? "criterio non supera"
                   : "criteri non superano"}{" "}
                 la soglia di rischio. Avvia la mitigazione per aggiornare le risposte.

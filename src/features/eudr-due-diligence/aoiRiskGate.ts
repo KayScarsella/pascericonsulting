@@ -10,6 +10,8 @@
  * - Se JRC non disponibile → fallback screening Hansen-only (come prima).
  */
 
+import type { SupabaseClient } from '@supabase/supabase-js'
+import type { Database } from '@/types/supabase'
 import type { LossYearHistogram, RunMetadata } from './types/due-diligence-run'
 import type { RiskCalculationResult, RiskDetail } from '@/lib/risk-calculator'
 import { RISK_THRESHOLD } from '@/lib/risk-calculator'
@@ -47,8 +49,112 @@ export type DdLastRunSnapshot = {
   dd_artifact_user_id?: string
 }
 
-export const AOI_GATE_QUESTION_ID = 'aoi-hansen-gate'
+/**
+ * Uuid stabile per mitigation_history.question_id (colonna uuid, senza FK verso questions).
+ * Non è una riga di `questions`: la mitigazione non scrive user_responses.
+ */
+export const AOI_GATE_QUESTION_ID = 'a01a14e0-0000-4000-8000-000000000014'
 const AOI_GATE_RISK_INDEX = 1.0
+/** Soglia già usata dalle risposte accettabili (overallRisk <= 0.30). */
+export const AOI_GATE_MITIGATED_RISK_INDEX = 0.3
+export const AOI_GATE_MITIGATED_ANSWER = 'mitigato'
+
+export const AOI_GATE_ANSWER_LABELS: Record<string, string> = {
+  triggered: 'Evidenza geospaziale',
+  tendenza_deforestazione: 'Tendenza deforestazione',
+  mitigato: 'Mitigato',
+}
+
+export const AOI_GATE_ANSWER_LOOKUP: Record<string, number> = {
+  triggered: AOI_GATE_RISK_INDEX,
+  tendenza_deforestazione: AOI_GATE_RISK_INDEX,
+  mitigato: AOI_GATE_MITIGATED_RISK_INDEX,
+}
+
+const ACCETTABILE_DESCRIPTION =
+  'Per questo approvvigionamento il rischio deforestazione è trascurabile, non sono necessarie azioni di mitigazione.'
+const NON_ACCETTABILE_DESCRIPTION =
+  'Per questo approvvigionamento il rischio deforestazione è non trascurabile, sono necessarie azioni di mitigazione.'
+
+export type AoiGateApplyOptions = {
+  /** Ultima mitigazione del punto 14 con risposta «mitigato». */
+  mitigated?: boolean
+}
+
+export function isAoiGateMitigatedAnswer(raw: string | null | undefined): boolean {
+  return (raw ?? '').trim().toLowerCase() === AOI_GATE_MITIGATED_ANSWER
+}
+
+export function aoiGateAnswerLabel(raw: string | null | undefined): string {
+  if (!raw?.trim()) return '—'
+  const key = Object.keys(AOI_GATE_ANSWER_LABELS).find(
+    (k) => k.toLowerCase() === raw.trim().toLowerCase()
+  )
+  return key ? AOI_GATE_ANSWER_LABELS[key] : raw
+}
+
+export function isAoiTendenza(dd: DdLastRunSnapshot | null | undefined): boolean {
+  return (
+    dd?.tendenza_deforestazione === true &&
+    (dd.reasons || []).some((r) => r.toLowerCase().includes('tendenza deforestazione'))
+  )
+}
+
+/** Risposta del gate prima della mitigazione, salvata come previous_answer. */
+export function aoiGateUnmitigatedAnswer(
+  dd: DdLastRunSnapshot | null | undefined
+): 'triggered' | 'tendenza_deforestazione' {
+  return isAoiTendenza(dd) ? 'tendenza_deforestazione' : 'triggered'
+}
+
+/** Il gate geospaziale alza ancora il rischio (attivo e senza mitigazione sotto soglia). */
+export function aoiGateStillFailing(
+  dd: DdLastRunSnapshot | null | undefined,
+  result: Pick<RiskCalculationResult, 'details'>
+): boolean {
+  if (!dd?.triggers_non_accettabile) return false
+  const detail = result.details.find((d) => d.questionId === AOI_GATE_QUESTION_ID)
+  if (!detail) return true
+  return detail.riskIndex > RISK_THRESHOLD
+}
+
+/** True se l'ultima riga di mitigation_history per il punto 14 è «mitigato». */
+export async function isAoiGateMitigatedForSession(
+  supabase: SupabaseClient<Database>,
+  sessionId: string
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('mitigation_history')
+    .select('new_answer')
+    .eq('session_id', sessionId)
+    .eq('question_id', AOI_GATE_QUESTION_ID)
+    .order('mitigated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error || !data) return false
+  return isAoiGateMitigatedAnswer(data.new_answer)
+}
+
+function riskResultFromDetails(
+  details: RiskDetail[],
+  nonAccettabileDescription: string
+): RiskCalculationResult {
+  const overallRisk = details.length > 0 ? Math.max(...details.map((d) => d.riskIndex)) : 0
+  const isAccettabile = overallRisk <= RISK_THRESHOLD
+  let expiryDate: string | null = null
+  if (isAccettabile) {
+    const d = new Date()
+    d.setMonth(d.getMonth() + 12)
+    expiryDate = d.toISOString().split('T')[0]
+  }
+  return {
+    details,
+    overallRisk,
+    outcome: isAccettabile ? 'accettabile' : 'non accettabile',
+    outcomeDescription: isAccettabile ? ACCETTABILE_DESCRIPTION : nonAccettabileDescription,
+    expiryDate,
+  }
+}
 
 /** Primo anno di loss Hansen rilevante per screening EUDR (post 31/12/2020). */
 const EUDR_FIRST_LOSS_CALENDAR_YEAR = 2021
@@ -278,7 +384,8 @@ export function buildDdLastRunSnapshot(meta: RunMetadata): DdLastRunSnapshot {
 
 export function applyAoiGateToEudrRiskResult(
   result: RiskCalculationResult,
-  ddLastRun: DdLastRunSnapshot | null | undefined
+  ddLastRun: DdLastRunSnapshot | null | undefined,
+  options?: AoiGateApplyOptions
 ): RiskCalculationResult {
   if (!ddLastRun?.triggers_non_accettabile) return result
 
@@ -288,9 +395,8 @@ export function applyAoiGateToEudrRiskResult(
       : r
   )
 
-  const isTendenza =
-    ddLastRun.tendenza_deforestazione === true &&
-    (ddLastRun.reasons || []).some((r) => r.toLowerCase().includes('tendenza deforestazione'))
+  const isTendenza = isAoiTendenza(ddLastRun)
+  const mitigated = options?.mitigated === true
 
   const gateDetail: RiskDetail = {
     questionId: AOI_GATE_QUESTION_ID,
@@ -298,17 +404,20 @@ export function applyAoiGateToEudrRiskResult(
       ? `Tendenza deforestazione (loss nell’ultimo anno Hansen ${HANSEN_LAST_LOSS_CALENDAR_YEAR} con data di taglio successiva)`
       : 'Screening geospaziale AOI (Hansen + JRC GFC2020 dove applicabile): evidenza post-cutoff EUDR; con data di taglio, solo loss con anno ≥ max(2021, anno taglio)',
     shortLabel: isTendenza ? 'Tendenza deforestazione' : 'Screening AOI (EUDR)',
-    riskIndex: AOI_GATE_RISK_INDEX,
-    answerRaw: isTendenza ? 'tendenza_deforestazione' : 'triggered',
-    answerLabel: normalizedReasons.join(' '),
+    riskIndex: mitigated ? AOI_GATE_MITIGATED_RISK_INDEX : AOI_GATE_RISK_INDEX,
+    answerRaw: mitigated ? AOI_GATE_MITIGATED_ANSWER : aoiGateUnmitigatedAnswer(ddLastRun),
+    answerLabel: mitigated ? AOI_GATE_ANSWER_LABELS.mitigato : normalizedReasons.join(' '),
   }
 
   const details = [...result.details, gateDetail]
-  const overallRisk = Math.max(result.overallRisk, AOI_GATE_RISK_INDEX)
+
+  if (mitigated) {
+    return riskResultFromDetails(details, NON_ACCETTABILE_DESCRIPTION)
+  }
 
   return {
     details,
-    overallRisk,
+    overallRisk: Math.max(result.overallRisk, AOI_GATE_RISK_INDEX),
     outcome: 'non accettabile',
     outcomeDescription: isTendenza
       ? `Esito non accettabile per tendenza deforestazione: loss nell’ultimo anno Hansen disponibile (${HANSEN_LAST_LOSS_CALENDAR_YEAR}) con data di taglio successiva. Sono necessarie verifiche e/o mitigazione.`

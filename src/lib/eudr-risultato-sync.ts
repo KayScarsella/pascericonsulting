@@ -1,7 +1,10 @@
 import { after } from "next/server"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database, Json } from "@/types/supabase"
-import type { DdLastRunSnapshot } from "@/features/eudr-due-diligence/aoiRiskGate"
+import {
+  aoiGateStillFailing,
+  type DdLastRunSnapshot,
+} from "@/features/eudr-due-diligence/aoiRiskGate"
 import {
   loadDdLastRunFromStorage,
   persistDdLastRunBackfill,
@@ -79,8 +82,9 @@ export function scheduleEudrSessionFinalize(params: FinalizeEudrSessionParams) {
 
   const needsInitialFinalize = sessionStatus !== "completed" || !sessionFinalOutcome
   const pageSuggestsAoiGate = Boolean(ddLastRunNormalized?.triggers_non_accettabile)
+  const aoiStillFailing = aoiGateStillFailing(ddLastRunNormalized, result)
   const needsAoiSync =
-    !needsInitialFinalize && pageSuggestsAoiGate && sessionFinalOutcome === "Rischio Trascurabile"
+    !needsInitialFinalize && aoiStillFailing && sessionFinalOutcome === "Rischio Trascurabile"
 
   if (!needsInitialFinalize && !needsAoiSync && !pageSuggestsAoiGate) return
 
@@ -105,7 +109,8 @@ export function scheduleEudrSessionFinalize(params: FinalizeEudrSessionParams) {
       }
     }
 
-    const outcomeFromGate = effectiveDd?.triggers_non_accettabile
+    const gateStillFailing = aoiGateStillFailing(effectiveDd, result)
+    const outcomeFromGate = gateStillFailing
       ? "Rischio Non Trascurabile"
       : result.outcome === "accettabile"
         ? "Rischio Trascurabile"
@@ -117,7 +122,7 @@ export function scheduleEudrSessionFinalize(params: FinalizeEudrSessionParams) {
         shortLabel: d.shortLabel,
         riskIndex: d.riskIndex,
       })),
-      expiry_date: effectiveDd?.triggers_non_accettabile ? null : result.expiryDate,
+      expiry_date: gateStillFailing ? null : result.expiryDate,
       dds_type: ddsType,
       dds_determined_at: new Date().toISOString(),
       dds_chain_complexity: ddsOutcome.ddsInputs.chainComplexity,

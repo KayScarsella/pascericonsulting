@@ -12,7 +12,12 @@ import {
   getCanonicalValueForEudrRiskQuestion,
 } from "@/lib/eudr-risk-calculator"
 import {
+  AOI_GATE_MITIGATED_ANSWER,
+  AOI_GATE_QUESTION_ID,
+  aoiGateUnmitigatedAnswer,
   applyAoiGateToEudrRiskResult,
+  isAoiGateMitigatedAnswer,
+  isAoiGateMitigatedForSession,
   type DdLastRunSnapshot,
 } from "@/features/eudr-due-diligence/aoiRiskGate"
 import { resolveDdLastRun } from "@/features/eudr-due-diligence/storage/loadDdLastRunFromStorage"
@@ -396,20 +401,26 @@ export async function finalizeEudrAnalisi(sessionId: string): Promise<{ redirect
 
     let riskResult = calculateEudrRisk(answersMap)
     const oldMeta = (sessionRow?.metadata as Record<string, unknown>) || {}
-    const ddLastRun = await resolveDdLastRun(
-      supabase,
-      sessionOwnerId,
-      sessionId,
-      oldMeta.dd_last_run as DdLastRunSnapshot | undefined
-    )
-    riskResult = applyAoiGateToEudrRiskResult(riskResult, ddLastRun)
+    const [ddLastRun, aoiMitigated] = await Promise.all([
+      resolveDdLastRun(
+        supabase,
+        sessionOwnerId,
+        sessionId,
+        oldMeta.dd_last_run as DdLastRunSnapshot | undefined
+      ),
+      isAoiGateMitigatedForSession(supabase, sessionId),
+    ])
+    riskResult = applyAoiGateToEudrRiskResult(riskResult, ddLastRun, {
+      mitigated: aoiMitigated,
+    })
 
     const ddsOutcome = await computeEudrDdsOutcome(
       supabase,
       sessionId,
       sessionRow.parent_session_id,
       riskResult,
-      ddLastRun
+      ddLastRun,
+      { aoiMitigated }
     )
 
     const updatedMeta: Record<string, unknown> = {
@@ -485,41 +496,88 @@ async function saveMitigationCore(
   const { sessionOwnerId } = await validateSessionAccess(supabase, toolId, sessionId)
 
   try {
-    const questionIds = mitigations.map((m) => m.questionId)
-    const { data: currentResponses } = await supabase
-      .from("user_responses")
-      .select("question_id, answer_text")
-      .eq("session_id", sessionId)
-      .in("question_id", questionIds)
-
+    const responseQuestionIds = mitigations
+      .map((m) => m.questionId)
+      .filter((id) => id !== AOI_GATE_QUESTION_ID)
     const currentAnswersMap: Record<string, string | null> = {}
-    currentResponses?.forEach((r) => {
-      currentAnswersMap[r.question_id] = r.answer_text
-    })
+    if (responseQuestionIds.length > 0) {
+      const { data: currentResponses } = await supabase
+        .from("user_responses")
+        .select("question_id, answer_text")
+        .eq("session_id", sessionId)
+        .in("question_id", responseQuestionIds)
+      currentResponses?.forEach((r) => {
+        currentAnswersMap[r.question_id] = r.answer_text
+      })
+    }
 
     const now = new Date().toISOString()
-    const normalizedMitigations: MitigationNormalized[] = mitigations.map((m) => ({
-      ...m,
-      newAnswer: scoredQuestionIds.has(m.questionId)
-        ? toCanonical(m.questionId, m.newAnswer)
-        : m.newAnswer,
-    }))
+    const normalizedMitigations: MitigationNormalized[] = mitigations.map((m) => {
+      if (m.questionId === AOI_GATE_QUESTION_ID) {
+        return {
+          ...m,
+          newAnswer: m.newAnswer.trim().toLowerCase(),
+          comment: m.comment?.trim() || null,
+        }
+      }
+      return {
+        ...m,
+        newAnswer: scoredQuestionIds.has(m.questionId)
+          ? toCanonical(m.questionId, m.newAnswer)
+          : m.newAnswer,
+      }
+    })
 
-    const upsertPayloads: TablesInsert<"user_responses">[] = normalizedMitigations.map((m) => ({
-      user_id: sessionOwnerId,
-      tool_id: toolId,
-      session_id: sessionId,
-      question_id: m.questionId,
-      answer_text: m.newAnswer,
-      updated_at: now,
-    }))
+    const invalidAoi = normalizedMitigations.find((m) => m.questionId === AOI_GATE_QUESTION_ID)
+    if (invalidAoi) {
+      if (!isAoiGateMitigatedAnswer(invalidAoi.newAnswer)) {
+        return { error: "La mitigazione dello screening AOI richiede la risposta Mitigato." }
+      }
+      if (!invalidAoi.comment) {
+        return { error: "Inserisci un commento che spiega il motivo della mitigazione dello screening AOI." }
+      }
+      invalidAoi.newAnswer = AOI_GATE_MITIGATED_ANSWER
+    }
+
+    let aoiPreviousAnswer: string | null = null
+    if (invalidAoi) {
+      const { data: aoiSession } = await supabase
+        .from("assessment_sessions")
+        .select("user_id, metadata")
+        .eq("id", sessionId)
+        .maybeSingle()
+      const aoiMeta = (aoiSession?.metadata as Record<string, unknown> | null) ?? null
+      const ddLastRun = aoiSession
+        ? await resolveDdLastRun(
+            supabase,
+            aoiSession.user_id,
+            sessionId,
+            aoiMeta?.dd_last_run as DdLastRunSnapshot | undefined
+          )
+        : undefined
+      aoiPreviousAnswer = aoiGateUnmitigatedAnswer(ddLastRun)
+    }
+
+    const upsertPayloads: TablesInsert<"user_responses">[] = normalizedMitigations
+      .filter((m) => m.questionId !== AOI_GATE_QUESTION_ID)
+      .map((m) => ({
+        user_id: sessionOwnerId,
+        tool_id: toolId,
+        session_id: sessionId,
+        question_id: m.questionId,
+        answer_text: m.newAnswer,
+        updated_at: now,
+      }))
 
     await upsertUserResponses(supabase, upsertPayloads)
 
     const historyPayloads: TablesInsert<"mitigation_history">[] = normalizedMitigations.map((m) => ({
       session_id: sessionId,
       question_id: m.questionId,
-      previous_answer: currentAnswersMap[m.questionId] ?? null,
+      previous_answer:
+        m.questionId === AOI_GATE_QUESTION_ID
+          ? (currentAnswersMap[m.questionId] ?? aoiPreviousAnswer)
+          : (currentAnswersMap[m.questionId] ?? null),
       new_answer: m.newAnswer,
       mitigated_at: now,
       comment: m.comment ?? null,
