@@ -1,4 +1,4 @@
-declare module '@google/earthengine' {
+﻿declare module '@google/earthengine' {
   const ee: {
     data: {
       authenticateViaPrivateKey: (
