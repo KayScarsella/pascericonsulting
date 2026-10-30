@@ -1,29 +1,14 @@
-# AGENTS.md — Guida rapida
+# AGENTS.md
 
-Questo file serve a rendere le prossime domande “complete” e sempre contestualizzate al progetto.
+**AI entrypoint:** open `AI_ROUTER.md` first; load only the matching `.cursor/rules/*.mdc` + folder.
 
-## Prima di chiedere (2 righe)
-- Cita la **route** o il **file** coinvolto (es. `src/app/EUDR/risk-analysis/page.tsx`).
-- Dimmi **ruolo utente** (admin/premium/standard) e **toolId** se c’entrano permessi o documenti.
+## Before asking (human)
+- Cite route/file (e.g. `src/app/EUDR/risk-analysis/page.tsx`).
+- State user role (admin/premium/standard) and `toolId` when permissions matter.
 
-## Dove cercare le cose
-- **Routing/UI**: `src/app/**`
-- **Server Actions (Supabase)**: `src/actions/**`
-- **RBAC/permessi tool**: `src/lib/tool-auth.ts`
-- **Anteprima tool**: `tools.is_active = false` → catalogo visibile a tutti; ingresso solo con riga `tool_access` (ruolo standard/premium/admin). Launch GA: `is_active = true` (snippet `supabase/snippets/cloud-fsc-tool-access-and-launch.sql` §4).
-- **BoscoLog** (`BOSCOLOG_TOOL_ID`, `/boscolog`): anteprima admin — `is_active = false`; grant solo `admin` via `supabase/snippets/boscolog-tool-access-and-launch.sql`. Tenancy: `boscolog_companies` + `boscolog_company_members` + `boscolog_parties` + `boscolog_lots` (+ `risk` jsonb / `risk_score` / `risk_level` + `geojson` / `geo_feature_count` / `geo_area_ha`) + figlie (`boscolog_lot_species|exits|movements|permits|parents`; uscite con `species_id`). Dettaglio lotto a 3 sezioni: `/lotti/[id]` anagrafica, `/lotti/[id]/materiale` (qty/specie/uscite/movimenti/padri), `/lotti/[id]/compliance` (rischio/EUDR/geodati/autorizzazioni). Geodati: actions `src/actions/boscolog/geo.ts`, lib `src/lib/boscolog/geojson.ts` (riuso `normalizeAoiInput`), mappa `BoscologLotMap` → `DueDiligenceMap` via blob URL. Actions in `src/actions/boscolog/` (`lots`, `lot-operations`, `risk`, `geo`, `dashboard`, …); totali per specie in `src/lib/boscolog/totals.ts` (`calcTotalsBySpecies`); rischio/EUDR/alert/ICS in `src/lib/boscolog/{risk,eudr-checklist,alerts,ics}.ts`.
-- **Supabase client + session refresh**: `src/utils/supabase/**`
-- **UI library (shadcn)**: `src/components/ui/**`
-- **Area Documenti**: `src/actions/documents.ts` + tabella `documents` + bucket `documents`
+## Hard safety (max)
+- Do not move App Router files out of `src/app/`.
+- Invites onboarding: Resend only (`RESEND_API_KEY`, `FROM_EMAIL`); portal `/auth/onboarding-entry`.
+- Supabase Auth ops: enable leaked-password protection; Email OTP expiry ≤ 3600s (dashboard `bqmjtxhdhfbwxydcaidv`).
 
-## Sicurezza Auth / Supabase (operatore)
-- Dashboard progetto **bqmjtxhdhfbwxydcaidv**:
-  - **Leaked password protection**: Auth → Password security → abilitare (lint `auth_leaked_password_protection`).
-  - **Email OTP expiration**: Auth → Email → impostare **≤ 3600 secondi** (lint `auth_otp_long_expiry`). Vale solo per magic link / OTP Supabase al click «Continua e accedi»; il link porta Resend (`ONBOARDING_PORTAL_TICKET_TTL_DAYS`) resta separato — vedi `AUTH_EMAIL_OTP_EXPIRATION_HINT`.
-- Inviti onboarding: **solo Resend** (`RESEND_API_KEY`, `FROM_EMAIL`) + link porta `/auth/onboarding-entry` (vedi `INVITE_REQUIRES_RESEND_HINT` in `src/lib/constants.ts`).
-- Scadenze CLOUD FSC (email Resend 30 gg prima): cron `fsc_daily_alerts` → outbox `fsc_alert_outbox`; Edge Function `fsc-expiry-emails` (schedule 07:15 UTC, secrets `SITE_URL`). Trigger manuale: `triggerFscExpiryEmailsNowAction` in `src/actions/fsc/alerts.ts`. EUDR/Timber non coinvolti (`expiry-reminders`).
-- RPC SECURITY DEFINER: migration `20260624110000_fsc_rpc_security_hardening.sql` revoca `PUBLIC`/`anon` e limita i grant per ruolo.
-
-## Indice tecnico completo
-Vedi `PROJECT_INDEX.md`.
-
+Humans: full index in `PROJECT_INDEX.md`. Agents: use `AI_ROUTER.md` only.

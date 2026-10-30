@@ -1,0 +1,11 @@
+---
+description: Timber Regulation App Router — bridge to modules/timber
+globs: src/app/timberRegulation/**/*
+alwaysApply: false
+---
+
+# src/app/timberRegulation (bridge)
+
+- Routes stay here; do not relocate out of `src/app`.
+- Domain libs: `modules/timber/` + rule `module-timber.mdc`.
+- Shared outcome/risk: `core/risk-calculator.ts`, `core/final-outcome.ts`.

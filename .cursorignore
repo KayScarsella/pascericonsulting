@@ -1,0 +1,16 @@
+﻿# Dead / archived code
+archive/
+
+# Human indexes & legacy analyses (AI uses AI_ROUTER.md)
+PROJECT_INDEX.md
+MIGRATION_AND_LEGACY_ANALYSIS.md
+docs/
+
+# Long feature prose (not needed for routing)
+**/HOW_IT_WORKS.md
+**/METHODOLOGY.md
+**/CONFIGURATION.md
+**/INTEGRATION_SECTION_E.md
+
+# Cursor plan artifacts
+.cursor/plans/

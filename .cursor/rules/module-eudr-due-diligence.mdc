@@ -1,0 +1,14 @@
+---
+description: EUDR AOI due diligence — Earth Engine, map, storage payloads, risk gate
+globs: modules/eudr-due-diligence/**/*
+alwaysApply: false
+---
+
+# modules/eudr-due-diligence
+
+- Feature root for AOI assessment, Hansen/JRC/S2 tiles, map UI, DD storage payloads.
+- Shim: `src/features/eudr-due-diligence/**` → edit files under `modules/eudr-due-diligence/`.
+- Server action entry still: `src/actions/eudr-due-diligence.ts` (not moved).
+- Related workflow libs: `modules/eudr/` + rule `module-eudr.mdc`.
+- Routes stay in `src/app/EUDR/**` — use `app-eudr.mdc` bridge.
+- Preserve uncommitted AOI/risultato work; do not rewrite business logic while relocating.

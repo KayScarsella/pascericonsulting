@@ -168,7 +168,11 @@ export default async function EudrRisultatoPage({
     resolveDdLastRun(supabase, session.user_id, sessionId, metadataDdLastRun),
     isAoiGateMitigatedForSession(supabase, sessionId),
   ])
-  if (ddLastRun && !metadataDdLastRun?.run_id) {
+  const tendenzaRuleUpgraded =
+    Boolean(metadataDdLastRun?.run_id) &&
+    metadataDdLastRun?.tendenza_rule_applied !== true &&
+    ddLastRun?.tendenza_rule_applied === true
+  if (ddLastRun && (!metadataDdLastRun?.run_id || tendenzaRuleUpgraded)) {
     await persistDdLastRunBackfill(supabase, sessionId, ddLastRun, metadata)
   }
   const normalizeAoiReasons = (reasons: string[] | undefined) => {

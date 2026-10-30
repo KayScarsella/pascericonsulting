@@ -1,0 +1,14 @@
+---
+description: CLOUD FSC domain — partners, ILO, documents upload, file-service
+globs: modules/fsc/**/*
+alwaysApply: false
+---
+
+# modules/fsc
+
+- Domain: partners, ILO schema/export, expiry, logos, product-groups, file-service.
+- Shim: `src/lib/fsc/**` → edit `modules/fsc/`.
+- Actions (not moved): `src/actions/fsc/**`, `src/actions/cloud-fsc/**`.
+- UI: `src/app/cloud-fsc/**` + `src/components/cloud-fsc/**`.
+- Types: `core/types/fsc.ts`, `core/types/fsc-storage.ts`.
+- Tool id: `CLOUD_FSC_TOOL_ID` in `core/constants.ts`.

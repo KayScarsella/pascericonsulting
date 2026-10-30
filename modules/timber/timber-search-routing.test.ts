@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import {
   normalizeTimberSearchTab,
   resolveTimberVerificheActionUrl,
-} from "./timber-search-routing.ts"
+} from "./timber-search-routing"
 
 test("normalizes both verifica and verifiche tabs to verifiche", () => {
   assert.equal(normalizeTimberSearchTab("verifica"), "verifiche")

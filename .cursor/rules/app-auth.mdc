@@ -1,0 +1,12 @@
+---
+description: Auth/onboarding App Router — bridge to modules/auth + infra
+globs: src/app/(auth)/**/*
+alwaysApply: false
+---
+
+# src/app/(auth) (bridge)
+
+- Routes stay here; do not relocate out of `src/app`.
+- Helpers: `modules/auth/` + `infra/auth/` + `infra/email/`.
+- Rules: `module-auth.mdc`, `infra.mdc`.
+- Actions: `src/actions/auth.ts`, `invite.ts`, `onboarding-entry.ts`.

@@ -1,5 +1,7 @@
 # PROJECT_INDEX — pascericonsulting
 
+> For AI agents use `AI_ROUTER.md`.
+
 Indice tecnico del progetto per avere contesto “globale” nelle prossime domande.
 
 ## TL;DR

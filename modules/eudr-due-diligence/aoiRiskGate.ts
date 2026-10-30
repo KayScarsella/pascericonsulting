@@ -43,6 +43,11 @@ export type DdLastRunSnapshot = {
    * (il gate classico non conterebbe quella loss) → evidenza «Tendenza deforestazione».
    */
   tendenza_deforestazione?: boolean
+  /**
+   * true dopo che la regola «tendenza deforestazione» è stata valutata
+   * (sia che scatti, sia che no). Gli snapshot precedenti non hanno il campo.
+   */
+  tendenza_rule_applied?: boolean
   /** Sessione su cui sono stati salvati gli artifact (cartella storage) — per PDF/cleanup */
   dd_artifact_session_id?: string
   /** User id della cartella storage `{userId}/eudr-due-diligence/...` (sempre il proprietario sessione) */
@@ -242,6 +247,116 @@ export function detectTendenzaDeforestazione(args: {
   return hasLossInCalendarYear(args.histogram, lastYear)
 }
 
+export function tendenzaDeforestazioneReason(
+  cuttingYear: number,
+  lastYear: number = HANSEN_LAST_LOSS_CALENDAR_YEAR
+): string {
+  return `Tendenza deforestazione: loss rilevata nell’ultimo anno Hansen disponibile (${lastYear}) con data di taglio successiva (${cuttingYear}). Il gate classico post-taglio non conterebbe questa loss.`
+}
+
+/** Testo del blocco UI/PDF, senza la nota sul gate classico. */
+export function tendenzaDeforestazioneUiMessage(
+  cuttingYear: number,
+  lastYear: number = HANSEN_LAST_LOSS_CALENDAR_YEAR
+): string {
+  return `Tendenza deforestazione: loss rilevata nell’ultimo anno Hansen disponibile (${lastYear}) con data di taglio successiva (${cuttingYear}).`
+}
+
+export function cuttingYearFromIso(iso: string | null | undefined): number | null {
+  if (!iso || !/^\d{4}/.test(iso)) return null
+  const year = parseInt(iso.slice(0, 4), 10)
+  return Number.isFinite(year) ? year : null
+}
+
+/** Snapshot salvato prima della regola, con taglio successivo all'ultimo anno Hansen. */
+export function snapshotNeedsTendenzaUpgrade(snapshot: DdLastRunSnapshot): boolean {
+  if (snapshot.tendenza_rule_applied === true) return false
+  const cuttingYear = cuttingYearFromIso(snapshot.cutting_date_iso)
+  if (cuttingYear == null || cuttingYear <= HANSEN_LAST_LOSS_CALENDAR_YEAR) return false
+  return true
+}
+
+function snapshotHasTendenzaReason(reasons: string[] | undefined): boolean {
+  return (reasons || []).some((r) => r.toLowerCase().includes('tendenza deforestazione'))
+}
+
+/**
+ * Riapplica la regola sugli snapshot precedenti, usando l'istogramma già salvato.
+ * Se `tendenza_rule_applied` è già true, lo snapshot resta com'è.
+ * Senza istogramma non marca la regola: il chiamante può riprovare al download successivo.
+ */
+export function applyTendenzaRuleToSnapshot(
+  snapshot: DdLastRunSnapshot,
+  histogram: LossYearHistogram | undefined
+): DdLastRunSnapshot {
+  if (snapshot.tendenza_rule_applied === true) return snapshot
+  if (!histogram || typeof histogram !== 'object') return snapshot
+
+  const cuttingYear = cuttingYearFromIso(snapshot.cutting_date_iso)
+  const classicTriggered =
+    snapshot.triggers_non_accettabile === true &&
+    !snapshotHasTendenzaReason(snapshot.reasons) &&
+    snapshot.tendenza_deforestazione !== true
+
+  const tendenza = detectTendenzaDeforestazione({
+    cuttingYear,
+    classicGateTriggered: classicTriggered,
+    histogram,
+  })
+
+  if (!tendenza || cuttingYear == null) {
+    return { ...snapshot, tendenza_rule_applied: true }
+  }
+
+  return {
+    ...snapshot,
+    tendenza_rule_applied: true,
+    tendenza_deforestazione: true,
+    triggers_non_accettabile: true,
+    reasons: snapshotHasTendenzaReason(snapshot.reasons)
+      ? snapshot.reasons
+      : [tendenzaDeforestazioneReason(cuttingYear)],
+  }
+}
+
+export type DdReportGateFields = {
+  ui_blocks?: { heading?: string; body: string }[]
+  gate_triggers_non_accettabile?: boolean
+  gate_reasons?: string[]
+}
+
+/** Allinea in memoria gate e messaggio sintetico del report salvato allo snapshot ricalcolato. */
+export function alignReportGateWithSnapshot<T extends DdReportGateFields>(
+  payload: T,
+  snapshot: Pick<
+    DdLastRunSnapshot,
+    'tendenza_deforestazione' | 'triggers_non_accettabile' | 'reasons' | 'cutting_date_iso'
+  > | null | undefined
+): T {
+  if (!snapshot?.tendenza_deforestazione || !snapshot.triggers_non_accettabile) return payload
+  const cuttingYear = cuttingYearFromIso(snapshot.cutting_date_iso)
+  if (cuttingYear == null) return payload
+
+  const body = tendenzaDeforestazioneUiMessage(cuttingYear)
+  const blocks = [...(payload.ui_blocks ?? [])]
+  const idx = blocks.findIndex((block) => {
+    const heading = (block.heading || '').trim().toLowerCase()
+    return heading === 'messaggio sintetico' || heading === 'tendenza deforestazione'
+  })
+  if (idx >= 0) {
+    blocks[idx] = { heading: 'Tendenza deforestazione', body }
+  } else {
+    blocks.unshift({ heading: 'Tendenza deforestazione', body })
+  }
+
+  return {
+    ...payload,
+    gate_triggers_non_accettabile: true,
+    gate_reasons: snapshot.reasons?.length ? snapshot.reasons : [tendenzaDeforestazioneReason(cuttingYear)],
+    ui_blocks: blocks,
+  }
+}
+
 /**
  * Costruisce snapshot e flag da RunMetadata completata.
  * Priorità: se eudr_refined è ok e ha loss su foresta 2020 ≥ soglia → gate con motivazione JRC.
@@ -321,9 +436,7 @@ export function buildDdLastRunSnapshot(meta: RunMetadata): DdLastRunSnapshot {
   const reasons: string[] = []
   if (triggers_non_accettabile) {
     if (tendenza_deforestazione && !classicTriggered) {
-      reasons.push(
-        `Tendenza deforestazione: loss rilevata nell’ultimo anno Hansen disponibile (${HANSEN_LAST_LOSS_CALENDAR_YEAR}) con data di taglio successiva (${cuttingYear}). Il gate classico post-taglio non conterebbe questa loss.`
-      )
+      reasons.push(tendenzaDeforestazioneReason(cuttingYear!))
     } else {
       reasons.push(
         'Verifica: Ogni perdita FORESTALE rilevata dopo il 31/12/2020 all’interno della maschera forestale 2020 costituisce una "evidenza" di possibile non conformità.'
@@ -374,6 +487,7 @@ export function buildDdLastRunSnapshot(meta: RunMetadata): DdLastRunSnapshot {
     has_loss_after_cutting_date,
     triggers_non_accettabile,
     reasons,
+    tendenza_rule_applied: true,
     ...(tendenza_deforestazione ? { tendenza_deforestazione: true } : {}),
     ...(gateUsesJrc ? { gate_uses_jrc_gfc2020: true } : {}),
     ...(lossHaOnForest != null ? { loss_on_forest_2020_post_eudr_ha: lossHaOnForest } : {}),

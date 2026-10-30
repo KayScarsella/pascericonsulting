@@ -1,0 +1,14 @@
+---
+description: Start every task from AI_ROUTER.md; never load whole-repo indexes unless asked
+alwaysApply: true
+---
+
+# AI context isolation
+
+- Open `AI_ROUTER.md` first; pick ONE domain row; open only that `.mdc` + folder.
+- Never load `PROJECT_INDEX.md` or full historic docs unless the human explicitly asks.
+- Prefer `modules/`, `core/`, `infra/` over scanning all of `src/`.
+- Keep App Router files in `src/app/**`; do not relocate routes.
+- Old paths under `src/lib`, `src/utils/supabase`, `src/features/**` are thin re-export shims — edit the real file under `modules/` / `core/` / `infra/`.
+- Ignore `archive/` and long human docs (listed in `.cursorignore`).
+- Modules may import `core`/`infra`; `core` and `infra` must not import `modules`.

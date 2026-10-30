@@ -1,0 +1,13 @@
+---
+description: Auth/onboarding helpers — invite tickets, callback debug, portal
+globs: modules/auth/**/*
+alwaysApply: false
+---
+
+# modules/auth
+
+- Onboarding invite ticket/access status, auth callback debug helpers.
+- Connectivity helpers: `infra/auth/**`, email: `infra/email/resend-api.ts`.
+- Shim: `src/lib/onboarding*`, `src/lib/auth-callback-debug*` → edit `modules/auth/`.
+- Routes stay in `src/app/(auth)/**`; actions: `src/actions/auth.ts`, `invite.ts`, `onboarding-entry.ts`.
+- Invites: Resend only — do not switch to Supabase invite mail.

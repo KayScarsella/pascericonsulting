@@ -1,0 +1,12 @@
+---
+description: CLOUD FSC App Router pages — bridge to modules/fsc
+globs: src/app/cloud-fsc/**/*
+alwaysApply: false
+---
+
+# src/app/cloud-fsc (bridge)
+
+- Routes stay here; do not relocate out of `src/app`.
+- Domain: `modules/fsc/` + rule `module-fsc.mdc`.
+- Actions: `src/actions/fsc/**`, `src/actions/cloud-fsc/**`.
+- Components: `src/components/cloud-fsc/**`.

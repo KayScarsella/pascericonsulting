@@ -1,0 +1,13 @@
+---
+description: EUDR workflow libs — DDS, PDF, search routing, risultato sync
+globs: modules/eudr/**/*
+alwaysApply: false
+---
+
+# modules/eudr
+
+- Domain libs: DDS determination/inputs, PDF sections, question ids, risk calc, workflow/risultato/search.
+- Shim: `src/lib/eudr-*` → edit `modules/eudr/`.
+- Actions stay in `src/actions/**` (`eudr-due-diligence.ts`, `workflows/**`).
+- AOI/Earth Engine feature: `modules/eudr-due-diligence/` + `module-eudr-due-diligence.mdc`.
+- UI routes: `src/app/EUDR/**` only.

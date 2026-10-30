@@ -1,0 +1,12 @@
+---
+description: BoscoLog App Router pages — bridge to modules/boscolog
+globs: src/app/boscolog/**/*
+alwaysApply: false
+---
+
+# src/app/boscolog (bridge)
+
+- Routes stay here; do not relocate out of `src/app`.
+- Domain helpers: `modules/boscolog/` + rule `module-boscolog.mdc`.
+- Actions: `src/actions/boscolog/**`.
+- Components: `src/components/boscolog/**`.

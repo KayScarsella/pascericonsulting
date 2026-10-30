@@ -1,0 +1,11 @@
+---
+description: Archived dead code — do not load or revive without explicit human ask
+globs: archive/**/*
+alwaysApply: false
+---
+
+# archive/
+
+- AI-ignored via `.cursorignore`; do not read unless the human asks.
+- Move dead/unused code here only; never delete working product code into the void.
+- Do not import from `archive/` into app/modules/core/infra.

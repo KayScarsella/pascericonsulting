@@ -1,0 +1,14 @@
+---
+description: Supabase clients, email/Resend, auth URL helpers — connectivity only
+globs: infra/**/*
+alwaysApply: false
+---
+
+# infra/
+
+- Supabase SSR/browser/admin/proxy: `infra/supabase/**` (shim: `src/utils/supabase/**`).
+- Resend wiring: `infra/email/resend-api.ts`.
+- Auth connectivity: `infra/auth/site-url-for-auth.ts`, `resolve-auth-user-by-email.ts`.
+- No business rules or domain workflows here — those belong in `modules/`.
+- Do not import from `modules/**`.
+- Prefer `@infra/...` for intentional new imports.

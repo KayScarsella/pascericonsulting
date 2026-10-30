@@ -688,8 +688,12 @@ async function buildPdf(
       // Summary line + synthetic message (gate outcome moved to Dettagli)
       const gateActive = Boolean(ddPdfPayload.gate_triggers_non_accettabile)
       const gateOutcomeLabel = gateActive ? 'Non trascurabile' : 'Nessun gate attivato'
-      const messaggioSinteticoBlock = ddPdfPayload.ui_blocks?.find(
-        (b) => (b.heading || '').trim().toLowerCase() === 'messaggio sintetico'
+      const isSyntheticMessageHeading = (heading?: string) => {
+        const normalized = (heading || '').trim().toLowerCase()
+        return normalized === 'messaggio sintetico' || normalized === 'tendenza deforestazione'
+      }
+      const messaggioSinteticoBlock = ddPdfPayload.ui_blocks?.find((b) =>
+        isSyntheticMessageHeading(b.heading)
       )
       const messaggioSinteticoText =
         messaggioSinteticoBlock?.body?.trim() ||
@@ -828,7 +832,7 @@ async function buildPdf(
     // Messaggio sintetico is shown in Sintesi; put Esito gate here instead.
     const detailRowsFromPayload: Array<[string, string]> =
       (ddPdfPayload.ui_blocks ?? [])
-        .filter((b) => (b.heading || '').trim().toLowerCase() !== 'messaggio sintetico')
+        .filter((b) => !isSyntheticMessageHeading(b.heading))
         .map((b): [string, string] => [normalizePdfText(b.heading || 'Dettaglio'), normalizePdfText(b.body)])
     const detailRows: Array<[string, string]> =
       detailRowsFromPayload.length > 0

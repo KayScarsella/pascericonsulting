@@ -1,0 +1,13 @@
+---
+description: Shared types, constants, RBAC, pure helpers across tools
+globs: core/**/*
+alwaysApply: false
+---
+
+# core/
+
+- Edit here for cross-tool constants, types, RBAC, pure helpers.
+- Paths: `core/constants.ts`, `core/utils.ts`, `core/types/**`, `core/rbac/**`, shared calculators/session helpers.
+- Shims remain at `src/lib/*` and `src/types/*` — change the `core/` source, not the shim.
+- Do not import from `modules/**` or `src/app/**`.
+- Prefer new imports via `@core/...` when touching call sites deliberately.

@@ -1,6 +1,7 @@
 import { createClient } from "@/utils/supabase/server"
 import { getEudrPdfSections } from "@/lib/eudr-pdf-sections"
 import {
+  alignReportGateWithSnapshot,
   AOI_GATE_ANSWER_LABELS,
   AOI_GATE_ANSWER_LOOKUP,
   AOI_GATE_QUESTION_ID,
@@ -416,7 +417,7 @@ export async function loadEudrRisultatoDeferredData(
                 .createSignedUrl(snapPath, 3600, { download: false })
               if (snapSigned?.signedUrl) payload.dd_snapshot_signed_url = snapSigned.signedUrl
             }
-            ddPdfPayload = payload
+            ddPdfPayload = alignReportGateWithSnapshot(payload, effectiveDdLastRun)
           }
         } catch {
           /* ignore */

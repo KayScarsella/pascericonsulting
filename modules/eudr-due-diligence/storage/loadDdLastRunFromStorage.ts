@@ -5,12 +5,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Json } from '@/types/supabase'
 import {
-  detectTendenzaDeforestazione,
+  applyTendenzaRuleToSnapshot,
   hasLossAfterCalendarYear,
   hasLossFromCalendarYearInclusive,
+  snapshotNeedsTendenzaUpgrade,
   type DdLastRunSnapshot,
 } from '../aoiRiskGate'
-import { HANSEN_LAST_LOSS_CALENDAR_YEAR } from '../constants/hansen-version'
 import type { LossYearHistogram } from '../types/due-diligence-run'
 import { ddReportJsonSessionPath, ddRunBasePath } from './paths'
 
@@ -42,13 +42,16 @@ function inferLogicMode(reasons: string[]): 'raffinata' | 'base' {
 
 function snapshotFromStoredReport(report: StoredDdReport, artifactSessionId: string): DdLastRunSnapshot | null {
   if (report.dd_last_run?.run_id) {
-    return {
-      ...report.dd_last_run,
-      dd_artifact_session_id: report.dd_last_run.dd_artifact_session_id ?? artifactSessionId,
-      ...(report.dd_last_run.dd_artifact_user_id || report.user_id
-        ? { dd_artifact_user_id: report.dd_last_run.dd_artifact_user_id || report.user_id }
-        : {}),
-    }
+    return applyTendenzaRuleToSnapshot(
+      {
+        ...report.dd_last_run,
+        dd_artifact_session_id: report.dd_last_run.dd_artifact_session_id ?? artifactSessionId,
+        ...(report.dd_last_run.dd_artifact_user_id || report.user_id
+          ? { dd_artifact_user_id: report.dd_last_run.dd_artifact_user_id || report.user_id }
+          : {}),
+      },
+      report.lossyear_histogram
+    )
   }
 
   const runId = report.run_id?.trim()
@@ -71,37 +74,26 @@ function snapshotFromStoredReport(report: StoredDdReport, artifactSessionId: str
   const reasons = report.gate_reasons ?? []
   const gateUsesJrc = inferLogicMode(reasons) === 'raffinata' && report.gate_triggers_non_accettabile
 
-  const classicFromReport =
-    report.gate_triggers_non_accettabile === true &&
-    !reasons.some((r) => r.toLowerCase().includes('tendenza deforestazione'))
-
-  const tendenza_deforestazione = detectTendenzaDeforestazione({
-    cuttingYear: Number.isFinite(cuttingYear) ? cuttingYear : null,
-    classicGateTriggered: classicFromReport || has_loss_after_cutting_date,
-    histogram,
-    lastHansenYear: HANSEN_LAST_LOSS_CALENDAR_YEAR,
-  })
-
-  return {
-    run_id: runId,
-    dd_artifact_session_id: report.session_id?.trim() || artifactSessionId,
-    ...(report.user_id ? { dd_artifact_user_id: report.user_id } : {}),
-    completed_at: report.completed_at || new Date().toISOString(),
-    dataset_id: report.dataset_id || 'UMD/hansen/global_forest_change_2024_v1_12',
-    eudr_cutoff_date: EUDR_CUTOFF_DATE,
-    cutting_date_iso: cuttingDateIso,
-    loss_pixel_count: report.loss_pixel_count,
-    has_loss_after_eudr_cutoff,
-    has_loss_after_cutting_date,
-    triggers_non_accettabile: report.gate_triggers_non_accettabile,
-    reasons,
-    ...(tendenza_deforestazione || reasons.some((r) => r.toLowerCase().includes('tendenza'))
-      ? { tendenza_deforestazione: true }
-      : {}),
-    ...(gateUsesJrc ? { gate_uses_jrc_gfc2020: true } : {}),
-    logic_mode: inferLogicMode(reasons),
-    ...(report.advisory_notes?.length ? { advisory_notes: report.advisory_notes } : {}),
-  }
+  return applyTendenzaRuleToSnapshot(
+    {
+      run_id: runId,
+      dd_artifact_session_id: report.session_id?.trim() || artifactSessionId,
+      ...(report.user_id ? { dd_artifact_user_id: report.user_id } : {}),
+      completed_at: report.completed_at || new Date().toISOString(),
+      dataset_id: report.dataset_id || 'UMD/hansen/global_forest_change_2024_v1_12',
+      eudr_cutoff_date: EUDR_CUTOFF_DATE,
+      cutting_date_iso: cuttingDateIso,
+      loss_pixel_count: report.loss_pixel_count,
+      has_loss_after_eudr_cutoff,
+      has_loss_after_cutting_date,
+      triggers_non_accettabile: report.gate_triggers_non_accettabile,
+      reasons,
+      ...(gateUsesJrc ? { gate_uses_jrc_gfc2020: true } : {}),
+      logic_mode: inferLogicMode(reasons),
+      ...(report.advisory_notes?.length ? { advisory_notes: report.advisory_notes } : {}),
+    },
+    histogram
+  )
 }
 
 async function downloadDdReport(
@@ -156,7 +148,16 @@ export async function resolveDdLastRun(
   sessionId: string,
   metadataDdLastRun?: DdLastRunSnapshot | null
 ): Promise<DdLastRunSnapshot | undefined> {
-  if (metadataDdLastRun?.run_id) return metadataDdLastRun
+  if (metadataDdLastRun?.run_id) {
+    if (!snapshotNeedsTendenzaUpgrade(metadataDdLastRun)) return metadataDdLastRun
+    const report = await downloadDdReport(
+      supabase,
+      userId,
+      sessionId,
+      metadataDdLastRun.run_id
+    )
+    return applyTendenzaRuleToSnapshot(metadataDdLastRun, report?.lossyear_histogram)
+  }
   const fromStorage = await loadDdLastRunFromStorage(supabase, userId, sessionId)
   return fromStorage ?? undefined
 }

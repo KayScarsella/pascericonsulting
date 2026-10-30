@@ -1,0 +1,13 @@
+---
+description: Timber Regulation domain libs — workflow, PDF, search, risultato
+globs: modules/timber/**/*
+alwaysApply: false
+---
+
+# modules/timber
+
+- Libs: `timber-workflow-state`, `timber-pdf-sections`, `timber-search-routing`, `timber-risultato-sync`.
+- Shim: `src/lib/timber-*` → edit `modules/timber/`.
+- Routes: `src/app/timberRegulation/**` (do not move).
+- Shared risk/outcome helpers live in `core/` (`risk-calculator`, `final-outcome`).
+- Actions remain under `src/actions/**` (shared session/workflow actions).

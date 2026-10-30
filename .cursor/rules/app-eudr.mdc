@@ -1,0 +1,12 @@
+---
+description: EUDR App Router pages — bridge to modules/eudr* (do not move routes)
+globs: src/app/EUDR/**/*
+alwaysApply: false
+---
+
+# src/app/EUDR (bridge)
+
+- Routes stay here (Next App Router hard requirement).
+- Domain logic: `modules/eudr/` + `modules/eudr-due-diligence/`.
+- Open `.cursor/rules/module-eudr.mdc` and/or `module-eudr-due-diligence.mdc` for implementation work.
+- Actions: `src/actions/eudr-due-diligence.ts`, `src/actions/workflows/**`.

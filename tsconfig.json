@@ -19,6 +19,18 @@
       }
     ],
     "paths": {
+      "@core/*": ["./core/*"],
+      "@modules/*": ["./modules/*"],
+      "@infra/*": ["./infra/*"],
+      "@/features/eudr-due-diligence": ["./modules/eudr-due-diligence"],
+      "@/features/eudr-due-diligence/*": ["./modules/eudr-due-diligence/*"],
+      "@/utils/supabase": ["./infra/supabase"],
+      "@/utils/supabase/*": ["./infra/supabase/*"],
+      "@/types/*": ["./core/types/*"],
+      "@/lib/boscolog": ["./modules/boscolog"],
+      "@/lib/boscolog/*": ["./modules/boscolog/*"],
+      "@/lib/fsc": ["./modules/fsc"],
+      "@/lib/fsc/*": ["./modules/fsc/*"],
       "@/*": ["./src/*"]
     }
   },
@@ -30,5 +42,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "supabase/functions"]
+  "exclude": ["node_modules", "supabase/functions", "archive"]
 }

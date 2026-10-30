@@ -1,0 +1,14 @@
+---
+description: BoscoLog domain — lots risk/geo/ICS/alerts/totals helpers
+globs: modules/boscolog/**/*
+alwaysApply: false
+---
+
+# modules/boscolog
+
+- Domain helpers: risk, geojson, eudr-checklist, alerts, ics, totals, catalog.
+- Shim: `src/lib/boscolog/**` → edit `modules/boscolog/`.
+- Server actions (not moved): `src/actions/boscolog/**`.
+- UI: `src/app/boscolog/**` + components `src/components/boscolog/**`.
+- Types: `core/types/boscolog.ts` (shim `src/types/boscolog.ts`).
+- Tool id / access: `core/constants.ts` (`BOSCOLOG_TOOL_ID`) + `core/rbac/tool-auth.ts`.

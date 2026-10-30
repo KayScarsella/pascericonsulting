@@ -1,0 +1,13 @@
+---
+description: Documents area — upload/download helpers and bucket wiring
+globs: modules/documents/**/*
+alwaysApply: false
+---
+
+# modules/documents
+
+- Helpers: `documents-upload.ts`, `documents-upload-client.ts`, `documents-download.ts`.
+- Shim: `src/lib/documents-*` → edit `modules/documents/`.
+- Server action (not moved): `src/actions/documents.ts`.
+- UI: `src/components/documents/**`, `documentsView`.
+- Storage: Supabase bucket `documents` via `infra/supabase`.

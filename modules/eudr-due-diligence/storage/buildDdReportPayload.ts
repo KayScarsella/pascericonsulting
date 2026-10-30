@@ -4,7 +4,7 @@
  */
 
 import type { RunMetadata } from '../types/due-diligence-run'
-import type { DdLastRunSnapshot } from '../aoiRiskGate'
+import { tendenzaDeforestazioneUiMessage, type DdLastRunSnapshot } from '../aoiRiskGate'
 import { HANSEN_LAST_LOSS_CALENDAR_YEAR } from '../constants/hansen-version'
 import { buildDdReplicatePayload } from './ddReplicatePayload'
 
@@ -86,7 +86,7 @@ export function buildDdReportPayload(
       body: hasLossFromCutYearOnward
         ? "Le coordinate inserite evidenziano la presenza di deforestazione per l'anno di taglio (vedi grafico in rosso)."
         : tendenza
-          ? `Tendenza deforestazione: loss rilevata nell’ultimo anno Hansen disponibile (${HANSEN_LAST_LOSS_CALENDAR_YEAR}) con data di taglio successiva (${cuttingYear}).`
+          ? tendenzaDeforestazioneUiMessage(cuttingYear)
           : "Le coordinate inserite non evidenziano la presenza di deforestazione per l'anno di taglio.",
     })
   }
