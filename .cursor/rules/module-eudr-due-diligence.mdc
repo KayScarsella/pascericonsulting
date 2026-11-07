@@ -12,3 +12,26 @@ alwaysApply: false
 - Related workflow libs: `modules/eudr/` + rule `module-eudr.mdc`.
 - Routes stay in `src/app/EUDR/**` — use `app-eudr.mdc` bridge.
 - Preserve uncommitted AOI/risultato work; do not rewrite business logic while relocating.
+
+## File map (Grep the symbol, then read only its range — never the whole file)
+
+Large files (>400 lines):
+- `src/actions/eudr-due-diligence.ts` (~700) — server actions. Pipeline: `runDueDiligenceWithNormalized` (~320 lines: lock/cooldown, buffer points, EE assessment, map PNG, storage, metadata). Entry points: `runDueDiligenceAoiAnalysis` (inline GeoJSON), `runDueDiligenceAoiAnalysisFromStorage` (staged upload > `AOI_INLINE_MAX_BYTES`), `stageDueDiligenceAoiForSession`, `getDueDiligenceArtifactUrl`. Helpers: `bufferedAnalysisGeometries`, `renderAoiMapPng`, `persistAoiMapPng`, `clearDdAnalysisLock`.
+- `EmbeddedDueDiligenceBlock.tsx` (~725) — upload/run UI, one big component `EmbeddedDueDiligenceBlock`. File parsing helpers at top: `mergeGeoJsonFiles`, `featuresFromGeoJsonRoot`, `hasPointLikeGeometry`, `normalizeCuttingDateIso`; run handler `confirmAndRun`.
+- `aoiRiskGate.ts` (~490) — "accettabile / non accettabile" gate + tendenza. Key: `buildDdLastRunSnapshot`, `applyAoiGateToEudrRiskResult`, `applyTendenzaRuleToSnapshot`, `alignReportGateWithSnapshot`, `hasLossFromCalendarYearInclusive`, `lossyearBandToCalendarYear`, `AOI_GATE_*` constants. Tests: `aoiRiskGate.test.ts`.
+- `map/DueDiligenceMap.tsx` (~430) — MapLibre map, bounds/focus helpers.
+
+Earth Engine (`server/earthengine/`):
+- `runEudrAoiAssessment.ts` — JRC GFC2020 ∩ Hansen via batched `reduceRegions` (`reduceBatchOrSplit`, `reduceSubtypes`); result type `EudrAoiAssessmentResult`.
+- `runForestLossForAoi.ts` — Hansen-only histogram (`runForestLossHistogramForAoi`).
+- `aoiMapLayerSpecs.ts` — shared layer/vis specs for tiles and poster PNG (`composeAoiPosterEeImage`).
+- `get*Tiles.ts` — tile URL builders (Hansen, JRC 2020, Sentinel-2 years). `initialize.ts` — EE auth. `normalizeAoi.ts` — GeoJSON → geometry.
+
+Geometry & parsing:
+- `prepareAoiGeometry.ts` — simplify (~15 m), round, batch (`batchAoiGeometries`, `AOI_BATCH_MAX_*`), bbox area, `simplifyUploadedFeatureCollection`. Tests alongside.
+- `parseGeoJsonText.ts` — BOM-safe JSON parse.
+
+Storage & types:
+- `storage/paths.ts` (all bucket paths), `buildDdReportPayload.ts` (report JSON v2), `ddReplicatePayload.ts`, `loadDdLastRunFromStorage.ts` (`resolveDdLastRun`), `cleanupSessionRuns.ts`.
+- `types/due-diligence-run.ts` — `RunMetadata`, `LossYearHistogram`.
+- `constants/` — Hansen version/colors, gate thresholds.

@@ -12,3 +12,9 @@ alwaysApply: true
 - Old paths under `src/lib`, `src/utils/supabase`, `src/features/**` are thin re-export shims — edit the real file under `modules/` / `core/` / `infra/`.
 - Ignore `archive/` and long human docs (listed in `.cursorignore`).
 - Modules may import `core`/`infra`; `core` and `infra` must not import `modules`.
+
+# Reading budget
+- Files >300 lines: Grep the symbol first, then Read one targeted range. No full reads, no back-to-back chunked reads of the same file; never re-read a range already in context.
+- Use the module `.mdc` file map (when present) to pick files instead of exploratory reads.
+- Graphify: use `graphify_find` / `graphify_callers` to locate code. Avoid `query_graph` (returns full bodies); never follow it by reading the same files.
+- One-off data inspection (GeoJSON, logs): write a temp script file instead of long inline `node -e` / PowerShell one-liners.

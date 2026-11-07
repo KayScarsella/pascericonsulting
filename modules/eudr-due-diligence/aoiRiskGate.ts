@@ -7,7 +7,8 @@
  * - Hansen lossyear ≥ 21 = loss in anni ≥ 2021. Intersecando con foresta 2020 si ottiene
  *   evidenza più diretta di area che era foresta al 2020 e risulta loss successiva.
  * - Soglia minima area (ha) su foresta 2020 per attivare il gate → riduce falsi positivi.
- * - Se JRC non disponibile → fallback screening Hansen-only (come prima).
+ * - Se JRC non è stato calcolato non c'è un verdetto: l'analisi non si completa.
+ *   Con JRC ok ma sotto soglia, il gate Hansen (tendenza inclusa) resta quello già in uso.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -34,7 +35,7 @@ export type DdLastRunSnapshot = {
   gate_uses_jrc_gfc2020?: boolean
   /** ha di loss post-2020 su foresta 2020 (se calcolato) */
   loss_on_forest_2020_post_eudr_ha?: number | null
-  /** 'raffinata' = JRC∩Hansen ≥ soglia; 'base' = solo Hansen o JRC sotto soglia */
+  /** 'raffinata' = JRC∩Hansen ≥ soglia; 'base' = JRC ok ma sotto soglia */
   logic_mode?: 'raffinata' | 'base'
   /** Avvisi non vincolanti (es. Hansen solo annuale, stesso anno taglio) */
   advisory_notes?: string[]
@@ -360,7 +361,8 @@ export function alignReportGateWithSnapshot<T extends DdReportGateFields>(
 /**
  * Costruisce snapshot e flag da RunMetadata completata.
  * Priorità: se eudr_refined è ok e ha loss su foresta 2020 ≥ soglia → gate con motivazione JRC.
- * Altrimenti fallback su histogram completo Hansen.
+ * Se JRC è ok ma sotto soglia, il gate resta sullo screening Hansen (tendenza inclusa).
+ * Se JRC non è stato calcolato, nessun verdetto Hansen-only.
  */
 export function buildDdLastRunSnapshot(meta: RunMetadata): DdLastRunSnapshot {
   const histogramAll = meta.lossyear_histogram
@@ -409,7 +411,7 @@ export function buildDdLastRunSnapshot(meta: RunMetadata): DdLastRunSnapshot {
   }
 
   let triggersFromHansenFallback = false
-  if (!gateUsesJrc && lossPixelCount > 0) {
+  if (jrcOk && !gateUsesJrc && lossPixelCount > 0) {
     if (minGateYear != null) {
       triggersFromHansenFallback = hasLossFromCalendarYearInclusive(histogramAll, minGateYear)
     } else {
@@ -425,11 +427,13 @@ export function buildDdLastRunSnapshot(meta: RunMetadata): DdLastRunSnapshot {
       ? forestHist
       : histogramAll
 
-  const tendenza_deforestazione = detectTendenzaDeforestazione({
-    cuttingYear: hasValidCutting ? cuttingYear : null,
-    classicGateTriggered: classicTriggered,
-    histogram: histForTrend,
-  })
+  const tendenza_deforestazione =
+    jrcOk &&
+    detectTendenzaDeforestazione({
+      cuttingYear: hasValidCutting ? cuttingYear : null,
+      classicGateTriggered: classicTriggered,
+      histogram: histForTrend,
+    })
 
   const triggers_non_accettabile = classicTriggered || tendenza_deforestazione
 

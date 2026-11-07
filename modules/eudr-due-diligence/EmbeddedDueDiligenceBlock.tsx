@@ -11,8 +11,14 @@ import {
   runDueDiligenceAoiAnalysis,
   runDueDiligenceAoiAnalysisFromStorage,
   getDueDiligenceArtifactUrl,
-  stageDueDiligenceAoiForSession,
 } from '@/actions/eudr-due-diligence'
+import { parseGeoJsonText } from '@/features/eudr-due-diligence/parseGeoJsonText'
+import {
+  simplifiedFeatureCollection,
+  simplifyUploadedFeatureCollection,
+} from '@/features/eudr-due-diligence/prepareAoiGeometry'
+import { normalizeAoiInput } from '@/features/eudr-due-diligence/server/earthengine/normalizeAoi'
+import { createClient } from '@/utils/supabase/client'
 import { LossYearChart } from '@/features/eudr-due-diligence/map/LossYearChart'
 import { HANSEN_LAST_LOSS_CALENDAR_YEAR } from '@/features/eudr-due-diligence/constants/hansen-version'
 import type { RunMetadata } from '@/features/eudr-due-diligence/types/due-diligence-run'
@@ -26,7 +32,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { USER_UPLOADS_MAX_FILE_SIZE } from '@/lib/user-uploads-client'
+import {
+  USER_UPLOADS_MAX_FILE_SIZE,
+  buildEudrDueDiligenceAoiUploadPath,
+  uploadToUserUploadsBucket,
+} from '@/lib/user-uploads-client'
 
 const DueDiligenceMap = dynamic(
   () => import('@/features/eudr-due-diligence/map/DueDiligenceMap').then((m) => m.DueDiligenceMap),
@@ -307,7 +317,7 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
       for (const file of files) {
         const text = await readFileAsText(file)
         try {
-          parsed.push({ name: file.name, data: JSON.parse(text) })
+          parsed.push({ name: file.name, data: parseGeoJsonText(text) })
         } catch {
           setError(`File non valido (${file.name}): JSON non parsabile.`)
           return
@@ -315,21 +325,19 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
       }
 
       const merged = mergeGeoJsonFiles(parsed)
-      const mergedText = JSON.stringify(merged)
-      setAoiText(mergedText)
+      const light = simplifyUploadedFeatureCollection(merged)
 
       const uploadName =
         files.length === 1 ? files[0].name : `aoi-merged-${files.length}-files.geojson`
-      const mergedFile = new File([mergedText], uploadName, {
+      const mergedFile = new File([JSON.stringify(light)], uploadName, {
         type: 'application/geo+json',
       })
 
-      // Keep in memory until confirm — upload only when the user starts the analysis
-      // (avoids orphan aoi-uploaded-* files when canceling or re-selecting).
+      // Solo il file già semplificato: niente seconda copia dell'originale in memoria.
       setPendingUploadFile(mergedFile)
       setPendingAoiStoragePath(null)
-      setPendingAoi(merged)
-      setPendingAoiHasPoint(hasPointLikeGeometry(merged))
+      setPendingAoi(null)
+      setPendingAoiHasPoint(hasPointLikeGeometry(light))
       setConfirmOpen(true)
     } catch (err) {
       const message =
@@ -349,11 +357,18 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
       return
     }
     try {
-      const aoi = JSON.parse(aoiText)
+      const normalized = normalizeAoiInput(parseGeoJsonText(aoiText))
+      if (!normalized) {
+        setError(
+          'AOI non valida: servono GeoJSON Point/MultiPoint/Polygon/MultiPolygon (WGS84).'
+        )
+        return
+      }
+      const light = simplifiedFeatureCollection(normalized.geometries)
       setPendingUploadFile(null)
       setPendingAoiStoragePath(null)
-      setPendingAoi(aoi)
-      setPendingAoiHasPoint(hasPointLikeGeometry(aoi))
+      setPendingAoi(light)
+      setPendingAoiHasPoint(hasPointLikeGeometry(light))
       setConfirmOpen(true)
     } catch {
       setError('JSON non valido. Usa il file oppure incolla GeoJSON valido.')
@@ -373,14 +388,35 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
     try {
       if (pendingUploadFile) {
         setLoading(true)
-        const geoJsonText = await pendingUploadFile.text()
-        const stageRes = await stageDueDiligenceAoiForSession(sessionId, geoJsonText)
-        if (stageRes.error || !stageRes.storagePath) {
-          setError(stageRes.error ?? 'Upload AOI fallito')
+        try {
+          const supabase = createClient()
+          const {
+            data: { user },
+          } = await supabase.auth.getUser()
+          if (!user) {
+            setError('Non autenticato')
+            setLoading(false)
+            return
+          }
+          const storagePath = buildEudrDueDiligenceAoiUploadPath({
+            userId: user.id,
+            sessionId,
+          })
+          const up = await uploadToUserUploadsBucket({
+            storagePath,
+            file: pendingUploadFile,
+            upsert: true,
+          })
+          if (up.error) {
+            setError(up.error)
+            setLoading(false)
+            return
+          }
+          await runAnalysisFromStorage(storagePath)
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Upload AOI fallito')
           setLoading(false)
-          return
         }
-        await runAnalysisFromStorage(stageRes.storagePath)
       } else if (pendingAoiStoragePath) {
         await runAnalysisFromStorage(pendingAoiStoragePath)
       } else if (pendingAoi != null) {
@@ -421,8 +457,8 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
             <DialogDescription asChild>
               <div className="space-y-2 text-left text-sm text-muted-foreground">
                 <p>
-                  Verrà eseguita l&apos;analisi forest loss (Hansen) e, se disponibili, layer JRC / Sentinel-2.
-                  È un processo pesante: <strong>non rilanciare</strong> più volte di seguito.
+                  Verrà eseguita l&apos;analisi JRC foresta 2020 ∩ Hansen. Senza il risultato JRC l&apos;analisi
+                  non viene salvata. È un processo pesante: <strong>non rilanciare</strong> più volte di seguito.
                 </p>
                 <p>
                   Anno di taglio selezionato: <strong className="text-foreground">{cuttingDate || '—'}</strong>
@@ -551,7 +587,7 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
             className="mt-2 inline-flex items-center gap-2 rounded-md bg-[#967635] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
             {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-            {loading ? 'Analisi in corso…' : 'Esegui analisi forest loss (Hansen)'}
+            {loading ? 'Analisi in corso…' : 'Esegui analisi AOI'}
           </button>
         </div>
 
@@ -564,21 +600,16 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-2">
             <div className="min-w-0 space-y-2">
               {/* Badge logica base vs raffinata */}
-              {metadata?.eudr_refined && (
+              {metadata?.eudr_refined?.jrc_assessment_ok && (
                 <div className="flex flex-wrap items-center gap-2">
-                  {metadata.eudr_refined.jrc_assessment_ok &&
-                  metadata.eudr_refined.loss_on_forest_2020_post_eudr_ha != null &&
+                  {metadata.eudr_refined.loss_on_forest_2020_post_eudr_ha != null &&
                   metadata.eudr_refined.loss_on_forest_2020_post_eudr_ha >= 0.5 ? (
                     <span className="rounded-full bg-amber-100 border border-amber-300 px-3 py-1 text-xs font-semibold text-amber-900">
                       Logica raffinata (JRC foresta 2020 ∩ Hansen, ≥0,5 ha)
                     </span>
-                  ) : metadata.eudr_refined.jrc_assessment_ok ? (
+                  ) : (
                     <span className="rounded-full bg-slate-100 border border-slate-300 px-3 py-1 text-xs font-medium text-slate-800">
                       Logica raffinata disponibile — sotto soglia ha → gate su base Hansen se applicabile
-                    </span>
-                  ) : (
-                    <span className="rounded-full bg-slate-100 border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700">
-                      Logica base (solo Hansen; JRC non disponibile o errore)
                     </span>
                   )}
                 </div>
@@ -676,13 +707,6 @@ export function EmbeddedDueDiligenceBlock({ sessionId }: Props) {
                   {metadata.forest_types_2020 && !metadata.forest_types_2020.ok && (
                     <p className="text-xs text-slate-500">
                       Tipi foresta JRC non disponibili: {metadata.forest_types_2020.error ?? '—'}
-                    </p>
-                  )}
-                  {metadata.eudr_refined && !metadata.eudr_refined.jrc_assessment_ok && (
-                    <p className="text-xs text-amber-800">
-                      Intersect JRC GFC2020 non disponibile:{' '}
-                      {metadata.eudr_refined.jrc_assessment_error ?? 'errore EE'}. Screening fallback su
-                      Hansen-only.
                     </p>
                   )}
                   <details className="rounded-md border border-amber-100 bg-amber-50/60 p-2 text-[11px] text-amber-950">

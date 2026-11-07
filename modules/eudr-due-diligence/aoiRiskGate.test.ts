@@ -90,6 +90,18 @@ test('snapshot con regola già applicata non viene ricalcolato', () => {
   assert.equal(snapshotNeedsTendenzaUpgrade(oldSnapshot()), true)
 })
 
+test('JRC non calcolato non accende il gate Hansen', () => {
+  const meta = runMeta({ '24': 17.247 }, '2026-01-01')
+  meta.eudr_refined = {
+    ...meta.eudr_refined!,
+    jrc_assessment_ok: false,
+    jrc_assessment_error: 'User memory limit exceeded',
+  }
+  const built = buildDdLastRunSnapshot(meta)
+  assert.equal(built.triggers_non_accettabile, false)
+  assert.equal(built.tendenza_deforestazione, undefined)
+})
+
 test('il report PDF sostituisce il messaggio di assenza deforestazione', () => {
   const snapshot = applyTendenzaRuleToSnapshot(oldSnapshot(), { '24': 4 })
   const aligned = alignReportGateWithSnapshot(

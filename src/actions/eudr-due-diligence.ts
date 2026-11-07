@@ -20,17 +20,21 @@ import { getSentinel2YearCompositeTilesForAoi } from '@/features/eudr-due-dilige
 import { ensureEarthEngineInitialized, isEarthEngineConfigured } from '@/features/eudr-due-diligence/server/earthengine/initialize'
 import type { RunMetadata } from '@/features/eudr-due-diligence/types/due-diligence-run'
 import { normalizeAoiInput } from '@/features/eudr-due-diligence/server/earthengine/normalizeAoi'
+import { parseGeoJsonText } from '@/features/eudr-due-diligence/parseGeoJsonText'
 import { buildDdLastRunSnapshot } from '@/features/eudr-due-diligence/aoiRiskGate'
+import {
+  AOI_S2_MAX_BBOX_KM2,
+  aoiBoundingBoxAreaKm2,
+  featureCollectionFromGeometries,
+  geometriesToMapGeometry,
+  simplifiedFeatureCollection,
+  simplifyAoiGeometries,
+  type AoiGeometry,
+} from '@/features/eudr-due-diligence/prepareAoiGeometry'
 import { removePreviousDueDiligenceRuns } from '@/features/eudr-due-diligence/storage/cleanupSessionRuns'
 import { composeAoiPosterEeImage } from '@/features/eudr-due-diligence/server/earthengine/aoiMapLayerSpecs'
 import { buffer as turfBuffer } from '@turf/buffer'
-import {
-  point,
-  multiPoint,
-  polygon,
-  multiPolygon,
-  featureCollection,
-} from '@turf/helpers'
+import { point, multiPoint } from '@turf/helpers'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 const EUDR_CUTOFF = '2020-12-31'
@@ -46,7 +50,6 @@ type NormalizedAoi = NonNullable<ReturnType<typeof normalizeAoiInput>>
 
 type EeImage = {
   getThumbURL: (params: Record<string, unknown>, cb: (url: string | null, error?: Error) => void) => void
-  union: (other: unknown, maxError: number) => EeImage
   buffer: (meters: number) => EeImage
   bounds?: (maxError: number) => unknown
 }
@@ -54,6 +57,8 @@ type EeImage = {
 type EeModule = {
   Image: (image?: unknown) => EeImage
   Geometry: (geom: unknown) => EeImage
+  Feature: (geom: unknown) => unknown
+  FeatureCollection: (features: unknown[]) => { geometry: (maxError: number) => EeImage }
 }
 
 function getEe(): EeModule {
@@ -99,39 +104,44 @@ function hasPointGeometries(geometries: Array<{ type: string }>): boolean {
   return geometries.some((g) => g.type === 'Point' || g.type === 'MultiPoint')
 }
 
-function radiusMetersFromAreaHa(areaHa: number): number {
-  return Math.sqrt((areaHa * 10000) / Math.PI)
-}
-
-function buildStorageFeatureCollection(
+function bufferedAnalysisGeometries(
   geometries: Array<{
     type: 'Polygon' | 'MultiPolygon' | 'Point' | 'MultiPoint'
     coordinates: unknown
   }>,
   pointBufferAreaHa: number | null
-): unknown {
+): AoiGeometry[] {
   if (!hasPointGeometries(geometries)) {
-    return featureCollection(
-      geometries.map((g) => {
-        if (g.type === 'Polygon') return polygon(g.coordinates as number[][][])
-        return multiPolygon(g.coordinates as number[][][][])
-      }) as GeoJSON.Feature[]
-    )
+    return simplifyAoiGeometries(geometries as AoiGeometry[])
   }
 
   const radiusKm = Math.sqrt((pointBufferAreaHa! * 10000) / Math.PI) / 1000
-  return featureCollection(
-    geometries.flatMap((g) => {
-      if (g.type === 'Point') {
-        return [turfBuffer(point(g.coordinates as number[]), radiusKm, { units: 'kilometers' })]
-      }
-      if (g.type === 'MultiPoint') {
-        return [turfBuffer(multiPoint(g.coordinates as number[][]), radiusKm, { units: 'kilometers' })]
-      }
-      if (g.type === 'Polygon') return [polygon(g.coordinates as number[][][])]
-      return [multiPolygon(g.coordinates as number[][][][])]
-    }) as GeoJSON.Feature[]
-  )
+  const polygonal = geometries.map((g) => {
+    if (g.type === 'Point') {
+      const buffered = turfBuffer(point(g.coordinates as number[]), radiusKm, { units: 'kilometers' })
+      if (!buffered?.geometry) throw new Error('Buffer del punto non riuscito')
+      return buffered.geometry as AoiGeometry
+    }
+    if (g.type === 'MultiPoint') {
+      const buffered = turfBuffer(multiPoint(g.coordinates as number[][]), radiusKm, { units: 'kilometers' })
+      if (!buffered?.geometry) throw new Error('Buffer del punto non riuscito')
+      return buffered.geometry as AoiGeometry
+    }
+    return g as AoiGeometry
+  })
+  return simplifyAoiGeometries(polygonal)
+}
+
+async function removeStagingAoi(
+  storage: SupabaseClient,
+  stagingPath: string | null | undefined
+): Promise<void> {
+  if (!stagingPath) return
+  try {
+    await storage.storage.from('user-uploads').remove([stagingPath])
+  } catch {
+    /* già rimosso insieme agli artifact della sessione */
+  }
 }
 
 async function renderAoiMapPng(
@@ -181,15 +191,12 @@ async function persistAoiMapPng(
     reportPath: string
     pngPath: string
     runId: string
-    aoiEe: unknown
-    cuttingDateIso: string
-    sentinel2Year: number
+    renderBuf: Buffer | null
   }
 ): Promise<boolean> {
-  const { reportPath, pngPath, runId, aoiEe, cuttingDateIso, sentinel2Year } = params
+  const { reportPath, pngPath, runId, renderBuf } = params
+  if (!renderBuf) return false
   try {
-    const renderBuf = await renderAoiMapPng(aoiEe, cuttingDateIso, sentinel2Year)
-    if (!renderBuf) return false
     const { error: renderUpErr } = await supabase.storage.from('user-uploads').upload(pngPath, renderBuf, {
       contentType: 'image/png',
       upsert: true,
@@ -224,7 +231,8 @@ async function runDueDiligenceWithNormalized(
   sessionId: string,
   normalized: NormalizedAoi,
   cuttingDateIso?: string | null,
-  pointBufferAreaHa?: number | null
+  pointBufferAreaHa?: number | null,
+  stagingStoragePath?: string | null
 ): Promise<{
   runId?: string
   error?: string
@@ -354,11 +362,33 @@ async function runDueDiligenceWithNormalized(
     const reportPath = ddReportJsonSessionPath(userId, sessionId)
     const pngPath = aoiMapRenderSessionPath(userId, sessionId)
 
-    const aoiFeatureCollection = buildStorageFeatureCollection(normalized.geometries, validPointBufferAreaHa)
+    const simplified = bufferedAnalysisGeometries(normalized.geometries, validPointBufferAreaHa)
+    const allowSentinel2 = aoiBoundingBoxAreaKm2(simplified) <= AOI_S2_MAX_BBOX_KM2
+
+    let assessment
+    try {
+      assessment = await runEudrAoiAssessment(simplified)
+    } catch (assessmentError) {
+      await clearDdAnalysisLock(supabase, sessionId)
+      return {
+        error:
+          assessmentError instanceof Error
+            ? assessmentError.message
+            : 'JRC GFC2020 non disponibile: analisi non completata.',
+      }
+    }
+    if (!assessment.jrc_assessment_ok) {
+      await clearDdAnalysisLock(supabase, sessionId)
+      return {
+        error:
+          assessment.jrc_assessment_error ??
+          'JRC GFC2020 non disponibile: analisi non completata. Nessun esito solo Hansen.',
+      }
+    }
 
     const { error: uploadAoiError } = await storage.storage
       .from('user-uploads')
-      .upload(aoiPath, JSON.stringify(aoiFeatureCollection), {
+      .upload(aoiPath, JSON.stringify(featureCollectionFromGeometries(simplified)), {
         contentType: 'application/geo+json',
         upsert: true,
       })
@@ -369,46 +399,29 @@ async function runDueDiligenceWithNormalized(
 
     const ee = getEe()
     await ensureEarthEngineInitialized()
-    const parts = normalized.geometries.map((g) => {
-      const geom = ee.Geometry(g)
-      if (g.type === 'Point' || g.type === 'MultiPoint') {
-        const radiusMeters = radiusMetersFromAreaHa(validPointBufferAreaHa!)
-        return geom.buffer(radiusMeters)
-      }
-      return geom
-    })
-    let aoiEe = parts[0]
-    for (let i = 1; i < parts.length; i++) {
-      aoiEe = aoiEe.union(parts[i], 1)
-    }
+    const aoiEe = ee.Geometry(geometriesToMapGeometry(simplified))
 
-    const assessmentPromise = runEudrAoiAssessment(aoiEe)
-    const lossTilesPromise = getHansenLossTilesForAoi(aoiEe, cuttingDate).catch(() => null)
-    const forest2020TilesPromise = getJrcForest2020TilesForAoi(aoiEe).catch(() => null)
-    const sentinel2YearTilesPromise = (async () => {
-      try {
-        const cuttingYear = parseInt(cuttingDate.slice(0, 4), 10)
-        const minS2Year = Number.isFinite(cuttingYear) ? cuttingYear : 2020
-        const s2Years = [2020, 2021, 2022, 2023, 2024].filter((y) => y >= minS2Year)
-        const res = await getSentinel2YearCompositeTilesForAoi(aoiEe, s2Years.length > 0 ? s2Years : [2024])
-        return res.years.length > 0 ? res : null
-      } catch {
-        return null
-      }
-    })()
+    const cuttingYear = parseInt(cuttingDate.slice(0, 4), 10)
+    const minS2Year = Number.isFinite(cuttingYear) ? cuttingYear : 2020
+    const s2Years = [2020, 2021, 2022, 2023, 2024].filter((y) => y >= minS2Year)
+    const requestedS2Years = s2Years.length > 0 ? s2Years : [2024]
+    const newestRequestedYear = requestedS2Years[requestedS2Years.length - 1]
 
-    const [assessment, lossTiles, forest2020TilesResolved, sentinel2YearTilesResolved] = await Promise.all([
-      assessmentPromise,
-      lossTilesPromise,
-      forest2020TilesPromise,
-      sentinel2YearTilesPromise,
+    const [lossTiles, forest2020TilesResolved, sentinel2YearTilesResolved] = await Promise.all([
+      getHansenLossTilesForAoi(aoiEe, cuttingDate).catch(() => null),
+      getJrcForest2020TilesForAoi(aoiEe).catch(() => null),
+      allowSentinel2
+        ? getSentinel2YearCompositeTilesForAoi(aoiEe, requestedS2Years)
+            .then((res) => (res.years.length > 0 ? res : null))
+            .catch(() => null)
+        : Promise.resolve(null),
     ])
 
-    const sentinel2YearForPoster =
+    const lastSuccessfulS2Year =
       sentinel2YearTilesResolved?.years?.length &&
       sentinel2YearTilesResolved.years[sentinel2YearTilesResolved.years.length - 1]?.year != null
         ? sentinel2YearTilesResolved.years[sentinel2YearTilesResolved.years.length - 1].year
-        : 2024
+        : null
 
     const completedMeta: RunMetadata = {
       run_id: runId,
@@ -465,13 +478,19 @@ async function runDueDiligenceWithNormalized(
       upsert: true,
     })
 
+    let posterBuf: Buffer | null = null
+    if (allowSentinel2) {
+      posterBuf = await renderAoiMapPng(aoiEe, cuttingDate, newestRequestedYear)
+      if (!posterBuf && lastSuccessfulS2Year != null && lastSuccessfulS2Year !== newestRequestedYear) {
+        posterBuf = await renderAoiMapPng(aoiEe, cuttingDate, lastSuccessfulS2Year)
+      }
+    }
+
     await persistAoiMapPng(storage, {
       reportPath,
       pngPath,
       runId,
-      aoiEe,
-      cuttingDateIso: cuttingDate,
-      sentinel2Year: sentinel2YearForPoster,
+      renderBuf: posterBuf,
     })
 
     const { data: sessionRow } = await supabase
@@ -522,6 +541,8 @@ async function runDueDiligenceWithNormalized(
   } catch (err) {
     await clearDdAnalysisLock(supabase, sessionId)
     return { runId, error: err instanceof Error ? err.message : String(err) }
+  } finally {
+    await removeStagingAoi(storage, stagingStoragePath)
   }
 }
 
@@ -622,7 +643,7 @@ export async function runDueDiligenceAoiAnalysisFromStorage(
 
     let parsed: unknown
     try {
-      parsed = JSON.parse(text)
+      parsed = parseGeoJsonText(text)
     } catch {
       return { error: 'AOI non valida: JSON non parsabile' }
     }
@@ -635,7 +656,13 @@ export async function runDueDiligenceAoiAnalysisFromStorage(
       }
     }
 
-    return await runDueDiligenceWithNormalized(sessionId, normalized, cuttingDateIso, pointBufferAreaHa)
+    return await runDueDiligenceWithNormalized(
+      sessionId,
+      normalized,
+      cuttingDateIso,
+      pointBufferAreaHa,
+      aoiStoragePath
+    )
   } catch (e) {
     return { error: e instanceof Error ? e.message : 'Accesso negato' }
   }
@@ -660,11 +687,12 @@ export async function stageDueDiligenceAoiForSession(
 
     let parsed: unknown
     try {
-      parsed = JSON.parse(geoJsonText)
+      parsed = parseGeoJsonText(geoJsonText)
     } catch {
       return { error: 'AOI non valida: JSON non parsabile' }
     }
-    if (!normalizeAoiInput(parsed)) {
+    const normalized = normalizeAoiInput(parsed)
+    if (!normalized) {
       return {
         error:
           'AOI non valida: caricare GeoJSON Point/MultiPoint/Polygon/MultiPolygon, oppure Feature/FeatureCollection (WGS84).',
@@ -679,7 +707,8 @@ export async function stageDueDiligenceAoiForSession(
     }
 
     const storagePath = `${sessionOwnerId}/eudr-due-diligence/${sessionId}/aoi-upload-staging.geojson`
-    const { error: upErr } = await storage.storage.from('user-uploads').upload(storagePath, geoJsonText, {
+    const staged = JSON.stringify(simplifiedFeatureCollection(normalized.geometries))
+    const { error: upErr } = await storage.storage.from('user-uploads').upload(storagePath, staged, {
       contentType: 'application/geo+json',
       upsert: true,
     })

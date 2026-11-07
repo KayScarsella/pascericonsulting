@@ -91,23 +91,18 @@ export function buildDdReportPayload(
     })
   }
 
-  // Badge / logica
+  // Un run completato ha sempre il JRC. Senza JRC l'analisi non viene salvata.
   const r = meta.eudr_refined
-  if (r) {
-    if (r.jrc_assessment_ok && r.loss_on_forest_2020_post_eudr_ha != null && r.loss_on_forest_2020_post_eudr_ha >= 0.5) {
+  if (r?.jrc_assessment_ok) {
+    if (r.loss_on_forest_2020_post_eudr_ha != null && r.loss_on_forest_2020_post_eudr_ha >= 0.5) {
       ui_blocks.push({
         heading: 'Logica screening',
         body: 'Logica raffinata (JRC foresta 2020 ∩ Hansen, ≥0,5 ha).',
       })
-    } else if (r.jrc_assessment_ok) {
-      ui_blocks.push({
-        heading: 'Logica screening',
-        body: 'Logica raffinata disponibile — sotto soglia ha → gate su base Hansen se applicabile.',
-      })
     } else {
       ui_blocks.push({
         heading: 'Logica screening',
-        body: 'Logica base (solo Hansen; JRC non disponibile o errore).',
+        body: 'Logica raffinata disponibile — sotto soglia ha → gate su base Hansen se applicabile.',
       })
     }
   }
@@ -140,12 +135,6 @@ export function buildDdReportPayload(
   } else if (ft && !ft.ok) {
     ui_blocks.push({
       body: `Tipi foresta JRC non disponibili: ${ft.error ?? '—'}`,
-    })
-  }
-
-  if (r && !r.jrc_assessment_ok) {
-    ui_blocks.push({
-      body: `Intersect JRC GFC2020 non disponibile: ${r.jrc_assessment_error ?? 'errore EE'}. Screening fallback su Hansen-only.`,
     })
   }
 
