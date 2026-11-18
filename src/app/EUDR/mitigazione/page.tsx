@@ -1,8 +1,6 @@
-import { getToolAccess } from "@/lib/tool-auth"
+import { getEudrPageContext } from "@/lib/eudr-page-context"
+import { getCachedEudrSessionResponses } from "@/lib/eudr-cache"
 import { EUDR_TOOL_ID } from "@/lib/constants"
-import { createServerClient } from "@supabase/ssr"
-import { cookies } from "next/headers"
-import { Database } from "@/types/supabase"
 import { redirect } from "next/navigation"
 import { ShieldAlert, ArrowLeft, Shield } from "lucide-react"
 import Link from "next/link"
@@ -32,20 +30,7 @@ export default async function EudrMitigazionePage({
 }) {
   const params = await searchParams
   const sessionId = params.session_id as string | undefined
-
-  const cookieStore = await cookies()
-  const supabase = createServerClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } }
-  )
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) redirect("/login")
-
-  const { role } = await getToolAccess(EUDR_TOOL_ID)
+  const { role, supabase } = await getEudrPageContext()
   if (!role || role === "standard") {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center space-y-4">
@@ -104,23 +89,16 @@ export default async function EudrMitigazionePage({
     (metadata?.operation_name as string) ||
     "Analisi Finale EUDR"
 
+  const [parentResponses, childResponses] = await Promise.all([
+    session.parent_session_id
+      ? getCachedEudrSessionResponses(session.parent_session_id)
+      : Promise.resolve([]),
+    getCachedEudrSessionResponses(sessionId),
+  ])
   const answersMap: Record<string, string | null> = {}
-  if (session.parent_session_id) {
-    const { data: parentResponses } = await supabase
-      .from("user_responses")
-      .select("question_id, answer_text")
-      .eq("session_id", session.parent_session_id)
-    parentResponses?.forEach((r) => {
-      answersMap[r.question_id] = r.answer_text
-    })
+  for (const row of [...parentResponses, ...childResponses]) {
+    answersMap[row.question_id] = row.answer_text
   }
-  const { data: childResponses } = await supabase
-    .from("user_responses")
-    .select("question_id, answer_text")
-    .eq("session_id", sessionId)
-  childResponses?.forEach((r) => {
-    answersMap[r.question_id] = r.answer_text
-  })
 
   const metadataDdLastRun = metadata?.dd_last_run as DdLastRunSnapshot | undefined
   const [ddLastRun, aoiMitigated] = await Promise.all([

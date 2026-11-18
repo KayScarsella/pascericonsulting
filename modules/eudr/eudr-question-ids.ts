@@ -110,20 +110,33 @@ export async function resolveEudrImportQuestionId(
   return resolveEudrQuestionIdByText(supabase, '%importazione%fuori%UE%')
 }
 
+let cachedEudrNumPaesiQuestionId: string | null | undefined
+
+/** Module-scope memo so risultato/DDS does not ilike `questions.text` on every view. */
 export async function resolveEudrNumPaesiQuestionId(
   supabase: SupabaseClient<Database>
 ): Promise<string | null> {
+  if (cachedEudrNumPaesiQuestionId !== undefined) return cachedEudrNumPaesiQuestionId
+
   if (EUDR_Q_NUM_PAESE) {
     const { data } = await supabase
       .from('questions')
       .select('id')
       .eq('id', EUDR_Q_NUM_PAESE)
       .maybeSingle()
-    if (data?.id) return data.id
+    if (data?.id) {
+      cachedEudrNumPaesiQuestionId = data.id
+      return data.id
+    }
   }
   const byNumero = await resolveEudrQuestionIdByText(supabase, '%numero%paes%')
-  if (byNumero) return byNumero
-  return resolveEudrQuestionIdByText(supabase, '%quanti%paes%')
+  if (byNumero) {
+    cachedEudrNumPaesiQuestionId = byNumero
+    return byNumero
+  }
+  const byQuanti = await resolveEudrQuestionIdByText(supabase, '%quanti%paes%')
+  cachedEudrNumPaesiQuestionId = byQuanti
+  return byQuanti
 }
 
 let cachedEudrFaoQuestionId: string | null | undefined

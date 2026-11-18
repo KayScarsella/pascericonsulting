@@ -31,6 +31,7 @@ import {
   processTimberValutazione as runProcessTimberValutazione,
 } from "@/actions/workflows/timber-valutazione"
 import { isYesLikeAnswer } from "@/lib/eudr-question-ids"
+import { touchEudrResponses, touchEudrSearch } from "@/lib/eudr-cache"
 import {
   materializeEudrFinalPrefillForParent,
   materializeEudrFinalPrefillForSession,
@@ -109,7 +110,7 @@ async function resetDownstreamAfterStep1Change(
   supabase: SupabaseClient<Database>,
   toolId: string,
   sessionId: string
-): Promise<void> {
+): Promise<string[]> {
   const { data: childRows } = await supabase
     .from("assessment_sessions")
     .select("id")
@@ -147,6 +148,8 @@ async function resetDownstreamAfterStep1Change(
         .in("question_id", nonRiskQuestionIds)
     }
   }
+
+  return childIds
 }
 
 /** Shared prima-fase logic: success → complete + search; warning → metadata only; else → evaluation. */
@@ -158,7 +161,7 @@ async function runPrimaFase(
   searchPath: string,
   evaluationBasePath: string
 ): Promise<{ redirectUrl: string }> {
-  await validateSessionAccess(supabase, toolId, sessionId)
+  const { sessionOwnerId } = await validateSessionAccess(supabase, toolId, sessionId)
 
   const { data: baseSession } = await supabase
     .from("assessment_sessions")
@@ -178,8 +181,16 @@ async function runPrimaFase(
     .eq("session_type", "analisi_finale")
     .eq("tool_id", toolId)
 
+  let removedChildIds: string[] = []
   if (step1Changed && (hadDownstreamState || (childCount ?? 0) > 0)) {
-    await resetDownstreamAfterStep1Change(supabase, toolId, sessionId)
+    removedChildIds = await resetDownstreamAfterStep1Change(supabase, toolId, sessionId)
+  }
+
+  const touchEudrPrimaFase = () => {
+    if (toolId !== EUDR_TOOL_ID) return
+    touchEudrResponses(sessionId)
+    touchEudrSearch(sessionOwnerId)
+    for (const childId of removedChildIds) touchEudrResponses(childId)
   }
 
   const step1MetaBase: SessionMetadata = {
@@ -199,6 +210,7 @@ async function runPrimaFase(
       resume_step: "risk-analysis",
     }
     await completeSessionAsExempt(supabase, sessionId, metadata)
+    touchEudrPrimaFase()
     return { redirectUrl: searchPath }
   }
 
@@ -225,6 +237,7 @@ async function runPrimaFase(
     })
     .eq("id", sessionId)
 
+  touchEudrPrimaFase()
   return { redirectUrl: `${evaluationBasePath}?session_id=${sessionId}` }
 }
 
@@ -322,6 +335,14 @@ export async function backfillEudrFinalPrefillForRoot(
       "manual-backfill",
       { force: true }
     )
+    touchEudrSearch(sessionOwnerId)
+    touchEudrResponses(rootSessionId)
+    const { data: prefillChildren } = await supabase
+      .from("assessment_sessions")
+      .select("id")
+      .eq("parent_session_id", rootSessionId)
+      .eq("session_type", "analisi_finale")
+    for (const child of prefillChildren ?? []) touchEudrResponses(child.id)
     return { ok: true }
   } catch (err: unknown) {
     return {
@@ -462,6 +483,8 @@ export async function finalizeEudrAnalisi(sessionId: string): Promise<{ redirect
       })
       .eq("id", sessionId)
 
+    touchEudrResponses(sessionId)
+    touchEudrSearch(sessionOwnerId)
     return { redirectUrl: `/EUDR/risultato?session_id=${sessionId}` }
   } catch {
     return { error: "Errore durante la conclusione dell'analisi finale EUDR" }
@@ -570,6 +593,7 @@ async function saveMitigationCore(
       }))
 
     await upsertUserResponses(supabase, upsertPayloads)
+    if (toolId === EUDR_TOOL_ID) touchEudrResponses(sessionId)
 
     const historyPayloads: TablesInsert<"mitigation_history">[] = normalizedMitigations.map((m) => ({
       session_id: sessionId,

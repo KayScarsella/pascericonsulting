@@ -5,6 +5,7 @@ import { Database, TablesInsert, Json } from "@/types/supabase"
 import { getToolAccess } from "@/lib/tool-auth"
 import { createClient } from "@/utils/supabase/server"
 import { TIMBER_TOOL_ID } from "@/lib/constants"
+import { touchEudrResponses } from "@/lib/eudr-cache"
 
 // ----------------------------------------------------------------------
 // HELPER FUNCTIONS
@@ -83,6 +84,7 @@ export async function saveResponse(
       .upsert(payload, { onConflict: 'session_id, question_id' })
 
     if (error) throw new Error(error.message)
+    touchEudrResponses(sessionId)
     return { success: true }
 
   } catch (err: unknown) { // 🛠️ FIX: 'unknown' invece di 'any'
@@ -117,6 +119,7 @@ export async function saveResponsesBulk(
       .upsert(payloads, { onConflict: 'session_id, question_id' })
 
     if (error) throw new Error(error.message)
+    touchEudrResponses(sessionId)
     return { success: true }
 
   } catch (err: unknown) { // 🛠️ FIX
@@ -156,6 +159,7 @@ export async function deleteResponsesBulk(
       .in('question_id', questionIds)
 
     if (dbError) throw new Error(dbError.message)
+    touchEudrResponses(sessionId)
     return { success: true }
 
   } catch (err: unknown) { // 🛠️ FIX
@@ -205,6 +209,7 @@ export async function uploadQuestionAttachment(
 
     if (dbError) throw new Error(dbError.message)
 
+    touchEudrResponses(sessionId)
     return { success: true, path: storagePath }
 
   } catch (err: unknown) { // 🛠️ FIX
@@ -245,6 +250,7 @@ export async function deleteQuestionAttachment(
       .eq('id', response.id)
 
     if (dbError) throw new Error(dbError.message)
+    touchEudrResponses(sessionId)
     return { success: true }
 
   } catch (err: unknown) { // 🛠️ FIX
@@ -271,6 +277,7 @@ export async function deleteQuestionRow(
       .eq('question_id', questionId)
 
     if (error) throw new Error(error.message)
+    touchEudrResponses(sessionId)
     return { success: true }
 
   } catch (err: unknown) { // 🛠️ FIX

@@ -1,16 +1,24 @@
-import { getToolAccess } from "@/lib/tool-auth"
+import { Suspense } from "react"
+import type { ComponentProps } from "react"
+import { getEudrPageContext } from "@/lib/eudr-page-context"
+import {
+  getCachedEudrSections,
+  getCachedEudrSessionResponses,
+  type EudrCachedResponse,
+  type EudrCachedSection,
+} from "@/lib/eudr-cache"
 import { EUDR_TOOL_ID } from "@/lib/constants"
-import { createServerClient } from "@supabase/ssr"
-import { cookies } from "next/headers"
-import { Database } from "@/types/supabase"
+import { EUDR_PREFILL_VERSION } from "@/lib/eudr-question-ids"
 import { redirect } from "next/navigation"
 import { ShieldAlert, TreePine, FileText, ArrowLeft } from "lucide-react"
 import Link from "next/link"
+import { EudrRouteSkeleton } from "@/components/eudr/EudrRouteSkeleton"
 
 import { SectionList } from "@/components/questions/SectionList"
 import { processEudrValutazione, finalizeEudrAnalisi } from "@/actions/workflows"
 import { resolveEudrWorkflowState } from "@/lib/eudr-workflow-state"
 import { materializeEudrFinalPrefillForSession } from "@/actions/workflows/eudr-prefill"
+import type { SessionMetadata } from "@/types/session"
 
 export default async function EudrValutazioneFinalePage({
   searchParams,
@@ -19,18 +27,7 @@ export default async function EudrValutazioneFinalePage({
 }) {
   const params = await searchParams
   const sessionId = params.session_id as string | undefined
-
-  const cookieStore = await cookies()
-  const supabase = createServerClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } }
-  )
-
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect("/login")
-
-  const { role } = await getToolAccess(EUDR_TOOL_ID)
+  const { role, userId } = await getEudrPageContext()
 
   if (!role || role === "standard") {
     return (
@@ -60,6 +57,24 @@ export default async function EudrValutazioneFinalePage({
     )
   }
 
+  return (
+    <Suspense fallback={<EudrRouteSkeleton />}>
+      <ValutazioneFinaleBody sessionId={sessionId} userId={userId} role={role} />
+    </Suspense>
+  )
+}
+
+async function ValutazioneFinaleBody({
+  sessionId,
+  userId,
+  role,
+}: {
+  sessionId: string
+  userId: string
+  role: string
+}) {
+  const { supabase } = await getEudrPageContext()
+
   const { data: sessionInfo, error: sessionError } = await supabase
     .from("assessment_sessions")
     .select("id, user_id, status, final_outcome, session_type, parent_session_id, metadata")
@@ -70,7 +85,7 @@ export default async function EudrValutazioneFinalePage({
   if (sessionError || !sessionInfo) {
     return <div className="p-8 text-center text-red-600 font-bold">Sessione non trovata.</div>
   }
-  if (sessionInfo.user_id !== user.id && role !== "admin") {
+  if (sessionInfo.user_id !== userId && role !== "admin") {
     return <div className="p-8 text-center text-red-600 font-bold">Accesso negato.</div>
   }
 
@@ -90,21 +105,13 @@ export default async function EudrValutazioneFinalePage({
     redirect(workflowState.resumeUrl)
   }
 
+  const metadata = (sessionInfo.metadata as SessionMetadata | null) ?? null
   const groupNames = isAnalisiFinale
     ? ["Analisi Rischio", "Valutazione", "Valutazione Finale"]
     : ["Analisi Rischio", "Valutazione"]
+  const sectionsPromise = getCachedEudrSections(groupNames)
 
-  const { data: sections } = await supabase
-    .from("sections")
-    .select(`*, questions (*)`)
-    .eq("tool_id", EUDR_TOOL_ID)
-    .in("group_name", groupNames)
-    .order("order_index", { ascending: true })
-    .order("order_index", { foreignTable: "questions", ascending: true })
-
-  if (isAnalisiFinale) {
-    // No-op when evaluation-save already wrote the current prefill version.
-    // Always stamp responses as the session owner (not the admin/runner).
+  if (isAnalisiFinale && !isPrefillStampCurrent(metadata)) {
     await materializeEudrFinalPrefillForSession(
       supabase,
       sessionInfo.user_id,
@@ -113,31 +120,16 @@ export default async function EudrValutazioneFinalePage({
     )
   }
 
-  const { data: childResponses } = await supabase
-    .from("user_responses")
-    .select("*")
-    .eq("session_id", sessionId)
+  const [sections, childResponses] = await Promise.all([
+    sectionsPromise,
+    getCachedEudrSessionResponses(sessionId),
+  ])
 
-  const allResponses: Database["public"]["Tables"]["user_responses"]["Row"][] = childResponses || []
+  const configuredSections = sections.map((section) =>
+    configureSection(section, isAnalisiFinale)
+  )
 
-  const configuredSections = sections?.map((section) => {
-    if (isAnalisiFinale) {
-      if (section.group_name === "Analisi Rischio" || section.group_name === "Valutazione") {
-        return { ...section, default_open: false, default_mode: "view" as const }
-      }
-      return { ...section, default_open: true, default_mode: "edit" as const }
-    }
-    if (section.group_name === "Analisi Rischio") {
-      return { ...section, default_open: false, default_mode: "view" as const }
-    }
-    if (section.group_name === "Valutazione") {
-      return { ...section, default_open: true, default_mode: "edit" as const }
-    }
-    return section
-  }) ?? null
-
-  const metadata = sessionInfo.metadata as Record<string, unknown> | null
-  const nomeOperazione = (metadata?.nome_operazione as string) || null
+  const nomeOperazione = metadata?.nome_operazione || null
   const pageTitle = isAnalisiFinale ? "Analisi Finale" : "Valutazione Finale"
   const pageDescription = isAnalisiFinale
     ? "Compila i dati specifici per questa analisi: fornitore, specie, paese, legislazione e catena di approvvigionamento."
@@ -148,7 +140,6 @@ export default async function EudrValutazioneFinalePage({
       <div className="relative mt-6 mb-10">
         <Link
           href="/EUDR/search"
-          prefetch={false}
           className="inline-flex items-center gap-1.5 text-sm text-[#967635] hover:text-[#7a5f2a] font-medium mb-4 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" /> Torna all&apos;archivio
@@ -199,7 +190,7 @@ export default async function EudrValutazioneFinalePage({
 
       <SectionList
         sections={configuredSections}
-        userResponses={allResponses}
+        userResponses={asResponses(childResponses)}
         toolId={EUDR_TOOL_ID}
         sessionId={sessionId}
         onCompleteAction={isAnalisiFinale ? finalizeEudrAnalisi : processEudrValutazione}
@@ -208,3 +199,30 @@ export default async function EudrValutazioneFinalePage({
   )
 }
 
+function isPrefillStampCurrent(metadata: SessionMetadata | null): boolean {
+  return (
+    metadata?.eudr_prefill_version === EUDR_PREFILL_VERSION &&
+    Boolean(metadata?.eudr_prefill_materialized_at)
+  )
+}
+
+function configureSection(section: EudrCachedSection, isAnalisiFinale: boolean) {
+  const withTool = { ...section, tool_id: EUDR_TOOL_ID }
+  if (isAnalisiFinale) {
+    if (section.group_name === "Analisi Rischio" || section.group_name === "Valutazione") {
+      return { ...withTool, default_open: false, default_mode: "view" as const }
+    }
+    return { ...withTool, default_open: true, default_mode: "edit" as const }
+  }
+  if (section.group_name === "Analisi Rischio") {
+    return { ...withTool, default_open: false, default_mode: "view" as const }
+  }
+  if (section.group_name === "Valutazione") {
+    return { ...withTool, default_open: true, default_mode: "edit" as const }
+  }
+  return withTool
+}
+
+function asResponses(rows: EudrCachedResponse[]): ComponentProps<typeof SectionList>["userResponses"] {
+  return rows as unknown as ComponentProps<typeof SectionList>["userResponses"]
+}

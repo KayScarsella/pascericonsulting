@@ -110,7 +110,6 @@ export function ToolNavbar({ toolName, basePath, items, userRole, toolbarExtra, 
                 <Link
                   key={item.href}
                   href={`${basePath}${item.href}`}
-                  prefetch={false}
                   className={cn(
                     "group relative inline-flex items-center px-3 py-2 text-sm font-medium transition-all duration-200 rounded-md",
                     active ? "bg-amber-50/50" : "text-slate-500 hover:bg-slate-50"
@@ -163,7 +162,6 @@ export function ToolNavbar({ toolName, basePath, items, userRole, toolbarExtra, 
               <Link
                 key={item.href}
                 href={`${basePath}${item.href}`}
-                prefetch={false}
                 onClick={() => setIsOpen(false)}
                 className={cn(
                   "flex items-center rounded-md px-3 py-2 text-base font-medium transition-colors",

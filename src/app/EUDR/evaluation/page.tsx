@@ -1,10 +1,16 @@
-import { getToolAccess } from "@/lib/tool-auth"
+import { Suspense } from "react"
+import type { ComponentProps } from "react"
+import { getEudrPageContext } from "@/lib/eudr-page-context"
+import {
+  getCachedEudrSections,
+  getCachedEudrSessionResponses,
+  type EudrCachedResponse,
+  type EudrCachedSection,
+} from "@/lib/eudr-cache"
 import { EUDR_TOOL_ID } from "@/lib/constants"
-import { createServerClient } from "@supabase/ssr"
-import { cookies } from "next/headers"
-import { Database } from "@/types/supabase"
 import { redirect } from "next/navigation"
 import { ShieldAlert } from "lucide-react"
+import { EudrRouteSkeleton } from "@/components/eudr/EudrRouteSkeleton"
 
 import { SectionList } from "@/components/questions/SectionList"
 import { processEudrValutazione } from "@/actions/workflows"
@@ -17,20 +23,9 @@ export default async function EvaluationPage({
 }) {
   const params = await searchParams
   const sessionId = params.session_id as string | undefined
+  const { role, userId } = await getEudrPageContext()
 
-  const cookieStore = await cookies()
-  const supabase = createServerClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } }
-  )
-
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
-
-  const { role } = await getToolAccess(EUDR_TOOL_ID)
-
-  if (!role || role === 'standard') {
+  if (!role || role === "standard") {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center space-y-4">
         <div className="p-4 bg-amber-50 rounded-full">
@@ -56,18 +51,46 @@ export default async function EvaluationPage({
     )
   }
 
+  return (
+    <div className="max-w-5xl mx-auto">
+      <div className="border-b border-slate-200 pb-6 mb-8 mt-4">
+        <h1 className="text-3xl font-bold text-slate-900">Configurazione Analisi Finali</h1>
+        <p className="text-slate-500 mt-2">
+          Rivedi i dati della verifica preliminare e definisci quante e quali analisi finali generare.
+        </p>
+      </div>
+
+      <Suspense fallback={<EudrRouteSkeleton />}>
+        <EvaluationSections sessionId={sessionId} userId={userId} role={role} />
+      </Suspense>
+    </div>
+  )
+}
+
+async function EvaluationSections({
+  sessionId,
+  userId,
+  role,
+}: {
+  sessionId: string
+  userId: string
+  role: string
+}) {
+  const { supabase } = await getEudrPageContext()
+  const sectionsPromise = getCachedEudrSections(["Analisi Rischio", "Valutazione"])
+
   const { data: sessionInfo, error: sessionError } = await supabase
-    .from('assessment_sessions')
-    .select('id, user_id, session_type, status, final_outcome, metadata')
-    .eq('id', sessionId)
-    .eq('tool_id', EUDR_TOOL_ID)
+    .from("assessment_sessions")
+    .select("id, user_id, session_type, status, final_outcome, metadata")
+    .eq("id", sessionId)
+    .eq("tool_id", EUDR_TOOL_ID)
     .single()
 
   if (sessionError || !sessionInfo) {
     return <div className="p-8 text-center text-red-600 font-bold">Sessione non trovata nel database.</div>
   }
 
-  if (sessionInfo.user_id !== user.id && role !== 'admin') {
+  if (sessionInfo.user_id !== userId && role !== "admin") {
     return <div className="p-8 text-center text-red-600 font-bold">Non sei autorizzato a visualizzare o modificare questa verifica.</div>
   }
 
@@ -90,55 +113,35 @@ export default async function EvaluationPage({
     redirect(`/EUDR/risk-analysis?session_id=${sessionId}`)
   }
 
-  const { data: sections } = await supabase
-    .from('sections')
-    .select(`*, questions (*)`)
-    .eq('tool_id', EUDR_TOOL_ID)
-    .in('group_name', ['Analisi Rischio', 'Valutazione'])
-    .order('order_index', { ascending: true })
-    .order('order_index', { foreignTable: 'questions', ascending: true })
+  const [sections, userResponses] = await Promise.all([
+    sectionsPromise,
+    getCachedEudrSessionResponses(sessionId),
+  ])
 
-  const { data: userResponses } = await supabase
-    .from('user_responses')
-    .select('*')
-    .eq('session_id', sessionId)
-
-  const configuredSections = sections?.map(section => {
-    if (section.group_name === 'Analisi Rischio') {
-      return {
-        ...section,
-        default_open: false,
-        default_mode: 'view' as const
-      }
-    }
-    if (section.group_name === 'Valutazione') {
-      return {
-        ...section,
-        default_open: true,
-        default_mode: 'edit' as const
-      }
-    }
-    return section
-  }) ?? null
+  const configuredSections = sections.map((section) => configureSection(section))
 
   return (
-    <div className="max-w-5xl mx-auto">
-
-      <div className="border-b border-slate-200 pb-6 mb-8 mt-4">
-        <h1 className="text-3xl font-bold text-slate-900">Configurazione Analisi Finali</h1>
-        <p className="text-slate-500 mt-2">
-          Rivedi i dati della verifica preliminare e definisci quante e quali analisi finali generare.
-        </p>
-      </div>
-
-      <SectionList
-        sections={configuredSections}
-        userResponses={userResponses}
-        toolId={EUDR_TOOL_ID}
-        sessionId={sessionId}
-        onCompleteAction={processEudrValutazione}
-      />
-
-    </div>
+    <SectionList
+      sections={configuredSections}
+      userResponses={asResponses(userResponses)}
+      toolId={EUDR_TOOL_ID}
+      sessionId={sessionId}
+      onCompleteAction={processEudrValutazione}
+    />
   )
+}
+
+function configureSection(section: EudrCachedSection) {
+  const withTool = { ...section, tool_id: EUDR_TOOL_ID }
+  if (section.group_name === "Analisi Rischio") {
+    return { ...withTool, default_open: false, default_mode: "view" as const }
+  }
+  if (section.group_name === "Valutazione") {
+    return { ...withTool, default_open: true, default_mode: "edit" as const }
+  }
+  return withTool
+}
+
+function asResponses(rows: EudrCachedResponse[]): ComponentProps<typeof SectionList>["userResponses"] {
+  return rows as unknown as ComponentProps<typeof SectionList>["userResponses"]
 }

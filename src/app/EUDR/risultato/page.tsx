@@ -1,7 +1,10 @@
 import { Suspense } from "react"
+import { after } from "next/server"
 import { getToolAccess } from "@/lib/tool-auth"
+import { getSessionContext } from "@/lib/session-context"
+import { getCachedEudrSessionResponses } from "@/lib/eudr-cache"
 import { EUDR_TOOL_ID } from "@/lib/constants"
-import { createClient } from "@/utils/supabase/server"
+import { redirect } from "next/navigation"
 import { logRoutePerf } from "@/lib/perf-debug"
 import { scheduleEudrSessionFinalize } from "@/lib/eudr-risultato-sync"
 import {
@@ -46,7 +49,9 @@ export default async function EudrRisultatoPage({
   const sessionId = params.session_id as string | undefined
 
   const { role, userId } = await getToolAccess(EUDR_TOOL_ID)
-  const supabase = await createClient()
+  const sessionCtx = await getSessionContext()
+  if (!sessionCtx) redirect("/login")
+  const supabase = sessionCtx.supabase
   if (!role || role === "standard") {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center space-y-4">
@@ -111,27 +116,12 @@ export default async function EudrRisultatoPage({
     (metadata?.operation_name as string) ||
     "Analisi Finale EUDR"
 
-  let allResponses: { question_id: string; answer_text: string | null; answer_json: unknown }[] = []
-  if (session.parent_session_id) {
-    queryCount += 1
-    const [{ data: parentResponses }, { data: childResponses }] = await Promise.all([
-      supabase
-        .from("user_responses")
-        .select("question_id, answer_text, answer_json")
-        .eq("session_id", session.parent_session_id),
-      supabase
-        .from("user_responses")
-        .select("question_id, answer_text, answer_json")
-        .eq("session_id", sessionId),
-    ])
-    allResponses = [...(parentResponses || []), ...(childResponses || [])]
-  } else {
-    const { data: childResponses } = await supabase
-      .from("user_responses")
-      .select("question_id, answer_text, answer_json")
-      .eq("session_id", sessionId)
-    allResponses = childResponses || []
-  }
+  const allResponses = session.parent_session_id
+    ? (await Promise.all([
+        getCachedEudrSessionResponses(session.parent_session_id),
+        getCachedEudrSessionResponses(sessionId),
+      ])).flat()
+    : await getCachedEudrSessionResponses(sessionId)
 
   const answersMap: Record<string, string | null> = {}
   const answersJsonMap: Record<string, unknown> = {}
@@ -173,7 +163,10 @@ export default async function EudrRisultatoPage({
     metadataDdLastRun?.tendenza_rule_applied !== true &&
     ddLastRun?.tendenza_rule_applied === true
   if (ddLastRun && (!metadataDdLastRun?.run_id || tendenzaRuleUpgraded)) {
-    await persistDdLastRunBackfill(supabase, sessionId, ddLastRun, metadata)
+    const backfillRun = ddLastRun
+    after(async () => {
+      await persistDdLastRunBackfill(supabase, sessionId, backfillRun, metadata)
+    })
   }
   const normalizeAoiReasons = (reasons: string[] | undefined) => {
     const msg =

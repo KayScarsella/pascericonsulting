@@ -5,23 +5,13 @@ import { Lock } from "lucide-react"
 import { EudrSearchData } from "@/components/eudr/EudrSearchData"
 import { SearchTabSkeleton } from "@/components/search/SearchTabSkeleton"
 
-export default async function EudrSearchPage({
+type SearchParams = { [key: string]: string | string[] | undefined }
+
+export default function EudrSearchPage({
   searchParams,
 }: {
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
+  searchParams: Promise<SearchParams>
 }) {
-  const params = await searchParams
-  const { role, userId } = await getToolAccess(EUDR_TOOL_ID)
-  const { getToolImpersonation, getEffectiveToolUserId } = await import('@/lib/tool-impersonation')
-  const impersonation = await getToolImpersonation(EUDR_TOOL_ID)
-  const effectiveUserId = await getEffectiveToolUserId(EUDR_TOOL_ID)
-  const hasAccess = role === "admin" || role === "premium" || role === "tool"
-  const isAdmin = role === "admin" && !impersonation
-
-  if (!hasAccess) {
-    return <LockedSearchView />
-  }
-
   return (
     <div className="max-w-6xl mx-auto space-y-8 py-8 px-4">
       <div className="space-y-2 border-b border-slate-200 pb-6">
@@ -32,13 +22,35 @@ export default async function EudrSearchPage({
       </div>
 
       <Suspense fallback={<SearchTabSkeleton />}>
-        <EudrSearchData
-          searchParams={params}
-          isAdmin={isAdmin}
-          userId={impersonation ? effectiveUserId : userId}
-        />
+        <EudrSearchGate searchParams={searchParams} />
       </Suspense>
     </div>
+  )
+}
+
+async function EudrSearchGate({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>
+}) {
+  const params = await searchParams
+  const { role, userId } = await getToolAccess(EUDR_TOOL_ID)
+  const { getToolImpersonation, getEffectiveToolUserId } = await import("@/lib/tool-impersonation")
+  const impersonation = await getToolImpersonation(EUDR_TOOL_ID)
+  const effectiveUserId = await getEffectiveToolUserId(EUDR_TOOL_ID)
+  const hasAccess = role === "admin" || role === "premium" || role === "tool"
+  const isAdmin = role === "admin" && !impersonation
+
+  if (!hasAccess) {
+    return <LockedSearchView />
+  }
+
+  return (
+    <EudrSearchData
+      searchParams={params}
+      isAdmin={isAdmin}
+      userId={impersonation ? effectiveUserId : userId}
+    />
   )
 }
 

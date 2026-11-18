@@ -17,6 +17,7 @@ import {
   mergeNomeMetadata,
 } from '@/actions/workflows/shared'
 import { materializeEudrFinalPrefillForParent } from '@/actions/workflows/eudr-prefill'
+import { touchEudrResponses, touchEudrSearch } from '@/lib/eudr-cache'
 
 type ValutazioneException = { isBlocked: boolean; blockReason: string; blockVariant: 'success' | 'warning' | 'error' }
 
@@ -214,6 +215,7 @@ export async function processEudrValutazione(
         })
         .map((s) => s.id)
       if (removedSessionIds.length > 0) {
+        for (const removedId of removedSessionIds) touchEudrResponses(removedId)
         await supabase
           .from('assessment_sessions')
           .delete()
@@ -303,6 +305,15 @@ export async function processEudrValutazione(
         metadata: finalMetadata as unknown as Json,
       })
       .eq('id', sessionId)
+
+    touchEudrSearch(sessionOwnerId)
+    touchEudrResponses(sessionId)
+    const { data: touchedChildren } = await supabase
+      .from('assessment_sessions')
+      .select('id')
+      .eq('parent_session_id', sessionId)
+      .eq('session_type', 'analisi_finale')
+    for (const child of touchedChildren ?? []) touchEudrResponses(child.id)
 
     if (currentPairs.length === 1) {
       const { data: singleSession } = await supabase
