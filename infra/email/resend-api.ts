@@ -82,10 +82,17 @@ export async function getResendEmail(
 
 const INVITE_SUBJECT_PREFIX = 'Invito alla piattaforma'
 
-/** Recent invite emails indexed by recipient (lowercase), newest wins. */
-export async function buildInviteEmailIndexByRecipient(
+export type InviteEmailIndexEntry = {
+  email: string
+  id: string
+  last_event: string | null
+  created_at: string
+  subject: string
+}
+
+async function collectInviteEmailsByRecipient(
   apiKey: string,
-  maxPages = 8
+  maxPages: number
 ): Promise<Map<string, ResendEmailListItem>> {
   const byRecipient = new Map<string, ResendEmailListItem>()
   let after: string | undefined
@@ -106,6 +113,32 @@ export async function buildInviteEmailIndexByRecipient(
     if (!after) break
   }
   return byRecipient
+}
+
+/**
+ * Recent invite emails, one row per recipient (lowercase), newest wins.
+ * `last_event` comes from the list payload, so callers do not need a per-id GET.
+ */
+export async function listRecentInviteEmails(
+  apiKey: string,
+  maxPages = 8
+): Promise<InviteEmailIndexEntry[]> {
+  const byRecipient = await collectInviteEmailsByRecipient(apiKey, maxPages)
+  return [...byRecipient.entries()].map(([email, item]) => ({
+    email,
+    id: item.id,
+    last_event: item.last_event,
+    created_at: item.created_at,
+    subject: item.subject,
+  }))
+}
+
+/** Recent invite emails indexed by recipient (lowercase), newest wins. */
+export async function buildInviteEmailIndexByRecipient(
+  apiKey: string,
+  maxPages = 8
+): Promise<Map<string, ResendEmailListItem>> {
+  return collectInviteEmailsByRecipient(apiKey, maxPages)
 }
 
 export function resendEventLabelIt(lastEvent: string | null | undefined): string {

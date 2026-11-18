@@ -7,6 +7,7 @@ import {
 import { createOnboardingPortalLinkForUser } from '@/actions/onboarding-entry'
 import { attachResendEmailToActiveTicket } from '@/lib/onboarding-invite-ticket'
 import { resolveAuthUserIdByEmail } from '@/lib/resolve-auth-user-by-email'
+import { touchEmailSupervisionCache } from '@/actions/email-supervision'
 import { requireToolAdmin } from '@/lib/tool-auth'
 import { siteUrlForAuth } from '@/lib/site-url-for-auth'
 import { createServiceRoleClient } from '@/utils/supabase/admin'
@@ -363,6 +364,8 @@ export async function inviteUserToToolAction(
   }
 
   const warning = warnings.length > 0 ? warnings.join(' ') : undefined
+
+  await touchEmailSupervisionCache()
 
   return {
     success: true,

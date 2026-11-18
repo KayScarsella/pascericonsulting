@@ -10,7 +10,6 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import { saveResponsesBulk, deleteResponsesBulk } from "@/actions/questions"
-import { saveFscIloResponsesBulk, deleteFscIloResponsesBulk } from "@/actions/fsc/ilo-responses"
 import { EUDR_TOOL_ID, TIMBER_TOOL_ID, CLOUD_FSC_TOOL_ID } from "@/lib/constants"
 import {
     EUDR_Q_CITES,
@@ -310,6 +309,7 @@ export function SectionList({
         try {
             if (idsToDelete.length > 0) {
                 if (toolId === CLOUD_FSC_TOOL_ID) {
+                    const { deleteFscIloResponsesBulk } = await import("@/actions/fsc/ilo-responses")
                     await deleteFscIloResponsesBulk(sessionId, idsToDelete)
                 } else {
                     await deleteResponsesBulk(toolId, sessionId, idsToDelete)
@@ -317,6 +317,7 @@ export function SectionList({
             }
             if (payloadToSave.length > 0) {
                 if (toolId === CLOUD_FSC_TOOL_ID) {
+                    const { saveFscIloResponsesBulk } = await import("@/actions/fsc/ilo-responses")
                     const result = await saveFscIloResponsesBulk(sessionId, payloadToSave)
                     if (result.error) throw new Error(result.error)
                 } else {

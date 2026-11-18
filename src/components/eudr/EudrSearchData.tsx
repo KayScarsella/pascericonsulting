@@ -166,11 +166,11 @@ type AnalisiFilterBuilder = {
   or: (filters: string) => AnalisiFilterBuilder
 }
 
-async function applyAnalisiFilters<T extends AnalisiFilterBuilder>(
+function applyAnalisiFilters<T extends AnalisiFilterBuilder>(
   query: T,
-  supabase: SupabaseClient<Database>,
-  key: SearchCacheKey
-): Promise<T> {
+  key: SearchCacheKey,
+  ownerUserIds: readonly string[]
+): T {
   query.eq("tool_id", EUDR_TOOL_ID).eq("session_type", "analisi_finale")
   if (!key.isAdmin) query.eq("user_id", key.userId)
   if (key.esito === "in_corso") {
@@ -181,8 +181,7 @@ async function applyAnalisiFilters<T extends AnalisiFilterBuilder>(
     query.eq("status", "completed").in("final_outcome", [...ANALISI_FINALE_NEGATIVE_OUTCOMES])
   }
   if (key.q) {
-    const ownerUserIds = key.isAdmin ? await resolveOwnerUserIdsForSearch(supabase, key.q) : []
-    query.or(buildAnalisiSearchOrClause({ q: key.q, ownerUserIds }))
+    query.or(buildAnalisiSearchOrClause({ q: key.q, ownerUserIds: [...ownerUserIds] }))
   }
   return query
 }
@@ -190,18 +189,30 @@ async function applyAnalisiFilters<T extends AnalisiFilterBuilder>(
 async function loadAnalisiPage(supabase: SupabaseClient<Database>, key: SearchCacheKey) {
   const start = (key.page - 1) * PAGE_SIZE
   const end = start + PAGE_SIZE - 1
-  let queryCount = 1
+  const ownerUserIds =
+    key.q && key.isAdmin ? await resolveOwnerUserIdsForSearch(supabase, key.q) : []
 
-  const embeddedQuery = supabase
-    .from("assessment_sessions")
-    .select(ANALISI_EMBED_SELECT, { count: "exact" })
-  await applyAnalisiFilters(embeddedQuery, supabase, key)
-  const embeddedResult = await embeddedQuery
-    .order(key.sort, { ascending: key.dir === "asc" })
-    .range(start, end)
+  const countQuery = applyAnalisiFilters(
+    supabase.from("assessment_sessions").select("id", { count: "exact", head: true }),
+    key,
+    ownerUserIds
+  )
+  const listQuery = applyAnalisiFilters(
+    supabase.from("assessment_sessions").select(ANALISI_EMBED_SELECT),
+    key,
+    ownerUserIds
+  )
+  const [countResult, embeddedResult] = await Promise.all([
+    countQuery,
+    listQuery.order(key.sort, { ascending: key.dir === "asc" }).range(start, end),
+  ])
 
   let rows: AnalisiListRow[]
-  let count = embeddedResult.count
+  let queryCount = 2
+  let count = countResult.count
+  if (countResult.error) {
+    console.error("Errore durante il conteggio delle analisi EUDR:", countResult.error)
+  }
   if (!embeddedResult.error) {
     rows = (embeddedResult.data ?? []).map((row) => ({
       id: row.id,
@@ -220,17 +231,17 @@ async function loadAnalisiPage(supabase: SupabaseClient<Database>, key: SearchCa
       embeddedResult.error.message
     )
     queryCount += 1
-    const plainQuery = supabase
-      .from("assessment_sessions")
-      .select(ANALISI_PLAIN_SELECT, { count: "exact" })
-    await applyAnalisiFilters(plainQuery, supabase, key)
+    const plainQuery = applyAnalisiFilters(
+      supabase.from("assessment_sessions").select(ANALISI_PLAIN_SELECT),
+      key,
+      ownerUserIds
+    )
     const plainResult = await plainQuery
       .order(key.sort, { ascending: key.dir === "asc" })
       .range(start, end)
     if (plainResult.error) {
       console.error("Errore durante il fetch delle analisi EUDR:", plainResult.error)
     }
-    count = plainResult.count
     const plainRows = plainResult.data ?? []
     const parentCodeById = new Map<string, number>()
     const parentIds = Array.from(
@@ -308,53 +319,82 @@ function parentEvaluationCode(parent: ParentEmbed | undefined): number | null {
   return parent.evaluation_code ?? null
 }
 
+function resumeUrlFromStoredStep(sessionId: string, metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null
+  const step = (metadata as { resume_step?: unknown }).resume_step
+  if (step === "risk-analysis") return `/EUDR/risk-analysis?session_id=${sessionId}`
+  if (step === "evaluation") return `/EUDR/evaluation?session_id=${sessionId}`
+  return null
+}
+
+function applyVerificaFilters<T extends AnalisiFilterBuilder>(
+  query: T,
+  key: SearchCacheKey,
+  ownerUserIds: readonly string[]
+): T {
+  query.eq("tool_id", EUDR_TOOL_ID).eq("session_type", "verifica")
+  if (!key.isAdmin) query.eq("user_id", key.userId)
+  if (key.stato === "in_corso") query.neq("status", "completed")
+  else if (key.stato === "conclusa") query.eq("status", "completed")
+  if (key.vq) query.or(buildVerificaSearchOrClause({ q: key.vq, ownerUserIds: [...ownerUserIds] }))
+  return query
+}
+
 async function loadVerifichePage(supabase: SupabaseClient<Database>, key: SearchCacheKey) {
   const start = (key.vpage - 1) * PAGE_SIZE
   const end = start + PAGE_SIZE - 1
+  const ownerUserIds =
+    key.vq && key.isAdmin ? await resolveOwnerUserIdsForSearch(supabase, key.vq) : []
 
-  let countQuery = supabase
-    .from("assessment_sessions")
-    .select("id", { count: "exact", head: true })
-    .eq("tool_id", EUDR_TOOL_ID)
-    .eq("session_type", "verifica")
-  if (!key.isAdmin) countQuery = countQuery.eq("user_id", key.userId)
+  const countQuery = applyVerificaFilters(
+    supabase.from("assessment_sessions").select("id", { count: "exact", head: true }),
+    key,
+    ownerUserIds
+  )
+  const listQuery = applyVerificaFilters(
+    supabase
+      .from("assessment_sessions")
+      .select("id, created_at, status, final_outcome, metadata, user_id, profiles ( full_name )"),
+    key,
+    ownerUserIds
+  )
 
-  let listQuery = supabase
-    .from("assessment_sessions")
-    .select("id, created_at, status, final_outcome, metadata, user_id, profiles ( full_name )")
-    .eq("tool_id", EUDR_TOOL_ID)
-    .eq("session_type", "verifica")
-  if (!key.isAdmin) listQuery = listQuery.eq("user_id", key.userId)
-  if (key.stato === "in_corso") listQuery = listQuery.neq("status", "completed")
-  else if (key.stato === "conclusa") listQuery = listQuery.eq("status", "completed")
-  if (key.vq) {
-    const ownerUserIds = key.isAdmin ? await resolveOwnerUserIdsForSearch(supabase, key.vq) : []
-    listQuery = listQuery.or(buildVerificaSearchOrClause({ q: key.vq, ownerUserIds }))
-  }
-
-  const [{ count }, { data, error }] = await Promise.all([
+  const [countResult, listResult] = await Promise.all([
     countQuery,
     listQuery.order(key.vsort, { ascending: key.vdir === "asc" }).range(start, end),
   ])
 
-  if (error) {
-    console.error("Errore durante il fetch delle verifiche EUDR:", error)
+  if (countResult.error) {
+    console.error("Errore durante il conteggio delle verifiche EUDR:", countResult.error)
+  }
+  if (listResult.error) {
+    console.error("Errore durante il fetch delle verifiche EUDR:", listResult.error)
   }
 
-  const workflowInputs = (data || []).map((row) => ({
-    id: row.id,
-    status: row.status,
-    final_outcome: row.final_outcome,
-    metadata: row.metadata,
-    fallbackStep1Completed:
-      row.status === "completed" && row.final_outcome !== "Esente / Non Soggetto",
-  }))
-  const workflowById = await resolveEudrWorkflowStatesBatch(supabase, workflowInputs)
+  const count = countResult.count
+  const rows = listResult.data || []
+  const workflowInputs = rows.flatMap((row) => {
+    if (resumeUrlFromStoredStep(row.id, row.metadata)) return []
+    return [
+      {
+        id: row.id,
+        status: row.status,
+        final_outcome: row.final_outcome,
+        metadata: row.metadata,
+        fallbackStep1Completed:
+          row.status === "completed" && row.final_outcome !== "Esente / Non Soggetto",
+      },
+    ]
+  })
+  const workflowById =
+    workflowInputs.length > 0
+      ? await resolveEudrWorkflowStatesBatch(supabase, workflowInputs)
+      : new Map()
 
   return {
     queryCount: 2 + (workflowInputs.length > 0 ? 1 : 0),
     totalPagesV: Math.ceil((count || 0) / PAGE_SIZE) || 1,
-    rows: (data || []).map((row) => {
+    rows: rows.map((row) => {
       const workflowState = workflowById.get(row.id)
       return {
         id: row.id,
@@ -362,7 +402,10 @@ async function loadVerifichePage(supabase: SupabaseClient<Database>, key: Search
         status: row.status || "in_progress",
         final_outcome: row.final_outcome,
         metadata: (row.metadata as EudrVerificationRow["metadata"]) || null,
-        resume_url: workflowState?.resumeUrl ?? `/EUDR/evaluation?session_id=${row.id}`,
+        resume_url:
+          resumeUrlFromStoredStep(row.id, row.metadata) ??
+          workflowState?.resumeUrl ??
+          `/EUDR/evaluation?session_id=${row.id}`,
         owner_name: (row.profiles as { full_name?: string } | null)?.full_name ?? null,
       }
     }),

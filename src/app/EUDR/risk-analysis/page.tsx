@@ -16,7 +16,6 @@ import { EudrRouteSkeleton } from "@/components/eudr/EudrRouteSkeleton"
 
 import { SectionList } from "@/components/questions/SectionList"
 import { processPrimaFaseEUDR } from "@/actions/workflows"
-import { resolveEudrWorkflowState } from "@/lib/eudr-workflow-state"
 
 /** Earth Engine due-diligence Server Actions can exceed the default 60s limit. */
 export const maxDuration = 300
@@ -109,10 +108,11 @@ async function RiskAnalysisSections({
 }) {
   const { supabase } = await getEudrPageContext()
   const sectionsPromise = getCachedEudrSections(["Analisi Rischio"])
+  const responsesPromise = getCachedEudrSessionResponses(sessionId)
 
   const { data: sessionInfo, error: sessionError } = await supabase
     .from("assessment_sessions")
-    .select("id, user_id, session_type, status, final_outcome, metadata")
+    .select("id, user_id, session_type")
     .eq("id", sessionId)
     .eq("tool_id", EUDR_TOOL_ID)
     .single()
@@ -128,20 +128,9 @@ async function RiskAnalysisSections({
     redirect(`/EUDR/valutazione-finale?session_id=${sessionId}`)
   }
 
-  await resolveEudrWorkflowState(
-    supabase,
-    {
-      id: sessionInfo.id,
-      status: sessionInfo.status,
-      final_outcome: sessionInfo.final_outcome,
-      metadata: sessionInfo.metadata,
-    },
-    sessionInfo.status === "completed" && sessionInfo.final_outcome !== "Esente / Non Soggetto"
-  )
-
   const [sections, userResponses] = await Promise.all([
     sectionsPromise,
-    getCachedEudrSessionResponses(sessionId),
+    responsesPromise,
   ])
 
   return (

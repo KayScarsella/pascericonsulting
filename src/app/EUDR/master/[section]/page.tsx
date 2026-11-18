@@ -5,7 +5,7 @@ import { getToolUsersForAdminPaginated } from '@/actions/users'
 import { listSpeciesPaginated, listCountriesPaginated } from '@/actions/master-data'
 import { listNotificationsPaginated } from '@/actions/notifications'
 import { getEmailSupervisionForTool } from '@/actions/email-supervision'
-import { MasterSectionClient } from '@/components/admin/MasterSectionClient'
+import { EmailSupervisionSection } from '@/components/admin/EmailSupervisionSection'
 import type { MasterSection } from '@/components/admin/MasterSectionClient'
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
@@ -120,23 +120,64 @@ export default async function MasterSectionPage({
           <ChevronLeft className="h-4 w-4" /> Master
         </Link>
       </Button>
-      <MasterSectionClient
-        section={section as MasterSection}
-        toolId={EUDR_TOOL_ID}
-        usersData={section === 'users' ? (usersRes?.data ?? null) : undefined}
-        speciesData={section === 'species' ? (speciesRes?.data ?? null) : undefined}
-        countriesData={section === 'countries' ? (countriesRes?.data ?? null) : undefined}
-        notificationsData={section === 'notifications' ? (notificationsRes?.data ?? null) : undefined}
-        emailSupervisionData={
-          section === 'email-supervision' ? (emailSupervisionRes?.data ?? null) : undefined
-        }
-        resendConfigured={emailSupervisionRes?.resendConfigured ?? false}
-        needsResendTotalCount={emailSupervisionRes?.needsResendTotalCount ?? 0}
-        emailSupervisionTotalUserCount={emailSupervisionRes?.totalCount ?? 0}
-        page={page}
-        totalPages={totalPages}
-        basePath={basePath}
-      />
+      {section === 'email-supervision' ? (
+        <EmailSupervisionSection
+          data={emailSupervisionRes?.data ?? []}
+          page={page}
+          totalPages={totalPages}
+          basePath={basePath}
+          resendConfigured={emailSupervisionRes?.resendConfigured ?? false}
+          toolId={EUDR_TOOL_ID}
+          needsResendTotalCount={emailSupervisionRes?.needsResendTotalCount ?? 0}
+          totalUserCount={emailSupervisionRes?.totalCount ?? 0}
+        />
+      ) : (
+        <MasterSectionLoader
+          section={section as MasterSection}
+          usersData={section === 'users' ? (usersRes?.data ?? null) : undefined}
+          speciesData={section === 'species' ? (speciesRes?.data ?? null) : undefined}
+          countriesData={section === 'countries' ? (countriesRes?.data ?? null) : undefined}
+          notificationsData={section === 'notifications' ? (notificationsRes?.data ?? null) : undefined}
+          page={page}
+          totalPages={totalPages}
+          basePath={basePath}
+        />
+      )}
     </div>
+  )
+}
+
+async function MasterSectionLoader({
+  section,
+  usersData,
+  speciesData,
+  countriesData,
+  notificationsData,
+  page,
+  totalPages,
+  basePath,
+}: {
+  section: MasterSection
+  usersData?: Awaited<ReturnType<typeof getToolUsersForAdminPaginated>>['data']
+  speciesData?: Awaited<ReturnType<typeof listSpeciesPaginated>>['data']
+  countriesData?: Awaited<ReturnType<typeof listCountriesPaginated>>['data']
+  notificationsData?: Awaited<ReturnType<typeof listNotificationsPaginated>>['data']
+  page: number
+  totalPages: number
+  basePath: string
+}) {
+  const { MasterSectionClient } = await import('@/components/admin/MasterSectionClient')
+  return (
+    <MasterSectionClient
+      section={section}
+      toolId={EUDR_TOOL_ID}
+      usersData={usersData}
+      speciesData={speciesData}
+      countriesData={countriesData}
+      notificationsData={notificationsData}
+      page={page}
+      totalPages={totalPages}
+      basePath={basePath}
+    />
   )
 }
