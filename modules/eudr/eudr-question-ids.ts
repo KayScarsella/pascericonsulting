@@ -119,15 +119,8 @@ export async function resolveEudrNumPaesiQuestionId(
   if (cachedEudrNumPaesiQuestionId !== undefined) return cachedEudrNumPaesiQuestionId
 
   if (EUDR_Q_NUM_PAESE) {
-    const { data } = await supabase
-      .from('questions')
-      .select('id')
-      .eq('id', EUDR_Q_NUM_PAESE)
-      .maybeSingle()
-    if (data?.id) {
-      cachedEudrNumPaesiQuestionId = data.id
-      return data.id
-    }
+    cachedEudrNumPaesiQuestionId = EUDR_Q_NUM_PAESE
+    return EUDR_Q_NUM_PAESE
   }
   const byNumero = await resolveEudrQuestionIdByText(supabase, '%numero%paes%')
   if (byNumero) {

@@ -2,12 +2,22 @@ import { createClient } from "@/utils/supabase/server"
 import { getEudrPdfSections } from "@/lib/eudr-pdf-sections"
 import {
   alignReportGateWithSnapshot,
+  applyAoiGateToEudrRiskResult,
   AOI_GATE_ANSWER_LABELS,
   AOI_GATE_ANSWER_LOOKUP,
   AOI_GATE_QUESTION_ID,
   type DdLastRunSnapshot,
 } from "@/features/eudr-due-diligence/aoiRiskGate"
-import { loadDdLastRunFromStorage } from "@/features/eudr-due-diligence/storage/loadDdLastRunFromStorage"
+import {
+  loadDdLastRunFromStorage,
+  normalizeDdLastRunForOutcome,
+  resolveDdLastRun,
+} from "@/features/eudr-due-diligence/storage/loadDdLastRunFromStorage"
+import {
+  computeEudrDdsOutcome,
+  type EudrDdsResponseMaps,
+} from "@/lib/eudr-dds-inputs"
+import type { EudrDdsType } from "@/types/session"
 import {
   EUDR_SCORED_QUESTIONS,
   getEudrLabelForRaw,
@@ -42,6 +52,14 @@ export type MitigationHistoryEntry = {
   file_path?: string | null
 }
 
+export type EudrRisultatoResolvedOutcome = {
+  result: RiskCalculationResult
+  ddLastRunNormalized?: DdLastRunSnapshot
+  displayOutcomeDescription: string
+  ddsType: EudrDdsType
+  aoiMitigated: boolean
+}
+
 export type EudrRisultatoDeferredData = {
   sectionsForPdf: SectionForPdf[]
   ddPdfPayload: DdPdfPayload | null
@@ -52,6 +70,8 @@ export type EudrRisultatoDeferredData = {
   >
   queryCount: number
   storageMs: number
+  /** Set when this load had to read storage before the AOI gate could be final. */
+  resolvedOutcome?: EudrRisultatoResolvedOutcome
 }
 
 type QuestionRow = {
@@ -88,6 +108,13 @@ export type EudrRisultatoDeferredLoadParams = {
   answersJsonMap: Record<string, unknown>
   result: RiskCalculationResult
   ddLastRun?: DdLastRunSnapshot
+  /** Metadata snapshot is missing run_id or still needs the tendenza upgrade download. */
+  resolveStorage?: boolean
+  metadataDdLastRun?: DdLastRunSnapshot | null
+  baseResult?: RiskCalculationResult
+  aoiMitigated?: boolean
+  parentSessionId?: string | null
+  responses?: EudrDdsResponseMaps
 }
 
 /** Per-request loader: must not use React cache (calls createClient → cookies). */
@@ -97,12 +124,43 @@ export async function loadEudrRisultatoDeferredData(
   const { sessionId, sessionUserId, answersMap, answersJsonMap, result, ddLastRun } = params
   const supabase = await createClient()
   let effectiveDdLastRun = ddLastRun
-  if (!effectiveDdLastRun?.run_id) {
+  let resolvedOutcome: EudrRisultatoResolvedOutcome | undefined
+  let queryCount = 0
+  let storageMs = 0
+  if (params.resolveStorage && params.baseResult) {
+    const storageStarted = Date.now()
+    const resolved = await resolveDdLastRun(
+      supabase,
+      sessionUserId,
+      sessionId,
+      params.metadataDdLastRun ?? ddLastRun ?? null
+    )
+    storageMs += Date.now() - storageStarted
+    const normalized = normalizeDdLastRunForOutcome(resolved)
+    effectiveDdLastRun = normalized
+    const aoiMitigated = params.aoiMitigated === true
+    const gated = applyAoiGateToEudrRiskResult(params.baseResult, normalized, {
+      mitigated: aoiMitigated,
+    })
+    const ddsOutcome = await computeEudrDdsOutcome(
+      supabase,
+      sessionId,
+      params.parentSessionId ?? null,
+      gated,
+      normalized,
+      { aoiMitigated, responses: params.responses }
+    )
+    resolvedOutcome = {
+      result: gated,
+      ddLastRunNormalized: normalized,
+      displayOutcomeDescription: ddsOutcome.outcomeDescription,
+      ddsType: ddsOutcome.ddsType,
+      aoiMitigated,
+    }
+  } else if (!effectiveDdLastRun?.run_id) {
     const fromStorage = await loadDdLastRunFromStorage(supabase, sessionUserId, sessionId)
     if (fromStorage) effectiveDdLastRun = fromStorage
   }
-  let queryCount = 0
-  let storageMs = 0
 
   const questionLabelsMap: EudrRisultatoDeferredData["questionLabelsMap"] = {}
   for (const sq of EUDR_SCORED_QUESTIONS) {
@@ -113,7 +171,8 @@ export async function loadEudrRisultatoDeferredData(
       labels: sq.labels,
     }
   }
-  const aoiDetail = result.details.find((d) => d.questionId === AOI_GATE_QUESTION_ID)
+  const scoredResult = resolvedOutcome?.result ?? result
+  const aoiDetail = scoredResult.details.find((d) => d.questionId === AOI_GATE_QUESTION_ID)
   questionLabelsMap[AOI_GATE_QUESTION_ID] = {
     label: aoiDetail?.label ?? "Screening geospaziale AOI",
     shortLabel: aoiDetail?.shortLabel ?? "Screening AOI (EUDR)",
@@ -271,7 +330,7 @@ export async function loadEudrRisultatoDeferredData(
     return raw || "—"
   }
 
-  const detailsByQuestionId = new Map(result.details.map((d) => [d.questionId, d]))
+  const detailsByQuestionId = new Map(scoredResult.details.map((d) => [d.questionId, d]))
   const mitigationByQuestionId = new Map<
     string,
     { previousLabel: string; newLabel: string; date: string; comment?: string | null }[]
@@ -424,7 +483,7 @@ export async function loadEudrRisultatoDeferredData(
         }
       }
     }
-    storageMs = Date.now() - storageStart
+    storageMs += Date.now() - storageStart
   }
 
   return {
@@ -434,6 +493,7 @@ export async function loadEudrRisultatoDeferredData(
     questionLabelsMap,
     queryCount,
     storageMs,
+    resolvedOutcome,
   }
 }
 

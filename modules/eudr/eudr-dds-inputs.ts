@@ -30,6 +30,11 @@ function parseChainComplexity(raw: string | null | undefined): EudrChainComplexi
   return null
 }
 
+export type EudrDdsResponseMaps = {
+  answersMap: Record<string, string | null>
+  answersJsonMap: Record<string, unknown>
+}
+
 function distinctPaeseIdsFromGrid(answerJson: unknown): string[] {
   if (!Array.isArray(answerJson)) return []
   const ids = new Set<string>()
@@ -51,7 +56,12 @@ function distinctPaeseIdsFromGrid(answerJson: unknown): string[] {
 export async function collectEudrDdsInputs(
   supabase: SupabaseClient<Database>,
   parentSessionId: string,
-  opts: { isRiskTrascurabile: boolean; aoiGateTriggered?: boolean }
+  opts: {
+    isRiskTrascurabile: boolean
+    aoiGateTriggered?: boolean
+    /** Answers already loaded for this request. Skips the user_responses read. */
+    responses?: EudrDdsResponseMaps
+  }
 ): Promise<Pick<
   EudrDdsDeterminationInput,
   'chainComplexity' | 'countryCount' | 'countryRiskCodes' | 'isRiskTrascurabile' | 'aoiGateTriggered'
@@ -64,11 +74,19 @@ export async function collectEudrDdsInputs(
     ...(numPaesiQId ? [numPaesiQId] : []),
   ]
 
-  const { data: responses } = await supabase
-    .from('user_responses')
-    .select('question_id, answer_text, answer_json')
-    .eq('session_id', parentSessionId)
-    .in('question_id', questionIds)
+  const responses = opts.responses
+    ? questionIds.map((questionId) => ({
+        question_id: questionId,
+        answer_text: opts.responses?.answersMap[questionId] ?? null,
+        answer_json: opts.responses?.answersJsonMap[questionId] ?? null,
+      }))
+    : (
+        await supabase
+          .from('user_responses')
+          .select('question_id, answer_text, answer_json')
+          .eq('session_id', parentSessionId)
+          .in('question_id', questionIds)
+      ).data
 
   const gridRow = responses?.find((r) => r.question_id === EUDR_SPEC_PAESE_GRID_QUESTION_ID)
   const gridPaeseIds = distinctPaeseIdsFromGrid(gridRow?.answer_json)
@@ -135,7 +153,7 @@ export async function computeEudrDdsOutcome(
   parentSessionId: string | null,
   riskResult: RiskCalculationResult,
   ddLastRun?: DdLastRunSnapshot,
-  options?: { aoiMitigated?: boolean }
+  options?: { aoiMitigated?: boolean; responses?: EudrDdsResponseMaps }
 ): Promise<EudrDdsOutcome> {
   const isRiskTrascurabile = riskResult.outcome === 'accettabile'
   const aoiGateTriggered =
@@ -144,6 +162,7 @@ export async function computeEudrDdsOutcome(
   const ddsInputs = await collectEudrDdsInputs(supabase, rootId, {
     isRiskTrascurabile,
     aoiGateTriggered,
+    responses: options?.responses,
   })
   const ddsType = determineEudrDdsType(ddsInputs)
   const outcomeDescription = buildEudrOutcomeDescription(

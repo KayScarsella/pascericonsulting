@@ -5,6 +5,7 @@ import { cookies } from 'next/headers'
 import { Database } from '@/types/supabase'
 import { UserService } from '@/actions/UserService'
 import { requireToolAdmin } from '@/lib/tool-auth'
+import { touchDocuments } from '@/lib/documents-cache'
 import { createServiceRoleClient } from '@/utils/supabase/admin'
 import { deleteRecords } from '@/actions/actions'
 
@@ -172,7 +173,7 @@ async function removeStorageObjects(opts: {
 
 async function removeDocumentFilesByRows(
   adminClient: ReturnType<typeof createServiceRoleClient>,
-  rows: Array<{ id: string; storage_path: string | null }>
+  rows: Array<{ id: string; storage_path: string | null; tool_id: string }>
 ) {
   const storagePaths = rows
     .map((r) => r.storage_path)
@@ -181,8 +182,13 @@ async function removeDocumentFilesByRows(
     await adminClient.storage.from('documents').remove(storagePaths)
   }
   const ids = rows.map((r) => r.id)
-  if (ids.length > 0) {
-    await adminClient.from('documents').delete().in('id', ids)
+  if (ids.length === 0) return
+
+  const { error } = await adminClient.from('documents').delete().in('id', ids)
+  if (error) return
+
+  for (const id of new Set(rows.map((row) => row.tool_id))) {
+    touchDocuments(id)
   }
 }
 
@@ -232,7 +238,7 @@ export async function deleteUserFromToolAction(
     // 2) Cleanup documenti creati dall'utente nel tool corrente (DB + bucket documents)
     const { data: docsByUserInTool } = await adminClient
       .from('documents')
-      .select('id, storage_path')
+      .select('id, storage_path, tool_id')
       .eq('tool_id', toolId)
       .eq('created_by', targetUserId)
     await removeDocumentFilesByRows(adminClient, docsByUserInTool ?? [])
@@ -258,7 +264,7 @@ export async function deleteUserFromToolAction(
       // Cleanup globale residuo documenti
       const { data: allDocsByUser } = await adminClient
         .from('documents')
-        .select('id, storage_path')
+        .select('id, storage_path, tool_id')
         .eq('created_by', targetUserId)
       await removeDocumentFilesByRows(adminClient, allDocsByUser ?? [])
 

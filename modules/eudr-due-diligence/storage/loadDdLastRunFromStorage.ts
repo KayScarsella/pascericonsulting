@@ -141,6 +141,32 @@ export async function loadDdLastRunFromStorage(
   return snapshotFromStoredReport(report, sessionId)
 }
 
+const AOI_STAND_REPLACEMENT_REASON =
+  'Verifica: Ogni perdita FORESTALE rilevata dopo il 31/12/2020 all’interno della maschera forestale 2020 costituisce una "evidenza" di possibile non conformità.'
+
+/** True when metadata already has the snapshot resolveDdLastRun would return without storage. */
+export function isDdLastRunMetadataComplete(
+  snapshot?: DdLastRunSnapshot | null
+): boolean {
+  if (!snapshot?.run_id) return false
+  return !snapshotNeedsTendenzaUpgrade(snapshot)
+}
+
+/** Same reason text the risultato header applies before the AOI gate. */
+export function normalizeDdLastRunForOutcome(
+  snapshot?: DdLastRunSnapshot | null
+): DdLastRunSnapshot | undefined {
+  if (!snapshot) return undefined
+  return {
+    ...snapshot,
+    reasons: (snapshot.reasons ?? []).map((reason) =>
+      reason.includes('stand-replacement') && reason.includes('31/12/2020')
+        ? AOI_STAND_REPLACEMENT_REASON
+        : reason
+    ),
+  }
+}
+
 /** Prefer metadata; fall back to storage artifact. */
 export async function resolveDdLastRun(
   supabase: SupabaseClient,

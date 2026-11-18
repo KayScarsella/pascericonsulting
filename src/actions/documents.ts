@@ -16,6 +16,7 @@ import {
   buildDocumentStoragePath,
   validateDocumentFileMetadata,
 } from "@/lib/documents-upload"
+import { touchDocuments } from "@/lib/documents-cache"
 import { revalidatePath } from "next/cache"
 import { createClient } from "@/utils/supabase/server"
 import type { SupabaseClient } from "@supabase/supabase-js"
@@ -126,6 +127,7 @@ export async function createFolder(
 
   if (error) return { error: error.message }
 
+  touchDocuments(toolId)
   revalidatePath(pathRevalidate)
   return { success: true }
 }
@@ -203,6 +205,7 @@ export async function updateFolderAllowedRoles(
     }
   }
 
+  touchDocuments(toolId)
   revalidatePath(pathRevalidate)
   return {
     success: true,
@@ -293,6 +296,7 @@ export async function finalizeDocumentUpload(
     return { error: dbError.message }
   }
 
+  touchDocuments(toolId)
   revalidatePath(pathRevalidate)
   return { success: true }
 }
@@ -348,6 +352,7 @@ export async function deleteItem(id: string, toolId: string, pathRevalidate: str
 
     if (dbError) return { error: dbError.message }
 
+    touchDocuments(toolId)
     revalidatePath(pathRevalidate)
     return { success: true }
   } catch (err) {

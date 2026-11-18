@@ -3,12 +3,15 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database, Json } from "@/types/supabase"
 import {
   aoiGateStillFailing,
+  applyAoiGateToEudrRiskResult,
   type DdLastRunSnapshot,
 } from "@/features/eudr-due-diligence/aoiRiskGate"
 import {
-  loadDdLastRunFromStorage,
-  persistDdLastRunBackfill,
+  isDdLastRunMetadataComplete,
+  normalizeDdLastRunForOutcome,
+  resolveDdLastRun,
 } from "@/features/eudr-due-diligence/storage/loadDdLastRunFromStorage"
+import { computeEudrDdsOutcome, type EudrDdsResponseMaps } from "@/lib/eudr-dds-inputs"
 import type { RiskCalculationResult } from "@/lib/eudr-risk-calculator"
 import type { EudrDdsType } from "@/types/session"
 
@@ -31,6 +34,12 @@ type FinalizeEudrSessionParams = {
     }
   }
   ddLastRunNormalized?: DdLastRunSnapshot
+  /** Questionnaire score before the AOI gate. Used if storage still has to resolve the snapshot. */
+  baseResult?: RiskCalculationResult
+  aoiMitigated?: boolean
+  parentSessionId?: string | null
+  responses?: EudrDdsResponseMaps
+  storageResolutionNeeded?: boolean
 }
 
 function pickDdLastRun(
@@ -78,6 +87,11 @@ export function scheduleEudrSessionFinalize(params: FinalizeEudrSessionParams) {
     displayOutcomeDescription,
     ddsOutcome,
     ddLastRunNormalized,
+    baseResult,
+    aoiMitigated,
+    parentSessionId,
+    responses,
+    storageResolutionNeeded,
   } = params
 
   const needsInitialFinalize = sessionStatus !== "completed" || !sessionFinalOutcome
@@ -86,7 +100,7 @@ export function scheduleEudrSessionFinalize(params: FinalizeEudrSessionParams) {
   const needsAoiSync =
     !needsInitialFinalize && aoiStillFailing && sessionFinalOutcome === "Rischio Trascurabile"
 
-  if (!needsInitialFinalize && !needsAoiSync && !pageSuggestsAoiGate) return
+  if (!needsInitialFinalize && !needsAoiSync && !pageSuggestsAoiGate && !storageResolutionNeeded) return
 
   after(async () => {
     const { data: freshRow } = await supabase
@@ -101,37 +115,75 @@ export function scheduleEudrSessionFinalize(params: FinalizeEudrSessionParams) {
       freshMeta.dd_last_run as DdLastRunSnapshot | undefined
     )
 
-    if (!effectiveDd?.run_id) {
-      const fromStorage = await loadDdLastRunFromStorage(supabase, sessionUserId, sessionId)
-      if (fromStorage) {
-        effectiveDd = fromStorage
-        await persistDdLastRunBackfill(supabase, sessionId, fromStorage, freshMeta)
+    if (!isDdLastRunMetadataComplete(effectiveDd)) {
+      const resolved = await resolveDdLastRun(
+        supabase,
+        sessionUserId,
+        sessionId,
+        effectiveDd ?? null
+      )
+      if (resolved) effectiveDd = normalizeDdLastRunForOutcome(resolved)
+    } else {
+      effectiveDd = normalizeDdLastRunForOutcome(effectiveDd)
+    }
+
+    const snapshotKey = (dd?: DdLastRunSnapshot) =>
+      dd?.run_id
+        ? [
+            dd.run_id,
+            dd.triggers_non_accettabile === true,
+            dd.tendenza_deforestazione === true,
+            dd.tendenza_rule_applied === true,
+            (dd.reasons || []).join("\n"),
+          ].join("|")
+        : ""
+    const gateChanged = snapshotKey(effectiveDd) !== snapshotKey(ddLastRunNormalized)
+
+    let resultUsed = result
+    let ddsTypeUsed = ddsType
+    let descriptionUsed = displayOutcomeDescription
+    let ddsUsed = ddsOutcome
+    if (gateChanged && baseResult) {
+      const mitigated = aoiMitigated === true
+      resultUsed = applyAoiGateToEudrRiskResult(baseResult, effectiveDd, { mitigated })
+      if (responses) {
+        const recomputed = await computeEudrDdsOutcome(
+          supabase,
+          sessionId,
+          parentSessionId ?? null,
+          resultUsed,
+          effectiveDd,
+          { aoiMitigated: mitigated, responses }
+        )
+        ddsTypeUsed = recomputed.ddsType
+        descriptionUsed = recomputed.outcomeDescription
+        ddsUsed = recomputed
       }
     }
 
-    const gateStillFailing = aoiGateStillFailing(effectiveDd, result)
+    const gateStillFailing = aoiGateStillFailing(effectiveDd, resultUsed)
     const outcomeFromGate = gateStillFailing
       ? "Rischio Non Trascurabile"
-      : result.outcome === "accettabile"
+      : resultUsed.outcome === "accettabile"
         ? "Rischio Trascurabile"
         : "Rischio Non Trascurabile"
 
     const riskPatch = {
-      risk_score: result.overallRisk,
-      risk_details: result.details.map((d) => ({
+      risk_score: resultUsed.overallRisk,
+      risk_details: resultUsed.details.map((d) => ({
         shortLabel: d.shortLabel,
         riskIndex: d.riskIndex,
       })),
-      expiry_date: gateStillFailing ? null : result.expiryDate,
-      dds_type: ddsType,
+      expiry_date: gateStillFailing ? null : resultUsed.expiryDate,
+      dds_type: ddsTypeUsed,
       dds_determined_at: new Date().toISOString(),
-      dds_chain_complexity: ddsOutcome.ddsInputs.chainComplexity,
-      dds_country_count: ddsOutcome.ddsInputs.countryCount,
-      dds_country_risks: ddsOutcome.ddsInputs.countryRiskCodes,
-      outcome_description: displayOutcomeDescription,
+      dds_chain_complexity: ddsUsed.ddsInputs.chainComplexity,
+      dds_country_count: ddsUsed.ddsInputs.countryCount,
+      dds_country_risks: ddsUsed.ddsInputs.countryRiskCodes,
+      outcome_description: descriptionUsed,
     }
 
-    if (needsInitialFinalize || needsAoiSync || pageSuggestsAoiGate) {
+    if (needsInitialFinalize || needsAoiSync || pageSuggestsAoiGate || gateChanged) {
       const mergedMeta = buildMergedMetadata(metadata, freshMeta, {
         ...riskPatch,
         completed_at: freshMeta.completed_at || new Date().toISOString(),
